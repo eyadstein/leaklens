@@ -11,6 +11,8 @@ FIXES = {
     "temporal_leakage": "Split by time: train on earlier data and test on later data.",
     "group_overlap": "Split by entity with GroupShuffleSplit or GroupKFold so no entity appears in both splits.",
     "group_leakage_risk": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
+    "target_encode_before_split": "Compute the target encoding from the training fold only (sklearn.preprocessing.TargetEncoder in a Pipeline, or out-of-fold encoding) so held-out rows never help build it.",
+    "group_stat_before_split": "Compute group statistics on the training split only, or wrap the encoding in a Pipeline and evaluate with cross-validation.",
 }
 
 
