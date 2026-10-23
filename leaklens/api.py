@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from . import __version__
 from .audit import audit
 from .leakage import scan, score
+from .readers import read_dataset
 from .scanner import scan_source
 
 app = FastAPI(title="LeakLens", version=__version__)
@@ -36,12 +37,9 @@ def health():
 async def audit_csv(file: UploadFile = File(...), target: str = Form(...), threshold: float = Form(0.95)):
     try:
         data = io.BytesIO(await file.read())
-        if Path(file.filename or "").suffix.lower() == ".parquet":
-            df = pd.read_parquet(data)
-        else:
-            df = pd.read_csv(data)
+        df = read_dataset(data, file.filename or "")
     except Exception as e:
-        raise HTTPException(400, f"bad CSV: {e}")
+        raise HTTPException(400, f"bad input: {e}")
     if target not in df.columns:
         raise HTTPException(422, f"target '{target}' not in columns")
     fs = scan(df, target, threshold)

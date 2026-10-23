@@ -8,13 +8,12 @@ import pandas as pd
 from .audit import audit
 from .leakage import group_overlap, group_risk, scan, score, split_overlap, temporal_overlap
 from .fixes import advice
+from .readers import read_dataset
 from .scanner import scan_path
 
 
 def _read_dataset(path):
-    if str(path).lower().endswith(".parquet"):
-        return pd.read_parquet(path)
-    return pd.read_csv(path)
+    return read_dataset(path)
 
 
 def main(argv=None) -> int:
@@ -44,10 +43,16 @@ def main(argv=None) -> int:
         p.error("--arena needs a CSV")
     fs, rep, res = [], {}, None
     if a.train:
-        tr = _read_dataset(a.train)
+        try:
+            tr = _read_dataset(a.train)
+        except ImportError as e:
+            p.error(str(e))
         fs += scan(tr, a.target, a.threshold)
         if a.test:
-            te = _read_dataset(a.test)
+            try:
+                te = _read_dataset(a.test)
+            except ImportError as e:
+                p.error(str(e))
             fs += split_overlap(tr, te)
             if a.time:
                 fs += temporal_overlap(tr, te, a.time)

@@ -27,8 +27,10 @@ Issues = "https://github.com/eyadstein/leaklens/issues"
 [project.optional-dependencies]
 arena = ["mlflow>=2.9"]
 parquet = ["pyarrow>=14"]
+feather = ["pyarrow>=14"]
+excel = ["openpyxl>=3.1"]
 app = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9", "streamlit>=1.30"]
-dev = ["pytest>=7", "mlflow>=2.9", "fastapi>=0.110", "httpx>=0.26", "python-multipart>=0.0.9"]
+dev = ["pytest>=7", "mlflow>=2.9", "fastapi>=0.110", "httpx>=0.26", "python-multipart>=0.0.9", "pyarrow>=14", "openpyxl>=3.1"]
 
 [project.scripts]
 leaklens = "leaklens.cli:main"

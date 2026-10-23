@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Excel, JSON and Feather input alongside CSV and Parquet, via the new `excel` and `feather` extras for the optional formats
+
 ## 0.8.0
 - Dataflow tracking: names derived from the dataset passed to train_test_split are followed, so a transformer fitted on the full data after the split is reported (fit_on_full_data, medium)
 - Detects chained calls such as StandardScaler().fit_transform(X)

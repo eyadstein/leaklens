@@ -44,6 +44,9 @@ leaklens --scan notebooks/ --explain   # prints a suggested fix under each findi
 leaklens --scan . --sarif leaklens.sarif   # for GitHub code scanning
 leaklens train.csv --target label --test test.csv --group patient_id
 leaklens train.parquet --target label --fail-under 80   # Parquet input (pip install leaklens-ml[parquet]); CI gate on trust score
+leaklens train.json --target label   # JSON input, no extra needed
+leaklens train.xlsx --target label   # Excel input (pip install leaklens-ml[excel])
+leaklens train.feather --target label   # Feather input (pip install leaklens-ml[feather])
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
