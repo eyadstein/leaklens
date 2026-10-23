@@ -61,6 +61,19 @@ CASES += [
     ("fit on train partition only", _H + "sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X_train)\nZ = sc.transform(X_test)\n", False),
 ]
 
+# issue #20: features built from the target or from group statistics on all rows
+_P = "import pandas as pd\n" + SPLIT
+CASES += [
+    ("groupby target transform before split",
+     _P + "df['enc'] = df.groupby('city')[y].transform('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby target-name column transform before split",
+     _P + "df['enc'] = df.groupby('city')['target'].transform('mean')\na = train_test_split(df.drop('target'), df['target'])\n", True),
+    ("groupby feature transform before split",
+     _P + "df['m'] = df.groupby('city')['sales'].transform('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby transform after the split",
+     _P + "a = train_test_split(X, y)\nX_train['m'] = X_train.groupby('city')['sales'].transform('mean')\n", False),
+]
+
 
 # Low-severity reproducibility detector (issue #13): flagged when random_state is missing.
 LOW_CASES: list[tuple[str, str, bool]] = [

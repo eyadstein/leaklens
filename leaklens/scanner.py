@@ -45,6 +45,10 @@ def _all_names(expr) -> set:
     return {n.id for n in ast.walk(expr) if isinstance(n, ast.Name)}
 
 
+def _strings(expr) -> set:
+    return {s.value for s in ast.walk(expr) if isinstance(s, ast.Constant) and isinstance(s.value, str)}
+
+
 def _names(expr) -> set:
     """Names in an expression, or none if it indexes (X[idx] is usually a partition, not the full data)."""
     if any(isinstance(n, ast.Subscript) for n in ast.walk(expr)):
@@ -152,6 +156,12 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 for t in a.targets:
                     full |= _tnames(t)
 
+    # names and string columns the split treats as the label: train_test_split(X, y) -> y; df["target"] -> "target"
+    target: set = set()
+    if tts:
+        for a in tts[0].args:
+            target |= _all_names(a) | _strings(a)
+
     def loc(line):
         if cells:
             hit = [(s, i) for s, i in cells if s <= line]
@@ -207,6 +217,34 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             out.append(Finding("medium", "fit_on_full_data", loc(c.lineno),
                                f"{call}({args}) fits on the full dataset after the split at {loc(tts_line)}; "
                                "fine only for a final refit"))
+
+    # issue #20: features built from the target or from group statistics computed on all rows
+    for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+        f = c.func
+        if not (isinstance(f, ast.Attribute) and f.attr in ("transform", "agg", "apply")):
+            continue
+        if first is None or c.lineno >= first:
+            continue
+        sel, base = None, None
+        if isinstance(f.value, ast.Subscript) and isinstance(f.value.value, ast.Call) \
+                and _name(f.value.value) == "groupby":
+            sel, base = f.value.slice, f.value.value
+        elif isinstance(f.value, ast.Call) and _name(f.value) == "groupby":
+            base = f.value
+        if base is None:
+            continue
+        used = (_all_names(sel) | _strings(sel)) if sel is not None else set()
+        keys = set()
+        for a in base.args:
+            keys |= _all_names(a) | _strings(a)
+        if used & target or keys & target:
+            out.append(Finding("high", "target_encode_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} builds a feature from the target across all rows "
+                               f"before the split at {loc(first)}"))
+        else:
+            out.append(Finding("medium", "group_stat_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} uses group statistics from all rows before the "
+                               f"split at {loc(first)}; held-out rows help build the feature"))
     return out
 
 
