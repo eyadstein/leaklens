@@ -11,6 +11,7 @@ FIXES = {
     "temporal_leakage": "Split by time: train on earlier data and test on later data.",
     "group_overlap": "Split by entity with GroupShuffleSplit or GroupKFold so no entity appears in both splits.",
     "group_leakage_risk": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
+    "no_random_state": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it.",
 }
 
 

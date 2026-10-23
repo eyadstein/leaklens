@@ -15,6 +15,10 @@ HINTS = ("Scaler", "Imputer", "Encoder", "PCA", "SMOTE", "ADASYN", "Vectorizer",
 RESAMPLE = ("SMOTE", "ADASYN", "RandomOverSampler", "RandomUnderSampler")
 BENIGN = ("LabelEncoder", "OrdinalEncoder", "OneHotEncoder")
 UNSURE = ("ColumnTransformer",)
+# Splitters whose folds are random only when shuffle=True (fold order is deterministic without it).
+SHUFFLED_SPLITS = {"KFold", "StratifiedKFold", "StratifiedGroupKFold"}
+# Repeated splitters always shuffle, so a missing random_state always makes them non-reproducible.
+ALWAYS_SHUFFLED = {"RepeatedKFold", "RepeatedStratifiedKFold"}
 FUNCS = {"scale", "minmax_scale", "robust_scale", "maxabs_scale", "quantile_transform", "power_transform"}
 EVAL = re.compile(r"(^|[_\W])(test|val|valid|validation|eval)([_\W]|$)", re.I)
 SKIP = {".venv", "venv", ".git", "node_modules", "site-packages", "__pycache__"}
@@ -61,6 +65,17 @@ def _tnames(t) -> set:
 
 def _is_tts(v) -> bool:
     return isinstance(v, ast.Call) and _name(v) == "train_test_split"
+
+
+def _kw_true(c, name: str) -> bool:
+    """Whether a keyword argument is the literal True."""
+    return any(kw.arg == name and isinstance(kw.value, ast.Constant) and kw.value.value is True
+               for kw in c.keywords)
+
+
+def _has_seed(c) -> bool:
+    """random_state passed, or a **kwargs expansion that might carry it (assume it does)."""
+    return any(kw.arg == "random_state" or kw.arg is None for kw in c.keywords)
 
 
 def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
@@ -135,6 +150,17 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     out = []
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
+        nm = _name(c)
+        # low severity: reproducibility - a random split nobody can rerun
+        if nm == "train_test_split" and not _has_seed(c):
+            out.append(Finding("low", "no_random_state", loc(c.lineno),
+                               "train_test_split() without random_state: a different split on every run, so results are not reproducible"))
+        elif nm in SHUFFLED_SPLITS and not _has_seed(c) and _kw_true(c, "shuffle"):
+            out.append(Finding("low", "no_random_state", loc(c.lineno),
+                               f"{nm}(shuffle=True) without random_state: folds differ on every run, so results are not reproducible"))
+        elif nm in ALWAYS_SHUFFLED and not _has_seed(c):
+            out.append(Finding("low", "no_random_state", loc(c.lineno),
+                               f"{nm}() without random_state: it always shuffles, so folds differ on every run, so results are not reproducible"))
         if isinstance(f, ast.Name) and f.id in funcs:
             cls, call = f.id, f.id
         elif isinstance(f, ast.Attribute) and f.attr in FIT:

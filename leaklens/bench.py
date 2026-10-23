@@ -62,6 +62,21 @@ CASES += [
 ]
 
 
+# Low-severity reproducibility detector (issue #13): flagged when random_state is missing.
+LOW_CASES: list[tuple[str, str, bool]] = [
+    ("train_test_split without random_state",
+     SPLIT + "a = train_test_split(X, y)\n", True),
+    ("train_test_split with random_state",
+     SPLIT + "a = train_test_split(X, y, random_state=42)\n", False),
+    ("KFold shuffle without random_state",
+     "from sklearn.model_selection import KFold\nkf = KFold(5, shuffle=True)\n", True),
+    ("KFold shuffle with random_state",
+     "from sklearn.model_selection import KFold\nkf = KFold(5, shuffle=True, random_state=42)\n", False),
+    ("KFold without shuffle stays deterministic",
+     "from sklearn.model_selection import KFold\nkf = KFold(5)\n", False),
+]
+
+
 def evaluate() -> dict:
     tp = fp = tn = fn = 0
     errors = []
@@ -77,10 +92,25 @@ def evaluate() -> dict:
             errors.append(f"false alarm: {name}")
         else:
             tn += 1
+    # low-severity reproducibility cases, scored the same way on their own list
+    low_tp = low_fp = low_tn = low_fn = 0
+    for name, code, leaky in LOW_CASES:
+        flagged = any(f.kind == "no_random_state" for f in scan_source(code, name))
+        if leaky and flagged:
+            low_tp += 1
+        elif leaky:
+            low_fn += 1
+            errors.append(f"missed (low): {name}")
+        elif flagged:
+            low_fp += 1
+            errors.append(f"false alarm (low): {name}")
+        else:
+            low_tn += 1
     prec = tp / (tp + fp) if tp + fp else 1.0
     rec = tp / (tp + fn) if tp + fn else 1.0
     f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
     return {"n": len(CASES), "leaky": tp + fn, "clean": tn + fp, "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+            "low_n": len(LOW_CASES), "low_tp": low_tp, "low_fp": low_fp, "low_tn": low_tn, "low_fn": low_fn,
             "precision": prec, "recall": rec, "f1": f1, "errors": errors}
 
 
@@ -93,6 +123,8 @@ def markdown(m: dict) -> str:
         "| Metric | Value |\n|---|---|\n"
         f"| Precision | {m['precision']:.2f} |\n| Recall | {m['recall']:.2f} |\n| F1 | {m['f1']:.2f} |\n"
         f"| True / false positives | {m['tp']} / {m['fp']} |\n| True negatives / false negatives | {m['tn']} / {m['fn']} |\n\n"
+        f"Low-severity reproducibility cases (issue #13): {m['low_tp'] + m['low_tn']}/{m['low_n']} correct, "
+        f"{m['low_fp'] + m['low_fn']} misclassified.\n\n"
         f"Misclassified:\n{miss}\n\n"
         "## Caveats\n"
         "The set is small, hand-written and partly shaped by the scanner's own rules, so it guards against "

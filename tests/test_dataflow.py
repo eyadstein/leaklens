@@ -13,7 +13,7 @@ def test_chained_before_split_is_high():
 
 
 def test_chained_on_train_is_clean():
-    assert not kinds("a = train_test_split(X, y)\nX_train = StandardScaler().fit_transform(X_train)\n")
+    assert not kinds("a = train_test_split(X, y, random_state=42)\nX_train = StandardScaler().fit_transform(X_train)\n")
 
 
 def test_fit_on_full_after_split_is_medium():
@@ -27,7 +27,7 @@ def test_derived_copy_is_tracked():
 
 
 def test_train_partition_is_clean():
-    assert not kinds("sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+    assert not kinds("sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)\n"
                      "sc.fit(X_train)\nZ = sc.transform(X_test)\n")
 
 
