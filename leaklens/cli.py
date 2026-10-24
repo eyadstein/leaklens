@@ -4,7 +4,7 @@ import argparse
 import json
 
 import pandas as pd
-
+from . import __version__
 from .audit import audit
 from .leakage import group_overlap, group_risk, scan, score, split_overlap, temporal_overlap
 from .fixes import advice
@@ -18,6 +18,7 @@ def _read_dataset(path):
 
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="leaklens", description="Audit datasets and ML code for leakage")
+    p.add_argument("--version", action="version", version=__version__)
     p.add_argument("train", nargs="?")
     p.add_argument("--target")
     p.add_argument("--test")
