@@ -41,12 +41,34 @@ pip install leaklens-ml
 pip install -e “.[dev,app]”
 leaklens train.csv --target label --test test.csv --time date
 leaklens --scan notebooks/ --explain   # prints a suggested fix under each finding
+leaklens --scan notebooks/ --llm   # explicitly sends finding details to local Ollama for an explanation and patch suggestion
 leaklens --scan . --sarif leaklens.sarif   # for GitHub code scanning
 leaklens train.csv --target label --test test.csv --group patient_id
 leaklens train.parquet --target label --fail-under 80   # Parquet input (pip install leaklens-ml[parquet]); CI gate on trust score
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
+
+
+## Optional LLM explanations
+
+LLM explanations are disabled by default. With `--llm`, LeakLens sends only each finding's severity, kind, column, and diagnostic detail to the selected provider; it does not send the scanned source files or dataset rows. The default provider is local Ollama:
+
+```sh
+ollama pull qwen2.5:7b
+leaklens --scan notebooks/ --llm
+```
+
+To use an OpenAI-compatible API, select it explicitly and configure its endpoint and key (the request then leaves your machine):
+
+```sh
+export LEAKLENS_LLM_BASE_URL=https://api.example.com/v1
+export LEAKLENS_LLM_API_KEY=...
+export LEAKLENS_LLM_MODEL=your-model
+leaklens --scan notebooks/ --llm --llm-provider openai-compatible
+```
+
+You can also pass `--llm-base-url` and `--llm-model` on the command line. The API key is read only from `LEAKLENS_LLM_API_KEY`.
 
 
 ## Model arena

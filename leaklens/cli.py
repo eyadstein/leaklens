@@ -31,6 +31,10 @@ def main(argv=None) -> int:
     p.add_argument("--tracking-uri", default="sqlite:///mlflow.db")
     p.add_argument("--json", action="store_true")
     p.add_argument("--explain", action="store_true", help="print a suggested fix under each finding")
+    p.add_argument("--llm", action="store_true", help="ask an LLM to explain findings (opt-in; sends finding details to the provider)")
+    p.add_argument("--llm-provider", choices=("ollama", "openai-compatible"), default="ollama")
+    p.add_argument("--llm-base-url", help="provider URL; defaults to local Ollama at http://localhost:11434")
+    p.add_argument("--llm-model", help="model name (or LEAKLENS_LLM_MODEL)")
     p.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     p.add_argument("--html", help="write a shareable single-file HTML report")
     p.add_argument("--badge", help="write a shields.io endpoint JSON with the trust score")
@@ -66,7 +70,24 @@ def main(argv=None) -> int:
     if a.scan:
         for s in a.scan:
             fs += scan_path(s)
-    rep = {"trust_score": score(fs), **rep, "findings": [f.to_dict() for f in fs]}
+
+    explanations = []
+    if a.llm and fs:
+        from .llm import LLMError, create_provider, explain_findings
+
+        try:
+            provider = create_provider(a.llm_provider, a.llm_base_url, a.llm_model)
+            explanations = explain_findings(fs, provider)
+        except LLMError as exc:
+            p.error(str(exc))
+
+    finding_reports = []
+    for index, finding in enumerate(fs):
+        finding_report = finding.to_dict()
+        if explanations:
+            finding_report["llm_explanation"] = explanations[index]
+        finding_reports.append(finding_report)
+    rep = {"trust_score": score(fs), **rep, "findings": finding_reports}
     if a.sarif:
         from .sarif import to_sarif
         with open(a.sarif, "w", encoding="utf-8") as fh:
@@ -84,10 +105,12 @@ def main(argv=None) -> int:
         print(json.dumps(rep, indent=2))
     else:
         print(f"LeakLens trust score: {rep['trust_score']}/100")
-        for f in fs:
+        for index, f in enumerate(fs):
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
             if a.explain and advice(f.kind):
                 print(f"    fix: {advice(f.kind)}")
+            if explanations:
+                print(f"    LLM: {explanations[index]}")
         if not fs:
             print("No leakage found.")
         if res is not None:
