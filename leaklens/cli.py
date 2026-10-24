@@ -93,7 +93,9 @@ def main(argv=None) -> int:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
             if a.explain and advice(f.kind):
                 print(f"    fix: {advice(f.kind)}")
-        if not fs:
+        if fs:
+            print(", ".join(f"{sum(f.severity == lvl for f in fs)} {lvl}" for lvl in ("high", "medium", "low") if any(f.severity == lvl for f in fs)))
+        else:
             print("No leakage found.")
         if res is not None:
             print(f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})")
