@@ -71,3 +71,57 @@ def test_cli_scan(tmp_path):
     g = tmp_path / "good.py"
     g.write_text(GOOD, encoding="utf-8")
     assert main(["--scan", str(g)]) == 0
+
+TARGET_ENCODE = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+df["te"] = df.groupby("city")[y].transform("mean")
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+"""
+
+TARGET_ENCODE_BY_NAME = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+df["te"] = df.groupby("city")["target"].transform("mean")
+X_train, X_test, y_train, y_test = train_test_split(df.drop("target"), df["target"])
+"""
+
+GROUP_STAT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+df["city_mean"] = df.groupby("city")["sales"].transform("mean")
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+"""
+
+GROUP_STAT_AFTER_SPLIT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+X_train["city_mean"] = X_train.groupby("city")["sales"].transform("mean")
+"""
+
+
+def test_target_encode_before_split_is_high():
+    fs = [f for f in scan_source(TARGET_ENCODE) if f.kind == "target_encode_before_split"]
+    assert fs and fs[0].severity == "high"
+    assert "before the split" in fs[0].detail
+
+
+def test_target_encode_by_column_name():
+    assert "target_encode_before_split" in kinds(TARGET_ENCODE_BY_NAME)
+
+
+def test_group_stat_before_split_is_medium():
+    fs = [f for f in scan_source(GROUP_STAT) if f.kind == "group_stat_before_split"]
+    assert fs and fs[0].severity == "medium"
+    assert "target_encode_before_split" not in kinds(GROUP_STAT)
+
+
+def test_group_stat_after_split_is_clean():
+    assert not scan_source(GROUP_STAT_AFTER_SPLIT)
+
+
+def test_fix_hints_exist_for_new_kinds():
+    from leaklens.fixes import advice
+    assert advice("target_encode_before_split")
+    assert advice("group_stat_before_split")
