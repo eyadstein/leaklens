@@ -143,6 +143,31 @@ CASES += [
 ]
 
 
+# Contributed snippets (issue #14), adapted from common notebook patterns.
+CASES += [
+    ("QuantileTransformer fit on all data before split",
+     "from sklearn.preprocessing import QuantileTransformer\n" + SPLIT +
+     "qt = QuantileTransformer()\nX = qt.fit_transform(X)\na = train_test_split(X, y)\n", True),
+    ("power_transform() on all data before split",
+     "from sklearn.preprocessing import power_transform\n" + SPLIT +
+     "X = power_transform(X)\na = train_test_split(X, y)\n", True),
+    ("RandomOverSampler on all data before split",
+     "from imblearn.over_sampling import RandomOverSampler\n" + SPLIT +
+     "X_res, y_res = RandomOverSampler(random_state=0).fit_resample(X, y)\n"
+     "X_train, X_test, y_train, y_test = train_test_split(X_res, y_res, random_state=0)\n", True),
+    ("named-step Pipeline fitted on train only",
+     "from sklearn.pipeline import Pipeline\nfrom sklearn.impute import SimpleImputer\n"
+     "from sklearn.preprocessing import StandardScaler\n" + SPLIT +
+     "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+     "pipe = Pipeline([('imp', SimpleImputer()), ('sc', StandardScaler()), ('clf', model)])\n"
+     "pipe.fit(X_train, y_train)\nscore = pipe.score(X_test, y_test)\n", False),
+    ("imputer fitted on train only, applied to test",
+     "from sklearn.impute import SimpleImputer\n" + SPLIT +
+     "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+     "imp = SimpleImputer()\nX_train = imp.fit_transform(X_train)\nX_test = imp.transform(X_test)\n", False),
+]
+
+
 def markdown(m: dict) -> str:
     miss = "\n".join(f"- {e}" for e in m["errors"]) or "- none"
     return (
