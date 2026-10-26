@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Excel, JSON and Feather input alongside CSV and Parquet, via the new `excel` and `feather` extras for the optional formats
+- `leaklens images TRAIN_DIR TEST_DIR` finds near-duplicate images across splits with a 64-bit dHash (`--max-distance`, default 6); needs the new `images` extra (Pillow)
 
 ## 0.11.0
 - Dataflow now follows transformed data into later splits, even after an earlier split (re-run notebook cells): correct kind and severity instead of "fit_on_full_data"

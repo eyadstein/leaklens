@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 import pandas as pd
 from . import __version__
@@ -16,7 +17,38 @@ def _read_dataset(path):
     return read_dataset(path)
 
 
+def images(argv) -> int:
+    p = argparse.ArgumentParser(prog="leaklens images", description="Find near-duplicate images across train and test folders")
+    p.add_argument("train_dir")
+    p.add_argument("test_dir")
+    p.add_argument("--max-distance", type=int, default=6, help="largest dHash Hamming distance (0-64) that counts as a duplicate")
+    p.add_argument("--samples", type=int, default=5, help="number of example pairs to print")
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+    from .images import image_overlap
+    try:
+        fs, pairs, stats = image_overlap(a.train_dir, a.test_dir, a.max_distance)
+    except ImportError as e:
+        p.error(str(e))
+    rep = {"trust_score": score(fs), **stats, "findings": [f.to_dict() for f in fs], "pairs": pairs}
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"LeakLens trust score: {rep['trust_score']}/100")
+        print(f"{stats['train_images']} train images, {stats['test_images']} test images" + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else ""))
+        for f in fs:
+            print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
+        for m in pairs[: a.samples]:
+            print(f"    {m['test']} ~ {m['train']} (distance {m['distance']})")
+        if not fs:
+            print("No leakage found.")
+    return 1 if fs else 0
+
+
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "images":
+        return images(argv[1:])
     p = argparse.ArgumentParser(prog="leaklens", description="Audit datasets and ML code for leakage")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("train", nargs="?")
