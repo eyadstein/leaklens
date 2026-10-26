@@ -12,7 +12,7 @@
 ## What it catches
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), ID-like columns, train/test row overlap, temporal leakage, entity/group overlap (`--group COL`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), ID-like columns, train/test row overlap, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
 | Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`) |
 
 Every audit returns a 0-100 trust score. The CLI exits with code 1 on a high-severity leak, so it gates CI.
@@ -47,6 +47,7 @@ leaklens train.parquet --target label --fail-under 80   # Parquet input (pip ins
 leaklens train.json --target label   # JSON input, no extra needed
 leaklens train.xlsx --target label   # Excel input (pip install leaklens-ml[excel])
 leaklens train.feather --target label   # Feather input (pip install leaklens-ml[feather])
+leaklens images data/train data/test   # near-duplicate images across splits (pip install leaklens-ml[images])
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
