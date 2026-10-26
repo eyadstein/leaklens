@@ -72,6 +72,10 @@ CASES += [
      _P + "df['m'] = df.groupby('city')['sales'].transform('mean')\na = train_test_split(X, y)\n", True),
     ("groupby transform after the split",
      _P + "a = train_test_split(X, y)\nX_train['m'] = X_train.groupby('city')['sales'].transform('mean')\n", False),
+    ("groupby agg into a column before split",
+     _P + "df['m'] = df.groupby('city')['sales'].agg('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby agg summary before split (EDA, not a feature)",
+     _P + "summary = df.groupby('city')['sales'].agg('mean')\na = train_test_split(X, y)\n", False),
 ]
 
 

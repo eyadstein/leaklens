@@ -96,8 +96,29 @@ X_train, X_test, y_train, y_test = train_test_split(X, y)
 GROUP_STAT_AFTER_SPLIT = """
 import pandas as pd
 from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 X_train["city_mean"] = X_train.groupby("city")["sales"].transform("mean")
+"""
+
+GROUP_STAT_ON_X_COLUMN = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+df["age_mean"] = df.groupby("city")["age"].transform("mean")
+X_train, X_test, y_train, y_test = train_test_split(df[["age", "income"]], df["target"], random_state=42)
+"""
+
+AGG_INTO_COLUMN = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+df["m"] = df.groupby("city")["sales"].agg("mean")
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+"""
+
+AGG_SUMMARY_ONLY = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+summary = df.groupby("city")["sales"].agg("mean")
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 """
 
 
@@ -119,6 +140,20 @@ def test_group_stat_before_split_is_medium():
 
 def test_group_stat_after_split_is_clean():
     assert not scan_source(GROUP_STAT_AFTER_SPLIT)
+
+
+def test_group_stat_on_x_column_stays_medium():
+    fs = [f for f in scan_source(GROUP_STAT_ON_X_COLUMN)
+          if f.kind in ("group_stat_before_split", "target_encode_before_split")]
+    assert fs and fs[0].kind == "group_stat_before_split" and fs[0].severity == "medium"
+
+
+def test_agg_into_column_is_group_stat():
+    assert "group_stat_before_split" in kinds(AGG_INTO_COLUMN)
+
+
+def test_agg_summary_is_not_flagged():
+    assert not scan_source(AGG_SUMMARY_ONLY)
 
 
 def test_fix_hints_exist_for_new_kinds():

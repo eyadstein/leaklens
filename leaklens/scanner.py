@@ -156,10 +156,11 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 for t in a.targets:
                     full |= _tnames(t)
 
-    # names and string columns the split treats as the label: train_test_split(X, y) -> y; df["target"] -> "target"
+    # names and string columns the split treats as the label (label argument(s) only, args[1:]):
+    # train_test_split(X, y) -> y; df["target"] -> "target"; X's columns are features, never the label
     target: set = set()
     if tts:
-        for a in tts[0].args:
+        for a in tts[0].args[1:]:
             target |= _all_names(a) | _strings(a)
 
     def loc(line):
@@ -218,10 +219,20 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                                f"{call}({args}) fits on the full dataset after the split at {loc(tts_line)}; "
                                "fine only for a final refit"))
 
-    # issue #20: features built from the target or from group statistics computed on all rows
+    # issue #20: features built from the target or from group statistics computed on all rows.
+    # .agg/.apply usually build summary tables (EDA), so only a result written into a column
+    # (e.g. df['m'] = df.groupby(...).agg(...)) counts as a feature; .transform is row-aligned already.
+    assigned_cols = set()
+    for a in assigns:
+        if a.targets and isinstance(a.targets[0], ast.Subscript):
+            for n in ast.walk(a.value):
+                if isinstance(n, ast.Call):
+                    assigned_cols.add(id(n))
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
         if not (isinstance(f, ast.Attribute) and f.attr in ("transform", "agg", "apply")):
+            continue
+        if f.attr in ("agg", "apply") and id(c) not in assigned_cols:
             continue
         if first is None or c.lineno >= first:
             continue
