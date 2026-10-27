@@ -124,6 +124,20 @@ flowchart LR
   F --> G[FastAPI /predict]
   D --> H[CLI / Streamlit / GitHub Action]
 ```
+## How the Trust Score Is Calculated
+
+LeakLens starts with a trust score of 100 and deducts points for each finding based on its severity.
+
+| Severity | Penalty |
+|---|---:|
+| High | 35 points |
+| Medium | 15 points |
+| Low | 5 points |
+
+The final score is calculated by subtracting the total penalties from 100. The score cannot fall below 0.
+
+**Example:** If a dataset has one high-severity finding, one medium-severity finding, and one low-severity finding, the total penalty is 35 + 15 + 5 = 55. The final trust score is 100 − 55 = **45/100**.
+
 
 ## Roadmap
 Full plan with phases and exit criteria: [ROADMAP.md](ROADMAP.md). Open tasks are in [Issues](https://github.com/eyadstein/leaklens/issues).
