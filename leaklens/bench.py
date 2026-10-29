@@ -52,6 +52,17 @@ CASES += [
 ]
 
 
+CASES += [
+    ("fillna with full-data mean before split",
+     SPLIT + "df = df.fillna(df.mean())\na = train_test_split(df, y, random_state=42)\n", True),
+    ("fillna with full-data median before split",
+     SPLIT + "df['c'] = df['c'].fillna(df['c'].median())\na = train_test_split(df, y, random_state=42)\n", True),
+    ("fillna with constant before split",
+     SPLIT + "df = df.fillna(0)\na = train_test_split(df, y, random_state=42)\n", False),
+    ("fillna with train mean after split",
+     SPLIT + "a = train_test_split(df, y, random_state=42)\ndf['c'] = df['c'].fillna(df_train['c'].mean())\n", False),
+]
+
 _H = "from sklearn.preprocessing import StandardScaler\n" + SPLIT
 CASES += [
     ("chained StandardScaler before split", _H + "X = StandardScaler().fit_transform(X)\na = train_test_split(X, y)\n", True),
