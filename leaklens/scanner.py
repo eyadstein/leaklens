@@ -288,6 +288,27 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 out.append(Finding("high", "manual_scale_before_split", loc(b.lineno),
                                    f"{ast.unparse(b)} scales with statistics from all rows "
                                    f"before the split at {loc(first)}"))
+
+    # fillna with a statistic computed on all rows before the split (e.g. df.fillna(df.mean())).
+    if first is not None:
+        for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+            if _name(c) != "fillna" or c.lineno >= first:
+                continue
+            vals = list(c.args) + [kw.value for kw in c.keywords]
+            uses_stat = False
+            for v in vals:
+                for n in ast.walk(v):
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                            and n.func.attr in ("mean", "median", "mode"):
+                        uses_stat = True
+                        break
+                if uses_stat:
+                    break
+            if not uses_stat:
+                continue
+            out.append(Finding("medium", "fillna_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} imputes with a statistic from all rows "
+                               f"before the split at {loc(first)}"))
     return out
 
 
