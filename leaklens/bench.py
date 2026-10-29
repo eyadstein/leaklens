@@ -56,6 +56,8 @@ _H = "from sklearn.preprocessing import StandardScaler\n" + SPLIT
 CASES += [
     ("chained StandardScaler before split", _H + "X = StandardScaler().fit_transform(X)\na = train_test_split(X, y)\n", True),
     ("chained scaler after split on train", _H + "a = train_test_split(X, y)\nX_train = StandardScaler().fit_transform(X_train)\n", False),
+    ("fit then transform before cross-validation",
+     _H + "from sklearn.model_selection import cross_val_score\nsc = StandardScaler()\nsc.fit(X)\nXs = sc.transform(X)\ns = cross_val_score(m, Xs, y)\n", True),
     ("scaler fitted on full X after split", _H + "sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nZ = sc.fit_transform(X)\n", True),
     ("derived copy fitted after split", _H + "X2 = X.copy()\nsc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X2)\n", True),
     ("fit on train partition only", _H + "sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X_train)\nZ = sc.transform(X_test)\n", False),

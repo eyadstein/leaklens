@@ -56,6 +56,25 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     funcs.add(al.asname or al.name)
     assigns.sort(key=lambda a: a.lineno)
 
+    # Estimators fitted via a plain .fit() / .fit_transform() / .fit_resample() call keep the
+    # class and the data they learned from, so a later ".transform(X)" inherits the same taint
+    # as "fit_transform" would have (issue: fit-then-transform before CV evaded the tracker).
+    fitted = {}
+    for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+        f = c.func
+        if not (isinstance(f, ast.Attribute) and f.attr in ("fit", "fit_transform", "fit_resample")):
+            continue
+        b = f.value
+        if not isinstance(b, ast.Name):
+            continue
+        cls = ctor.get(b.id, "")
+        if not any(h in cls for h in HINTS):
+            continue
+        argn = set()
+        for x in c.args:
+            argn |= _all_names(x)
+        fitted.setdefault(b.id, []).append((c.lineno, cls, argn))
+
     tr = {}
     for a in assigns:
         if isinstance(a.value, ast.Call) and _name(a.value) == "train_test_split":
@@ -63,6 +82,14 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         hit = None
         for c in ast.walk(a.value):
             if isinstance(c, ast.Call):
+                if (isinstance(c.func, ast.Attribute) and c.func.attr == "transform"
+                        and isinstance(c.func.value, ast.Name)):
+                    events = [e for e in fitted.get(c.func.value.id, []) if e[0] <= a.lineno]
+                    if events:
+                        line, cls, argn = events[-1]
+                        if not any(b in cls for b in BENIGN):
+                            hit = (line, cls, argn)
+                            break
                 cls = _fit_cls(c, ctor, funcs)
                 if cls and not any(b in cls for b in BENIGN):
                     argn = set()
