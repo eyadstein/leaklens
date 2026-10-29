@@ -315,7 +315,25 @@ def scan_file(path) -> list[Finding]:
         cells.append((line, i))
         parts.append("\n".join(lines))
         line += max(len(lines), 1)
-    return scan_source("\n".join(parts), str(p), cells)
+    out = scan_source("\n".join(parts), str(p), cells)
+    if not any(f.kind == "parse_error" for f in out):
+        return out
+    # A single bad cell (e.g. a "%%writefile" body that is not Python) makes the whole
+    # notebook unparseable, hiding the leaks in every other cell. Skip only the cells that
+    # fail to parse on their own and keep scanning the rest with unchanged line offsets.
+    bad = []
+    for idx, part in enumerate(parts):
+        try:
+            ast.parse(part)
+        except SyntaxError as e:
+            bad.append((idx, e))
+    if not bad:
+        return out
+    for idx, _ in bad:
+        parts[idx] = "\n".join(["pass"] * (parts[idx].count("\n") + 1))
+    out = scan_source("\n".join(parts), str(p), cells)
+    skipped = [f"cell {cells[idx][1]} skipped: {e}" for idx, e in bad]
+    return out + [Finding("low", "parse_error", str(p), "; ".join(skipped))]
 
 
 def scan_path(path) -> list[Finding]:

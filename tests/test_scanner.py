@@ -188,3 +188,22 @@ def test_manual_scale_with_train_statistics_is_clean():
 def test_manual_scale_fix_hint_exists():
     from leaklens.fixes import advice
     assert advice("manual_scale_before_split")
+
+
+def test_notebook_one_bad_cell_does_not_hide_the_rest(tmp_path):
+    cells = [{"cell_type": "code",
+              "source": ["from sklearn.preprocessing import StandardScaler\n",
+                         "sc = StandardScaler()\n", "X = sc.fit_transform(X)\n"]},
+             {"cell_type": "code",
+              "source": ["%%writefile output.txt\n",
+                         "not python: 1 2 3 !!! ( )))\n", "unmatched '\n"]},
+             {"cell_type": "code",
+              "source": ["from sklearn.model_selection import train_test_split\n",
+                         "a = train_test_split(X, y, random_state=0)\n"]}]
+    f = tmp_path / "badcell.ipynb"
+    f.write_text(json.dumps({"cells": cells}), encoding="utf-8")
+    fs = scan_file(f)
+    kinds_ = [x.kind for x in fs]
+    assert "preprocess_before_split" in kinds_, fs
+    assert "parse_error" in kinds_ and any("cell 1 skipped" in x.detail for x in fs)
+    assert any(x.kind == "preprocess_before_split" and "cell 0" in x.column for x in fs)
