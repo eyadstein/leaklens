@@ -110,7 +110,7 @@ def test_cli_uses_provider_only_when_llm_is_enabled(monkeypatch, capsys):
 
 
 def test_provider_rejects_non_http_urls():
-    with pytest.raises(llm.LLMError, match="http"):
+    with pytest.raises(llm.LLMError, match="(?i)http"):
         llm.create_provider("openai-compatible", "ftp://api.example.com/v1", api_key="secret")
 
 

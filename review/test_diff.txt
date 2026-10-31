@@ -1,0 +1,141 @@
+commit a599f17c7d865699b47c757f3a1545dea83e1aff
+Author: Rahul <rahulsingh.ranjan06@gmail.com>
+Date:   Thu Oct 29 06:51:28 2026 +0530
+
+    feat(scanner): flag target-encoding and group statistics before the split (#29)
+    
+    * feat(scanner): flag target-encoding and group statistics before the split
+    
+    Flags features built from the target or from group statistics on all rows
+    (issue #20), the pattern df.groupby(c)[y].transform('mean') computed
+    before the split:
+    
+    - target_encode_before_split (high) when the groupby selection or the
+      groupby keys touch the label the split divides (y from
+      train_test_split(X, y), or the string column df['target']);
+    - group_stat_before_split (medium) for other group statistics on all
+      rows, whose held-out rows help build the feature.
+    
+    Both fire only before the first split, like the existing
+    preprocess_before_split family. Fix hints added for both kinds, and four
+    benchmark cases cover target-by-variable, target-by-column-name, a
+    plain group statistic, and the clean after-split case.
+    
+    Co-authored-by: rahul05ranjan <11793455+rahul05ranjan@users.noreply.github.com>
+    
+    * fix(scanner): treat only label args as target, skip unassigned agg/apply
+    
+    - build the label set from the label argument(s) (args[1:]) so columns
+      named in the X argument are no longer treated as the target
+    - report .agg/.apply only when the result is assigned into a column
+      (df['m'] = ...); plain summary tables used for EDA stay clean
+    - bench: assigned-agg leak case + clean EDA summary case
+    - tests: groupby over an X column stays medium; agg summary not
+      flagged; seed the no-findings split with random_state=42
+    
+    Co-authored-by: rahul05ranjan <11793455+rahul05ranjan@users.noreply.github.com>
+    
+    ---------
+    
+    Co-authored-by: Rahul Ranjan <11793455+rahul05ranjan@users.noreply.github.com>
+
+diff --git a/tests/test_scanner.py b/tests/test_scanner.py
+index c0fca6a..7db3e83 100644
+--- a/tests/test_scanner.py
++++ b/tests/test_scanner.py
+@@ -70,4 +70,93 @@ def test_cli_scan(tmp_path):
+     assert main(["--scan", str(f)]) == 1
+     g = tmp_path / "good.py"
+     g.write_text(GOOD, encoding="utf-8")
+-    assert main(["--scan", str(g)]) == 0
+\ No newline at end of file
++    assert main(["--scan", str(g)]) == 0
++
++TARGET_ENCODE = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++df["te"] = df.groupby("city")[y].transform("mean")
++X_train, X_test, y_train, y_test = train_test_split(X, y)
++"""
++
++TARGET_ENCODE_BY_NAME = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++df["te"] = df.groupby("city")["target"].transform("mean")
++X_train, X_test, y_train, y_test = train_test_split(df.drop("target"), df["target"])
++"""
++
++GROUP_STAT = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++df["city_mean"] = df.groupby("city")["sales"].transform("mean")
++X_train, X_test, y_train, y_test = train_test_split(X, y)
++"""
++
++GROUP_STAT_AFTER_SPLIT = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
++X_train["city_mean"] = X_train.groupby("city")["sales"].transform("mean")
++"""
++
++GROUP_STAT_ON_X_COLUMN = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++df["age_mean"] = df.groupby("city")["age"].transform("mean")
++X_train, X_test, y_train, y_test = train_test_split(df[["age", "income"]], df["target"], random_state=42)
++"""
++
++AGG_INTO_COLUMN = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++df["m"] = df.groupby("city")["sales"].agg("mean")
++X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
++"""
++
++AGG_SUMMARY_ONLY = """
++import pandas as pd
++from sklearn.model_selection import train_test_split
++summary = df.groupby("city")["sales"].agg("mean")
++X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
++"""
++
++
++def test_target_encode_before_split_is_high():
++    fs = [f for f in scan_source(TARGET_ENCODE) if f.kind == "target_encode_before_split"]
++    assert fs and fs[0].severity == "high"
++    assert "before the split" in fs[0].detail
++
++
++def test_target_encode_by_column_name():
++    assert "target_encode_before_split" in kinds(TARGET_ENCODE_BY_NAME)
++
++
++def test_group_stat_before_split_is_medium():
++    fs = [f for f in scan_source(GROUP_STAT) if f.kind == "group_stat_before_split"]
++    assert fs and fs[0].severity == "medium"
++    assert "target_encode_before_split" not in kinds(GROUP_STAT)
++
++
++def test_group_stat_after_split_is_clean():
++    assert not scan_source(GROUP_STAT_AFTER_SPLIT)
++
++
++def test_group_stat_on_x_column_stays_medium():
++    fs = [f for f in scan_source(GROUP_STAT_ON_X_COLUMN)
++          if f.kind in ("group_stat_before_split", "target_encode_before_split")]
++    assert fs and fs[0].kind == "group_stat_before_split" and fs[0].severity == "medium"
++
++
++def test_agg_into_column_is_group_stat():
++    assert "group_stat_before_split" in kinds(AGG_INTO_COLUMN)
++
++
++def test_agg_summary_is_not_flagged():
++    assert not scan_source(AGG_SUMMARY_ONLY)
++
++
++def test_fix_hints_exist_for_new_kinds():
++    from leaklens.fixes import advice
++    assert advice("target_encode_before_split")
++    assert advice("group_stat_before_split")
