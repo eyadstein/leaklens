@@ -1,0 +1,412 @@
+diff --git a/README.md b/README.md
+index a9f63a9..93a6091 100644
+--- a/README.md
++++ b/README.md
+@@ -51,6 +51,7 @@ python examples/make_demo.py
+ leaklens demo.csv --target is_fraud --arena
+ mlflow ui --backend-store-uri sqlite:///mlflow.db
+ 
++New to data leakage? Start with the [walkthrough notebook](examples/leak_walkthrough.ipynb): three planted leaks, an inflated score, and how LeakLens finds and fixes them.
+ 
+ ## Model arena
+ Auto-drops leaking and ID columns, then trains linear, gradient-boosted tree and neural-net models inside leak-safe pipelines (imputation, scaling and encoding are fitted on training data only). Runs are tracked in local MLflow (SQLite) and the winner is saved to `models/best.joblib`. Add `--time COL` for a temporal split.
+diff --git a/examples/leak_walkthrough.ipynb b/examples/leak_walkthrough.ipynb
+new file mode 100644
+index 0000000..d2c8831
+--- /dev/null
++++ b/examples/leak_walkthrough.ipynb
+@@ -0,0 +1,394 @@
++{
++ "cells": [
++  {
++   "cell_type": "markdown",
++   "id": "de910178-6c93-430e-8105-5a3f1f35b041",
++   "metadata": {},
++   "source": [
++    "# LeakLens walkthrough: three leaks, one honest score\n",
++    "\n",
++    "A model that scores suspiciously high is often leaking. In this notebook we plant three leaks,\n",
++    "watch them inflate the score, let LeakLens find them, fix each one and compare the honest result."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 1,
++   "id": "01b7da64-a2c2-44e4-b061-4610d2c48d25",
++   "metadata": {},
++   "outputs": [
++    {
++     "data": {
++      "text/html": [
++       "<div>\n",
++       "<style scoped>\n",
++       "    .dataframe tbody tr th:only-of-type {\n",
++       "        vertical-align: middle;\n",
++       "    }\n",
++       "\n",
++       "    .dataframe tbody tr th {\n",
++       "        vertical-align: top;\n",
++       "    }\n",
++       "\n",
++       "    .dataframe thead th {\n",
++       "        text-align: right;\n",
++       "    }\n",
++       "</style>\n",
++       "<table border=\"1\" class=\"dataframe\">\n",
++       "  <thead>\n",
++       "    <tr style=\"text-align: right;\">\n",
++       "      <th></th>\n",
++       "      <th>age</th>\n",
++       "      <th>visits</th>\n",
++       "      <th>bmi</th>\n",
++       "      <th>readmitted</th>\n",
++       "    </tr>\n",
++       "  </thead>\n",
++       "  <tbody>\n",
++       "    <tr>\n",
++       "      <th>0</th>\n",
++       "      <td>23</td>\n",
++       "      <td>1</td>\n",
++       "      <td>27.0</td>\n",
++       "      <td>0</td>\n",
++       "    </tr>\n",
++       "    <tr>\n",
++       "      <th>1</th>\n",
++       "      <td>65</td>\n",
++       "      <td>1</td>\n",
++       "      <td>19.4</td>\n",
++       "      <td>0</td>\n",
++       "    </tr>\n",
++       "    <tr>\n",
++       "      <th>2</th>\n",
++       "      <td>58</td>\n",
++       "      <td>5</td>\n",
++       "      <td>20.5</td>\n",
++       "      <td>0</td>\n",
++       "    </tr>\n",
++       "    <tr>\n",
++       "      <th>3</th>\n",
++       "      <td>45</td>\n",
++       "      <td>5</td>\n",
++       "      <td>23.1</td>\n",
++       "      <td>1</td>\n",
++       "    </tr>\n",
++       "    <tr>\n",
++       "      <th>4</th>\n",
++       "      <td>44</td>\n",
++       "      <td>2</td>\n",
++       "      <td>16.3</td>\n",
++       "      <td>0</td>\n",
++       "    </tr>\n",
++       "  </tbody>\n",
++       "</table>\n",
++       "</div>"
++      ],
++      "text/plain": [
++       "   age  visits   bmi  readmitted\n",
++       "0   23       1  27.0           0\n",
++       "1   65       1  19.4           0\n",
++       "2   58       5  20.5           0\n",
++       "3   45       5  23.1           1\n",
++       "4   44       2  16.3           0"
++      ]
++     },
++     "execution_count": 1,
++     "metadata": {},
++     "output_type": "execute_result"
++    }
++   ],
++   "source": [
++    "import numpy as np\n",
++    "import pandas as pd\n",
++    "from sklearn.ensemble import RandomForestClassifier\n",
++    "from sklearn.metrics import roc_auc_score\n",
++    "from sklearn.model_selection import train_test_split\n",
++    "\n",
++    "SEED = 42\n",
++    "rng = np.random.default_rng(SEED)\n",
++    "\n",
++    "n = 2000\n",
++    "age = rng.integers(18, 80, n)\n",
++    "visits = rng.poisson(3, n)\n",
++    "bmi = rng.normal(27, 5, n).round(1)\n",
++    "\n",
++    "# The real signal: older patients with more visits are a bit more likely to be readmitted\n",
++    "z = 0.04 * (age - 50) + 0.3 * (visits - 3) + 0.08 * (bmi - 27) - 0.5\n",
++    "readmitted = (rng.random(n) < 1 / (1 + np.exp(-z))).astype(int)\n",
++    "\n",
++    "df = pd.DataFrame({\"age\": age, \"visits\": visits, \"bmi\": bmi, \"readmitted\": readmitted})\n",
++    "df.head()"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "456af800-06c9-4139-9940-fa5e7f74edf9",
++   "metadata": {},
++   "source": [
++    "## 1. Plant three leaks\n",
++    "\n",
++    "1. **Target leakage**: `discharge_code` is filled in *after* we know whether the patient came back, so it encodes the answer.\n",
++    "2. **Train/test overlap**: half of the test rows are copied into the training set.\n",
++    "3. **Scaler fitted before the split**: the scaler sees the test rows when it computes its mean and standard deviation.\n"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 2,
++   "id": "7c4720c1-86ac-41fc-b1db-d641de220332",
++   "metadata": {},
++   "outputs": [
++    {
++     "data": {
++      "text/plain": [
++       "(1750, 500)"
++      ]
++     },
++     "execution_count": 2,
++     "metadata": {},
++     "output_type": "execute_result"
++    }
++   ],
++   "source": [
++    "from sklearn.preprocessing import StandardScaler\n",
++    "\n",
++    "leaky = df.copy()\n",
++    "\n",
++    "# Leak 1: a column that is only known after the outcome\n",
++    "leaky[\"discharge_code\"] = leaky[\"readmitted\"] * 2 + rng.integers(0, 2, n)\n",
++    "features = [\"age\", \"visits\", \"bmi\", \"discharge_code\"]\n",
++    "\n",
++    "# Leak 3: the scaler is fitted on every row, test rows included\n",
++    "leaky[features] = StandardScaler().fit_transform(leaky[features])\n",
++    "\n",
++    "train, test = train_test_split(leaky, test_size=0.25, random_state=SEED)\n",
++    "\n",
++    "# Leak 2: half of the test rows sneak into the training set\n",
++    "train = pd.concat([train, test.sample(frac=0.5, random_state=SEED)])\n",
++    "len(train), len(test)"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "c77a24a8-56ad-4c0b-af6e-c09ebb10fa11",
++   "metadata": {},
++   "source": [
++    "## 2. The inflated score"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 3,
++   "id": "3b5ad2e0-e165-4d9a-888b-1ae15d078f3b",
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "Leaky ROC AUC: 1.000\n"
++     ]
++    }
++   ],
++   "source": [
++    "model = RandomForestClassifier(n_estimators=200, random_state=SEED)\n",
++    "model.fit(train[features], train[\"readmitted\"])\n",
++    "leaky_auc = roc_auc_score(test[\"readmitted\"], model.predict_proba(test[features])[:, 1])\n",
++    "print(f\"Leaky ROC AUC: {leaky_auc:.3f}\")"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "46580399-10c0-4b9c-b726-10a022f8a555",
++   "metadata": {},
++   "source": [
++    "## 3. Let LeakLens find the leaks\n",
++    "\n",
++    "LeakLens audits the **data** (target leakage, train/test overlap) and the **code** (preprocessing before the split).\n",
++    "To keep this notebook from flagging itself, the leaky preprocessing step is copied into a string and scanned from there."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 5,
++   "id": "a065c21a-a78c-4b32-a507-1047c6175260",
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "LeakLens trust score: 0/100\n",
++      "[HIGH] target_leakage :: discharge_code :: alone predicts target (roc_auc=1.000)\n",
++      "[HIGH] split_overlap :: * :: 251 test rows (50.2%) also appear in train\n",
++      "[HIGH] preprocess_before_split :: leaky_snippet:5 :: StandardScaler.fit_transform() runs before the split at leaky_snippet:6\n"
++     ]
++    }
++   ],
++   "source": [
++    "from leaklens.leakage import scan, split_overlap, score\n",
++    "from leaklens.scanner import scan_source\n",
++    "\n",
++    "# Data audit\n",
++    "data_findings = scan(train, \"readmitted\") + split_overlap(train, test)\n",
++    "\n",
++    "# Code audit: the same leaky step from cell 4, written as a plain script\n",
++    "LEAKY_CODE = \"\"\"\n",
++    "from sklearn.model_selection import train_test_split\n",
++    "from sklearn.preprocessing import StandardScaler\n",
++    "\n",
++    "X = StandardScaler().fit_transform(X)\n",
++    "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)\n",
++    "\"\"\"\n",
++    "code_findings = scan_source(LEAKY_CODE, label=\"leaky_snippet\")\n",
++    "\n",
++    "findings = data_findings + code_findings\n",
++    "print(f\"LeakLens trust score: {score(findings)}/100\")\n",
++    "for f in findings:\n",
++    "    print(f\"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}\")"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "f1e9a5da-702f-4252-9d5d-319f424fb0e2",
++   "metadata": {},
++   "source": [
++    "## 4. Fix each leak\n",
++    "\n",
++    "1. **Target leakage**: drop `discharge_code`, it is not available at prediction time.\n",
++    "2. **Train/test overlap**: drop duplicate rows *before* splitting, and never copy test rows into train.\n",
++    "3. **Scaler before the split**: split first, then fit the scaler on the training rows only."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 6,
++   "id": "c4f4f295-0e6e-4b6a-9abc-c53d45ffa613",
++   "metadata": {},
++   "outputs": [
++    {
++     "data": {
++      "text/plain": [
++       "(1493, 498)"
++      ]
++     },
++     "execution_count": 6,
++     "metadata": {},
++     "output_type": "execute_result"
++    }
++   ],
++   "source": [
++    "# Fix 2: start from the clean data and remove exact duplicates before splitting\n",
++    "clean = df.drop_duplicates()\n",
++    "\n",
++    "# Fix 1: keep only the features we would really have when making a prediction\n",
++    "features = [\"age\", \"visits\", \"bmi\"]\n",
++    "\n",
++    "train, test = train_test_split(clean, test_size=0.25, random_state=SEED)\n",
++    "\n",
++    "# Fix 3: the scaler learns from the training rows only, then transforms both splits\n",
++    "scaler = StandardScaler().fit(train[features])\n",
++    "train, test = train.copy(), test.copy()\n",
++    "train[features] = scaler.transform(train[features])\n",
++    "test[features] = scaler.transform(test[features])\n",
++    "len(train), len(test)"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "6222e469-314b-4cab-9590-1ff99e8fb8da",
++   "metadata": {},
++   "source": [
++    "## 5. Re-run LeakLens and get the honest score"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": 7,
++   "id": "f6d683ce-14e7-4043-984c-fe65788fddcd",
++   "metadata": {},
++   "outputs": [
++    {
++     "name": "stdout",
++     "output_type": "stream",
++     "text": [
++      "LeakLens trust score: 100/100\n",
++      "\n",
++      "Leaky ROC AUC:  1.000\n",
++      "Honest ROC AUC: 0.669\n"
++     ]
++    }
++   ],
++   "source": [
++    "FIXED_CODE = \"\"\"\n",
++    "from sklearn.model_selection import train_test_split\n",
++    "from sklearn.preprocessing import StandardScaler\n",
++    "\n",
++    "X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)\n",
++    "scaler = StandardScaler().fit(X_train)\n",
++    "X_train, X_test = scaler.transform(X_train), scaler.transform(X_test)\n",
++    "\"\"\"\n",
++    "\n",
++    "findings = (\n",
++    "    scan(train, \"readmitted\")\n",
++    "    + split_overlap(train, test)\n",
++    "    + scan_source(FIXED_CODE, label=\"fixed_snippet\")\n",
++    ")\n",
++    "print(f\"LeakLens trust score: {score(findings)}/100\")\n",
++    "for f in findings:\n",
++    "    print(f\"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}\")\n",
++    "\n",
++    "model = RandomForestClassifier(n_estimators=200, random_state=SEED)\n",
++    "model.fit(train[features], train[\"readmitted\"])\n",
++    "honest_auc = roc_auc_score(test[\"readmitted\"], model.predict_proba(test[features])[:, 1])\n",
++    "\n",
++    "print(f\"\\nLeaky ROC AUC:  {leaky_auc:.3f}\")\n",
++    "print(f\"Honest ROC AUC: {honest_auc:.3f}\")"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "id": "e51ef69e-9a64-48be-92f5-c8258cad201f",
++   "metadata": {},
++   "source": [
++    "## Takeaway\n",
++    "\n",
++    "The leaky model looked perfect (ROC AUC 1.000) and LeakLens gave it a trust score of 0/100.\n",
++    "After fixing the three leaks, the trust score is 100/100 and the honest ROC AUC is about 0.67.\n",
++    "A lower score you can trust beats a perfect score that falls apart on new data.\n",
++    "\n",
++    "Try it on your own data: `leaklens train.csv --target label --test test.csv`, or `leaklens --scan notebooks/` for code."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "id": "11323e77-8102-46a5-8901-9be30875c974",
++   "metadata": {},
++   "outputs": [],
++   "source": []
++  }
++ ],
++ "metadata": {
++  "kernelspec": {
++   "display_name": "Python 3 (ipykernel)",
++   "language": "python",
++   "name": "python3"
++  },
++  "language_info": {
++   "codemirror_mode": {
++    "name": "ipython",
++    "version": 3
++   },
++   "file_extension": ".py",
++   "mimetype": "text/x-python",
++   "name": "python",
++   "nbconvert_exporter": "python",
++   "pygments_lexer": "ipython3",
++   "version": "3.14.7"
++  }
++ },
++ "nbformat": 4,
++ "nbformat_minor": 5
++}

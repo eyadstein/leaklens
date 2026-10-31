@@ -45,6 +45,10 @@ def _all_names(expr) -> set:
     return {n.id for n in ast.walk(expr) if isinstance(n, ast.Name)}
 
 
+def _strings(expr) -> set:
+    return {s.value for s in ast.walk(expr) if isinstance(s, ast.Constant) and isinstance(s.value, str)}
+
+
 def _names(expr) -> set:
     """Names in an expression, or none if it indexes (X[idx] is usually a partition, not the full data)."""
     if any(isinstance(n, ast.Subscript) for n in ast.walk(expr)):
@@ -152,6 +156,13 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 for t in a.targets:
                     full |= _tnames(t)
 
+    # names and string columns the split treats as the label (label argument(s) only, args[1:]):
+    # train_test_split(X, y) -> y; df["target"] -> "target"; X's columns are features, never the label
+    target: set = set()
+    if tts:
+        for a in tts[0].args[1:]:
+            target |= _all_names(a) | _strings(a)
+
     def loc(line):
         if cells:
             hit = [(s, i) for s, i in cells if s <= line]
@@ -207,6 +218,97 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             out.append(Finding("medium", "fit_on_full_data", loc(c.lineno),
                                f"{call}({args}) fits on the full dataset after the split at {loc(tts_line)}; "
                                "fine only for a final refit"))
+
+    # issue #20: features built from the target or from group statistics computed on all rows.
+    # .agg/.apply usually build summary tables (EDA), so only a result written into a column
+    # (e.g. df['m'] = df.groupby(...).agg(...)) counts as a feature; .transform is row-aligned already.
+    assigned_cols = set()
+    for a in assigns:
+        if a.targets and isinstance(a.targets[0], ast.Subscript):
+            for n in ast.walk(a.value):
+                if isinstance(n, ast.Call):
+                    assigned_cols.add(id(n))
+    for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+        f = c.func
+        if not (isinstance(f, ast.Attribute) and f.attr in ("transform", "agg", "apply")):
+            continue
+        if f.attr in ("agg", "apply") and id(c) not in assigned_cols:
+            continue
+        if first is None or c.lineno >= first:
+            continue
+        sel, base = None, None
+        if isinstance(f.value, ast.Subscript) and isinstance(f.value.value, ast.Call) \
+                and _name(f.value.value) == "groupby":
+            sel, base = f.value.slice, f.value.value
+        elif isinstance(f.value, ast.Call) and _name(f.value) == "groupby":
+            base = f.value
+        if base is None:
+            continue
+        used = (_all_names(sel) | _strings(sel)) if sel is not None else set()
+        keys = set()
+        for a in base.args:
+            keys |= _all_names(a) | _strings(a)
+        if used & target or keys & target:
+            out.append(Finding("high", "target_encode_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} builds a feature from the target across all rows "
+                               f"before the split at {loc(first)}"))
+        else:
+            out.append(Finding("medium", "group_stat_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} uses group statistics from all rows before the "
+                               f"split at {loc(first)}; held-out rows help build the feature"))
+    # issue #77: hand-rolled scaling with full-data statistics before the split,
+    # e.g. (X - X.mean()) / X.std() or X / X.max(). Statistics taken from a train
+    # partition only occur after the split, so they are never reported.
+    STATS = {"mean", "std", "var", "min", "max", "median", "quantile"}
+
+    def stat_recv(n):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in STATS:
+            if n.args and isinstance(n.func.value, ast.Name) and n.func.value.id in ("np", "numpy"):
+                return set().union(*(_all_names(a) for a in n.args))
+            return _all_names(n.func.value)
+        return None
+
+    if first is not None:
+        inner = {id(k) for b in ast.walk(tree) if isinstance(b, ast.BinOp)
+                 for k in (b.left, b.right) if isinstance(k, ast.BinOp)}
+        binops = [b for b in ast.walk(tree) if isinstance(b, ast.BinOp)]
+        for b in sorted(binops, key=lambda x: (x.lineno, x.col_offset)):
+            if id(b) in inner or b.lineno >= first:
+                continue
+            recv, skip = set(), set()
+            for n in ast.walk(b):
+                r = stat_recv(n)
+                if r is not None:
+                    recv |= r
+                    skip |= {id(m) for m in ast.walk(n)}
+            if not recv:
+                continue
+            outside = {m.id for m in ast.walk(b) if isinstance(m, ast.Name) and id(m) not in skip}
+            if outside & recv:
+                out.append(Finding("high", "manual_scale_before_split", loc(b.lineno),
+                                   f"{ast.unparse(b)} scales with statistics from all rows "
+                                   f"before the split at {loc(first)}"))
+
+    # fillna with a statistic computed on all rows before the split (e.g. df.fillna(df.mean())).
+    if first is not None:
+        for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+            if _name(c) != "fillna" or c.lineno >= first:
+                continue
+            vals = list(c.args) + [kw.value for kw in c.keywords]
+            uses_stat = False
+            for v in vals:
+                for n in ast.walk(v):
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) \
+                            and n.func.attr in ("mean", "median", "mode"):
+                        uses_stat = True
+                        break
+                if uses_stat:
+                    break
+            if not uses_stat:
+                continue
+            out.append(Finding("medium", "fillna_before_split", loc(c.lineno),
+                               f"{ast.unparse(c)} imputes with a statistic from all rows "
+                               f"before the split at {loc(first)}"))
     return out
 
 
@@ -234,7 +336,25 @@ def scan_file(path) -> list[Finding]:
         cells.append((line, i))
         parts.append("\n".join(lines))
         line += max(len(lines), 1)
-    return scan_source("\n".join(parts), str(p), cells)
+    out = scan_source("\n".join(parts), str(p), cells)
+    if not any(f.kind == "parse_error" for f in out):
+        return out
+    # A single bad cell (e.g. a "%%writefile" body that is not Python) makes the whole
+    # notebook unparseable, hiding the leaks in every other cell. Skip only the cells that
+    # fail to parse on their own and keep scanning the rest with unchanged line offsets.
+    bad = []
+    for idx, part in enumerate(parts):
+        try:
+            ast.parse(part)
+        except SyntaxError as e:
+            bad.append((idx, e))
+    if not bad:
+        return out
+    for idx, _ in bad:
+        parts[idx] = "\n".join(["pass"] * (parts[idx].count("\n") + 1))
+    out = scan_source("\n".join(parts), str(p), cells)
+    skipped = [f"cell {cells[idx][1]} skipped: {e}" for idx, e in bad]
+    return out + [Finding("low", "parse_error", str(p), "; ".join(skipped))]
 
 
 def scan_path(path) -> list[Finding]:

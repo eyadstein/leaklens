@@ -52,15 +52,62 @@ CASES += [
 ]
 
 
+CASES += [
+    ("fillna with full-data mean before split",
+     SPLIT + "df = df.fillna(df.mean())\na = train_test_split(df, y, random_state=42)\n", True),
+    ("fillna with full-data median before split",
+     SPLIT + "df['c'] = df['c'].fillna(df['c'].median())\na = train_test_split(df, y, random_state=42)\n", True),
+    ("fillna with constant before split",
+     SPLIT + "df = df.fillna(0)\na = train_test_split(df, y, random_state=42)\n", False),
+    ("fillna with train mean after split",
+     SPLIT + "a = train_test_split(df, y, random_state=42)\ndf['c'] = df['c'].fillna(df_train['c'].mean())\n", False),
+]
+
 _H = "from sklearn.preprocessing import StandardScaler\n" + SPLIT
 CASES += [
     ("chained StandardScaler before split", _H + "X = StandardScaler().fit_transform(X)\na = train_test_split(X, y)\n", True),
     ("chained scaler after split on train", _H + "a = train_test_split(X, y)\nX_train = StandardScaler().fit_transform(X_train)\n", False),
+    ("fit then transform before cross-validation",
+     _H + "from sklearn.model_selection import cross_val_score\nsc = StandardScaler()\nsc.fit(X)\nXs = sc.transform(X)\ns = cross_val_score(m, Xs, y)\n", True),
     ("scaler fitted on full X after split", _H + "sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nZ = sc.fit_transform(X)\n", True),
     ("derived copy fitted after split", _H + "X2 = X.copy()\nsc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X2)\n", True),
     ("fit on train partition only", _H + "sc = StandardScaler()\nX_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X_train)\nZ = sc.transform(X_test)\n", False),
 ]
 
+# issue #20: features built from the target or from group statistics on all rows
+_P = "import pandas as pd\n" + SPLIT
+CASES += [
+    ("groupby target transform before split",
+     _P + "df['enc'] = df.groupby('city')[y].transform('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby target-name column transform before split",
+     _P + "df['enc'] = df.groupby('city')['target'].transform('mean')\na = train_test_split(df.drop('target'), df['target'])\n", True),
+    ("groupby feature transform before split",
+     _P + "df['m'] = df.groupby('city')['sales'].transform('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby transform after the split",
+     _P + "a = train_test_split(X, y)\nX_train['m'] = X_train.groupby('city')['sales'].transform('mean')\n", False),
+    ("groupby agg into a column before split",
+     _P + "df['m'] = df.groupby('city')['sales'].agg('mean')\na = train_test_split(X, y)\n", True),
+    ("groupby agg summary before split (EDA, not a feature)",
+     _P + "summary = df.groupby('city')['sales'].agg('mean')\na = train_test_split(X, y)\n", False),
+]
+
+
+# issue #77: hand-rolled normalization with full-data statistics
+_N = "import numpy as np\n" + SPLIT
+CASES += [
+    ("z-score by hand before split",
+     _N + "X = (X - X.mean()) / X.std()\na = train_test_split(X, y, random_state=0)\n", True),
+    ("divide by max before split",
+     _N + "X = X / X.max()\na = train_test_split(X, y, random_state=0)\n", True),
+    ("np.mean subtraction before split",
+     _N + "X = X - np.mean(X)\na = train_test_split(X, y, random_state=0)\n", True),
+    ("column max scaling before split",
+     _N + "df['a'] = df['a'] / df['a'].max()\na = train_test_split(X, y, random_state=0)\n", True),
+    ("manual z-score with train statistics after split",
+     _N + "a = train_test_split(X, y, random_state=0)\nX_test = (X_test - X_train.mean()) / X_train.std()\n", False),
+    ("statistics from a different frame",
+     _N + "Z = (A - B.mean()) / B.std()\na = train_test_split(X, y, random_state=0)\n", False),
+]
 
 # Low-severity reproducibility detector (issue #13): flagged when random_state is missing.
 LOW_CASES: list[tuple[str, str, bool]] = [
@@ -140,6 +187,31 @@ CASES += [
     ("ColumnTransformer with only one-hot before split", _F + "ct = ColumnTransformer([('o', OneHotEncoder(), [0])])\nX = ct.fit_transform(X)\na = train_test_split(X, y, random_state=0)\n", False),
     ("scaler on all data then permutation_test_score", _F + "Xs = MinMaxScaler().fit_transform(x)\nr = permutation_test_score(model, Xs, y, cv=5)\n", True),
     ("scaler fitted per fold inside the loop", _F + "cv = StratifiedKFold(5)\nfor tr, te in cv.split(X, y):\n    sc = MinMaxScaler()\n    Xtr = sc.fit_transform(X[tr])\n    Xte = sc.transform(X[te])\n", False),
+]
+
+
+# Contributed snippets (issue #14), adapted from common notebook patterns.
+CASES += [
+    ("QuantileTransformer fit on all data before split",
+     "from sklearn.preprocessing import QuantileTransformer\n" + SPLIT +
+     "qt = QuantileTransformer()\nX = qt.fit_transform(X)\na = train_test_split(X, y)\n", True),
+    ("power_transform() on all data before split",
+     "from sklearn.preprocessing import power_transform\n" + SPLIT +
+     "X = power_transform(X)\na = train_test_split(X, y)\n", True),
+    ("RandomOverSampler on all data before split",
+     "from imblearn.over_sampling import RandomOverSampler\n" + SPLIT +
+     "X_res, y_res = RandomOverSampler(random_state=0).fit_resample(X, y)\n"
+     "X_train, X_test, y_train, y_test = train_test_split(X_res, y_res, random_state=0)\n", True),
+    ("named-step Pipeline fitted on train only",
+     "from sklearn.pipeline import Pipeline\nfrom sklearn.impute import SimpleImputer\n"
+     "from sklearn.preprocessing import StandardScaler\n" + SPLIT +
+     "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+     "pipe = Pipeline([('imp', SimpleImputer()), ('sc', StandardScaler()), ('clf', model)])\n"
+     "pipe.fit(X_train, y_train)\nscore = pipe.score(X_test, y_test)\n", False),
+    ("imputer fitted on train only, applied to test",
+     "from sklearn.impute import SimpleImputer\n" + SPLIT +
+     "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+     "imp = SimpleImputer()\nX_train = imp.fit_transform(X_train)\nX_test = imp.transform(X_test)\n", False),
 ]
 
 

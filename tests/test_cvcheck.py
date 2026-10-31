@@ -40,3 +40,18 @@ def test_gridsearch_fit_on_scaled_x():
 
 def test_raw_x_is_clean():
     assert not k("s = cross_val_score(m, X, y)\n")
+
+def test_fit_then_transform_before_cv_is_high():
+    body = "sc = StandardScaler()\nsc.fit(X)\nXs = sc.transform(X)\ns = cross_val_score(m, Xs, y)\n"
+    assert ("preprocess_outside_cv", "high") in k(body)
+
+
+def test_fit_on_train_then_transform_before_cv_is_low():
+    body = ("a = train_test_split(X, y, random_state=0)\nsc = StandardScaler()\n"
+            "sc.fit(X_train)\nXs = sc.transform(X)\ns = cross_val_score(m, Xs, y)\n")
+    assert ("preprocess_outside_cv", "low") in k(body)
+
+
+def test_unfitted_transform_is_clean():
+    body = "sc = StandardScaler()\nXs = sc.transform(X)\ns = cross_val_score(m, Xs, y)\n"
+    assert not k(body)
