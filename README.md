@@ -130,6 +130,8 @@ repos:
 ```
 Blocks a commit when a notebook or script fits a transformer before the split.
 
+`leaklens init` writes a commented starter `.leaklens.toml` (one key per CLI flag) and prints this snippet. Add `--force` to overwrite an existing file.
+
 ## Trust score badge
 
 leaklens --scan . --badge badge.json

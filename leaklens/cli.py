@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 import pandas as pd
 from . import __version__, llm
@@ -12,7 +13,6 @@ from .leakage import group_overlap, group_risk, scan, score, split_overlap, temp
 from .fixes import advice
 from .readers import read_dataset
 from .scanner import scan_path
-
 
 _SEVERITY_COLORS = {
     "high": "\033[31m",
@@ -34,36 +34,106 @@ def _read_dataset(path):
     return read_dataset(path)
 
 
+STARTER_CONFIG = """# LeakLens settings for this project.
+# Every key mirrors a command-line flag (dashes become underscores).
+# LeakLens does not read this file yet, so everything is commented out:
+# uncomment what you use and pass the same values as flags until it does.
+
+# target = "label"          # --target: label column of the training data
+# test = "test.csv"         # --test: held-out split to compare against
+# time = "date"             # --time: timestamp column for the temporal check
+# group = "patient_id"      # --group: entity column for group leakage
+# threshold = 0.95          # --threshold: single-feature score that counts as leakage
+# scan = ["notebooks"]      # --scan: files or folders of .py/.ipynb to scan
+# explain = false           # --explain: print a suggested fix under each finding
+# fail_under = 80           # --fail-under: exit 1 when the trust score is below this
+# sarif = "leaklens.sarif"  # --sarif: write SARIF 2.1.0 for GitHub code scanning
+# html = "report.html"      # --html: write a single-file HTML report
+# badge = "badge.json"      # --badge: write a shields.io endpoint JSON
+"""
+
+PRE_COMMIT_SNIPPET = """repos:
+  - repo: https://github.com/eyadstein/leaklens
+    rev: main
+    hooks:
+      - id: leaklens
+"""
+
+
+def init(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens init",
+        description="Write a starter .leaklens.toml",
+    )
+    p.add_argument("dir", nargs="?", default=".", help="folder to write .leaklens.toml into")
+    p.add_argument("--force", action="store_true", help="overwrite an existing .leaklens.toml")
+    a = p.parse_args(argv)
+    path = Path(a.dir) / ".leaklens.toml"
+    if path.exists() and not a.force:
+        p.error(f"{path} already exists (use --force to overwrite)")
+    path.write_text(STARTER_CONFIG, encoding="utf-8")
+    print(f"Wrote {path}")
+    print("\nAdd this to .pre-commit-config.yaml to scan notebooks and scripts on every commit:\n")
+    print(PRE_COMMIT_SNIPPET, end="")
+    return 0
+
+
 def images(argv) -> int:
-    p = argparse.ArgumentParser(prog="leaklens images", description="Find near-duplicate images across train and test folders")
+    p = argparse.ArgumentParser(
+        prog="leaklens images",
+        description="Find near-duplicate images across train and test folders",
+    )
     p.add_argument("train_dir")
     p.add_argument("test_dir")
-    p.add_argument("--max-distance", type=int, default=6, help="largest dHash Hamming distance (0-64) that counts as a duplicate")
-    p.add_argument("--samples", type=int, default=5, help="number of example pairs to print")
+    p.add_argument("--max-distance", type=int, default=6,
+                   help="largest dHash Hamming distance (0-64) that counts as a duplicate")
+    p.add_argument("--samples", type=int, default=5,
+                   help="number of example pairs to print")
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
+
+    if not 0 <= a.max_distance <= 64:
+        p.error("--max-distance must be between 0 and 64")
+    if a.samples < 0:
+        p.error("--samples must be non-negative")
+
     from .images import image_overlap
+
     try:
         fs, pairs, stats = image_overlap(a.train_dir, a.test_dir, a.max_distance)
     except ImportError as e:
         p.error(str(e))
-    rep = {"trust_score": score(fs), **stats, "findings": [f.to_dict() for f in fs], "pairs": pairs}
+
+    rep = {
+        "trust_score": score(fs),
+        **stats,
+        "findings": [f.to_dict() for f in fs],
+        "pairs": pairs,
+    }
+
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
         print(f"LeakLens trust score: {rep['trust_score']}/100")
-        print(f"{stats['train_images']} train images, {stats['test_images']} test images" + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else ""))
+        print(
+            f"{stats['train_images']} train images, "
+            f"{stats['test_images']} test images"
+            + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else "")
+        )
         for f in fs:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
-        for m in pairs[: a.samples]:
+        for m in pairs[:a.samples]:
             print(f"    {m['test']} ~ {m['train']} (distance {m['distance']})")
         if not fs:
             print("No leakage found.")
+
     return 1 if fs else 0
 
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "init":
+        return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
     p = argparse.ArgumentParser(prog="leaklens", description="Audit datasets and ML code for leakage")

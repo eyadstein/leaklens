@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Excel, JSON and Feather input alongside CSV and Parquet, via the new `excel` and `feather` extras for the optional formats
+- `leaklens init` writes a commented starter `.leaklens.toml` and prints the pre-commit snippet
 - `leaklens images TRAIN_DIR TEST_DIR` finds near-duplicate images across splits with a 64-bit dHash (`--max-distance`, default 6); needs the new `images` extra (Pillow)
 
 ## 0.12.0
