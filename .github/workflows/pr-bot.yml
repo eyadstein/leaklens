@@ -1,0 +1,115 @@
+name: PR Bot
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+  checks: read
+concurrency:
+  group: pr-bot
+  cancel-in-progress: false
+jobs:
+  judge:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const DAILY_LIMIT = 5;
+            const tick = String.fromCharCode(96);
+            const {owner, repo} = context.repo;
+            const run = context.payload.workflow_run;
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open',
+              head: run.head_repository.owner.login + ':' + run.head_branch });
+            const pr = prs.find(p => p.head.sha === run.head_sha);
+            if (!pr) { core.info('No open PR for this run.'); return; }
+            const author = pr.user.login;
+            const n = pr.number;
+            if (author === owner || pr.draft || pr.labels.some(l => l.name === 'bot-ignore')) return;
+
+            const say = body => github.rest.issues.createComment({owner, repo, issue_number: n, body});
+            const label = async (name, color) => {
+              try { await github.rest.issues.createLabel({owner, repo, name, color}); } catch (e) {}
+              await github.rest.issues.addLabels({owner, repo, issue_number: n, labels: [name]});
+            };
+
+            // attempt number = completed CI runs by this author today (UTC), up to this one
+            const today = new Date().toISOString().slice(0, 10);
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner, repo, workflow_id: run.workflow_id, event: 'pull_request',
+              status: 'completed', created: '>=' + today, per_page: 100 });
+            const mine = runs
+              .filter(r => r.actor && r.actor.login === author && ['success', 'failure'].includes(r.conclusion))
+              .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            const attempt = mine.findIndex(r => r.id === run.id) + 1;
+            if (attempt === 0) { core.info('Run not counted (cancelled?).'); return; }
+            const ok = run.conclusion === 'success';
+
+            if (attempt > DAILY_LIMIT) {
+              if (ok) {
+                await label('needs-owner-review', '0E8A16');
+                await say('@' + owner + ' @' + author + ' passed CI on attempt ' + attempt + ' today (over the bot limit of ' + DAILY_LIMIT + '). Owner review needed before merging.');
+              } else if (!pr.labels.some(l => l.name === 'bot-limit-reached')) {
+                await label('bot-limit-reached', 'D93F0B');
+                await say('Thanks @' + author + '! You used all ' + DAILY_LIMIT + ' automatic CI attempts for today (UTC). Please check the failures locally (run the tests and linters from CONTRIBUTING.md) and push again after midnight UTC. If it passes after the limit, the maintainer will review it by hand.');
+              }
+              return;
+            }
+
+            if (!ok) {
+              const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                owner, repo, run_id: run.id, filter: 'latest', per_page: 100 });
+              const lines = [];
+              for (const j of jobs.filter(j => j.conclusion === 'failure')) {
+                const steps = (j.steps || []).filter(s => s.conclusion === 'failure').map(s => s.name);
+                lines.push('- **' + j.name + '** failed at step: ' + (steps.join(', ') || 'unknown') + ' ([full log](' + j.html_url + '))');
+                try {
+                  const ann = await github.rest.checks.listAnnotations({owner, repo, check_run_id: j.id, per_page: 10});
+                  for (const a of ann.data) lines.push('  - ' + tick + a.path + ':' + a.start_line + tick + ' ' + a.message.split('\n')[0]);
+                } catch (e) {}
+              }
+              await say('Thanks @' + author + '! CI failed on this push (attempt ' + attempt + ' of ' + DAILY_LIMIT + ' today).\n\n' +
+                (lines.join('\n') || 'See the [run](' + run.html_url + ').') +
+                '\n\nRun the same checks locally, fix, and push again.' +
+                (attempt === DAILY_LIMIT ? '\n\n**This was your last automatic attempt for today.**' : ''));
+              return;
+            }
+
+            // CI passed: make sure it is mergeable
+            let full;
+            for (let i = 0; i < 6; i++) {
+              full = (await github.rest.pulls.get({owner, repo, pull_number: n})).data;
+              if (full.mergeable !== null) break;
+              await sleep(5000);
+            }
+            if (full.mergeable === false) {
+              await label('conflict', 'B60205');
+              await say('Thanks @' + author + '! CI passes, but this PR now conflicts with main. Please rebase:\n' + tick + tick + tick + '\ngit remote add upstream https://github.com/' + owner + '/' + repo + '.git\ngit fetch upstream\ngit checkout ' + pr.head.ref + '\ngit rebase upstream/main\n# fix the conflicted files, git add them, git rebase --continue\ngit push --force-with-lease\n' + tick + tick + tick);
+              return;
+            }
+
+            // sensitive files need a human
+            const files = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: n, per_page: 100});
+            const sensitive = files.map(f => f.filename).filter(f =>
+              /^\.github\/|^pyproject\.toml$|^setup\.(py|cfg)$|requirements.*\.txt$|^Dockerfile|^LICENSE/.test(f));
+            if (sensitive.length) {
+              await label('needs-owner-review', '0E8A16');
+              await say('@' + owner + ' CI passes, but this PR touches sensitive files (' + sensitive.join(', ') + '), so it needs your review before merging.');
+              return;
+            }
+
+            try {
+              await github.rest.pulls.merge({owner, repo, pull_number: n, merge_method: 'squash', sha: run.head_sha});
+              await say('CI passed on attempt ' + attempt + ' and this was merged automatically. Thanks @' + author + '!');
+            } catch (e) {
+              await label('needs-owner-review', '0E8A16');
+              await say('@' + owner + ' CI passes but the automatic merge failed (' + e.message + '). Needs your attention.');
+            }
