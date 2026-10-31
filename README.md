@@ -1,5 +1,7 @@
 # LeakLens
 
+[العربية](docs/README.ar.md)
+
 [![CI](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml/badge.svg)](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml)
 [![Leakage trust](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eyadstein/leaklens/main/badge.json)](#trust-score-badge)
 [![PyPI](https://img.shields.io/pypi/v/leaklens-ml)](https://pypi.org/project/leaklens-ml/) [![Python](https://img.shields.io/pypi/pyversions/leaklens-ml)](https://pypi.org/project/leaklens-ml/)
@@ -51,6 +53,27 @@ python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
 
+New to data leakage? Start with the [walkthrough notebook](examples/leak_walkthrough.ipynb): three planted leaks, an inflated score, and how LeakLens finds and fixes them.
+
+## Optional LLM explanations
+
+LLM explanations are disabled unless you pass `--llm`. LeakLens sends the selected findings' severity, kind, file name and line, and diagnostic detail; details can include short code expressions from scanned files. It does not send complete source files, notebooks, or dataset rows. The default provider is local Ollama. If you choose `--llm-provider openai-compatible` or configure a remote base URL, these finding details are sent to that host. Provider URLs must use HTTP or HTTPS, redirects are refused, and an API key is not sent over plain HTTP except to `localhost` or `127.0.0.1`. Explanations are limited to the 10 highest-severity findings by default; use `--llm-max-findings N` to change that limit.
+
+```sh
+ollama pull qwen2.5:7b
+leaklens --scan notebooks/ --llm
+```
+
+To use an OpenAI-compatible API, configure its endpoint and key. The request leaves your machine:
+
+```sh
+export LEAKLENS_LLM_BASE_URL=https://api.example.com/v1
+export LEAKLENS_LLM_API_KEY=...
+export LEAKLENS_LLM_MODEL=your-model
+leaklens --scan notebooks/ --llm --llm-provider openai-compatible
+```
+
+You can also pass `--llm-base-url` and `--llm-model` on the command line. The API key is read only from `LEAKLENS_LLM_API_KEY`.
 
 ## Model arena
 Auto-drops leaking and ID columns, then trains linear, gradient-boosted tree and neural-net models inside leak-safe pipelines (imputation, scaling and encoding are fitted on training data only). Runs are tracked in local MLflow (SQLite) and the winner is saved to `models/best.joblib`. Add `--time COL` for a temporal split.
@@ -126,6 +149,20 @@ flowchart LR
   F --> G[FastAPI /predict]
   D --> H[CLI / Streamlit / GitHub Action]
 ```
+## How the Trust Score Is Calculated
+
+LeakLens starts with a trust score of 100 and deducts points for each finding based on its severity.
+
+| Severity | Penalty |
+|---|---:|
+| High | 35 points |
+| Medium | 15 points |
+| Low | 5 points |
+
+The final score is calculated by subtracting the total penalties from 100. The score cannot fall below 0.
+
+**Example:** If a dataset has one high-severity finding, one medium-severity finding, and one low-severity finding, the total penalty is 35 + 15 + 5 = 55. The final trust score is 100 − 55 = **45/100**.
+
 
 ## Roadmap
 Full plan with phases and exit criteria: [ROADMAP.md](ROADMAP.md). Open tasks are in [Issues](https://github.com/eyadstein/leaklens/issues).
@@ -148,6 +185,6 @@ The code scanner is checked against a labeled regression benchmark on every CI r
 See [CONTRIBUTING.md](CONTRIBUTING.md). Starter tasks are labeled good first issue.
 
 ## Contributors
-Thanks to @jay23606 (Parquet input), @slopggobblercobbler81 (`--fail-under`), @tyza66 (Excel, JSON and Feather input), @rahul05ranjan (`random_state` reproducibility check), @have-you-tried-restarting (severity summary) and @rahul-jain-dev (`--version`).
+Thanks to @jay23606 (Parquet input), @slopggobblercobbler81 (`--fail-under`), @tyza66 (Excel, JSON and Feather input), @rahul05ranjan (`random_state` reproducibility check), @have-you-tried-restarting (severity summary), @Rashmi-R444 (trust score docs), @Thecoolss (benchmark snippets), @ElDShell (Arabic README), @Aaqibhafeezkhan (colored severity labels and `CITATION.cff`), @Cami0111 (leak walkthrough notebook) and @rahul-jain-dev (`--version`), @Vamsi-2581 (Add opt-in LLM explanations for findings).
 
 MIT licensed.

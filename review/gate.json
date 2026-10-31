@@ -1,0 +1,92 @@
+[
+  {
+    "pr": "114",
+    "author": "YuuGR1337",
+    "cat": "SAFE (docs/tests only)",
+    "files": 1,
+    "sus": 0,
+    "unsafe": "",
+    "title": "README: explain how the trust score is computed"
+  },
+  {
+    "pr": "113",
+    "author": "Rashmi-R444",
+    "cat": "SAFE (docs/tests only)",
+    "files": 1,
+    "sus": 0,
+    "unsafe": "",
+    "title": "docs: explain trust score calculation"
+  },
+  {
+    "pr": "112",
+    "author": "ElDShell",
+    "cat": "NEEDS REVIEW (touches code)",
+    "files": 2,
+    "sus": 8,
+    "unsafe": "",
+    "title": "docs: add Arabic README translation"
+  },
+  {
+    "pr": "111",
+    "author": "Aaqibhafeezkhan",
+    "cat": "NEEDS REVIEW (touches code)",
+    "files": 2,
+    "sus": 2,
+    "unsafe": "leaklens/cli.py",
+    "title": "feat(cli): color severity labels in terminal output"
+  },
+  {
+    "pr": "110",
+    "author": "Thecoolss",
+    "cat": "SAFE (docs/tests only)",
+    "files": 2,
+    "sus": 0,
+    "unsafe": "",
+    "title": "bench: add 5 labeled snippets (#14)"
+  },
+  {
+    "pr": "109",
+    "author": "arxigen",
+    "cat": "NEEDS REVIEW (touches code)",
+    "files": 4,
+    "sus": 1,
+    "unsafe": "leaklens/cli.py",
+    "title": "Add leaklens init: starter config and pre-commit snippet"
+  },
+  {
+    "pr": "108",
+    "author": "arxigen",
+    "cat": "NEEDS REVIEW (touches code)",
+    "files": 6,
+    "sus": 0,
+    "unsafe": "leaklens/cli.py, leaklens/images.py, pyproject.toml",
+    "title": "Add leaklens images: near-duplicate image detection across splits"
+  },
+  {
+    "pr": "59",
+    "author": "Aaqibhafeezkhan",
+    "cat": "NEEDS REVIEW (touches code)",
+    "files": 1,
+    "sus": 2,
+    "unsafe": "",
+    "title": "Add CITATION.cff for GitHub citation metadata"
+  },
+  {
+    "pr": "30",
+    "author": "Vamsi-2581",
+    "cat": "RE-REVIEW (updated after my review)",
+    "files": 4,
+    "sus": 25,
+    "unsafe": "leaklens/cli.py, leaklens/llm.py",
+    "title": "Add opt-in LLM explanations for findings"
+  },
+  {
+    "pr": "29",
+    "author": "rahul05ranjan",
+    "cat": "RE-REVIEW (updated after my review)",
+    "files": 4,
+    "sus": 0,
+    "unsafe": "leaklens/scanner.py",
+    "title": "feat(scanner): flag target-encoding and group statistics before the split"
+  }
+]
