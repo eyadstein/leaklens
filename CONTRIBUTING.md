@@ -6,6 +6,14 @@
 4. `pytest -q` must pass, and `leaklens --scan leaklens` must report no leaks.
 5. Open a PR with a short description of the leak it detects or the bug it fixes.
 
+### Running tests with coverage
+
+To run the tests and display a coverage report locally:
+
+`python -m pytest --cov=leaklens --cov-report=term-missing -q`
+
+This shows the overall code coverage percentage and the lines not covered by tests.
+
 New detectors belong in `leaklens/leakage.py` (data) or `leaklens/scanner.py` (code). Each one returns `Finding` objects with a severity of `high`, `medium` or `low`.
 
 Look for issues labeled **good first issue**.
