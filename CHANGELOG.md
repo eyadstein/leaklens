@@ -2,6 +2,7 @@
 
 ## Unreleased
 - Excel, JSON and Feather input alongside CSV and Parquet, via the new `excel` and `feather` extras for the optional formats
+- Store prompt templates as files and support user overrides via CLI, environment variable, or .leaklens/prompt.txt (#256)
 
 ## 0.12.0
 - Add opt-in LLM explanations for findings (#30, thanks @Vamsi-2581)

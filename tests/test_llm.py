@@ -160,3 +160,101 @@ def test_openai_provider_refuses_redirects_without_following_them(monkeypatch):
         provider.explain(finding)
 
     assert redirects == [None]
+
+
+def test_default_prompt_template_loads_from_file():
+    template = llm.load_prompt_template()
+    assert "{severity}" in template
+    assert "{kind}" in template
+    assert "{location}" in template
+    assert "{detail}" in template
+
+    finding = Finding("medium", "id_like", "customer_id", "98% unique values")
+    prompt = llm._prompt(finding)
+    assert "Severity: medium" in prompt
+    assert "Finding: id_like" in prompt
+    assert "Column: customer_id" in prompt
+    assert "Details (may include short code expressions): 98% unique values" in prompt
+
+
+def test_prompt_template_override_from_file(tmp_path):
+    custom_template = tmp_path / "my_prompt.txt"
+    custom_template.write_text("CUSTOM: {severity} issue in {kind} at {location} - {detail}", encoding="utf-8")
+
+    loaded = llm.load_prompt_template(str(custom_template))
+    assert loaded.startswith("CUSTOM:")
+
+    finding = Finding("high", "leak_kind", "script.py:10", "data leaked")
+    prompt = llm._prompt(finding, template=loaded)
+    assert prompt == "CUSTOM: high issue in leak_kind at script.py:10 - data leaked"
+
+
+def test_prompt_template_override_via_env_var(tmp_path, monkeypatch):
+    custom_template = tmp_path / "env_prompt.txt"
+    custom_template.write_text("ENV: {kind}", encoding="utf-8")
+
+    monkeypatch.setenv("LEAKLENS_LLM_PROMPT_TEMPLATE", str(custom_template))
+    finding = Finding("low", "minor_leak", "data.py:5", "warning")
+    prompt = llm._prompt(finding)
+    assert prompt == "ENV: minor_leak"
+
+
+def test_prompt_template_override_via_dot_leaklens_dir(tmp_path, monkeypatch):
+    dot_dir = tmp_path / ".leaklens"
+    dot_dir.mkdir()
+    dot_prompt = dot_dir / "prompt.txt"
+    dot_prompt.write_text("PROJECT: {severity} {kind}", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LEAKLENS_LLM_PROMPT_TEMPLATE", raising=False)
+    finding = Finding("high", "split_overlap", "split.py:12", "overlap")
+    prompt = llm._prompt(finding)
+    assert prompt == "PROJECT: high split_overlap"
+
+
+def test_prompt_template_file_not_found():
+    with pytest.raises(llm.LLMError, match="prompt template file not found"):
+        llm.load_prompt_template("nonexistent_template_path_12345.txt")
+
+
+def test_prompt_formatting_preserves_unknown_curly_braces():
+    finding = Finding("high", "preprocess_before_split", "train.py:20", "leaked scaler")
+    template = "Respond in JSON like {\"fix\": \"use pipeline\"} for {kind}."
+    prompt = llm._prompt(finding, template=template)
+    assert prompt == "Respond in JSON like {\"fix\": \"use pipeline\"} for preprocess_before_split."
+
+
+def test_cli_passes_custom_prompt_template(tmp_path, monkeypatch, capsys):
+    template_file = tmp_path / "custom_cli.txt"
+    template_file.write_text("CUSTOM_CLI: {kind}", encoding="utf-8")
+
+    finding = Finding("high", "leak", "file.py:1", "detail")
+    monkeypatch.setattr(cli, "scan_path", lambda _path: [finding])
+
+    created_providers = []
+
+    class CapturingProvider:
+        def __init__(self, prompt_template=None):
+            self.prompt_template = prompt_template
+            created_providers.append(self)
+
+        def explain(self, f):
+            return f"explained with template: {self.prompt_template[:10]}"
+
+    def fake_create_provider(name, base_url=None, model=None, api_key=None, prompt_template=None):
+        tmpl = llm.load_prompt_template(prompt_template)
+        return CapturingProvider(prompt_template=tmpl)
+
+    monkeypatch.setattr(llm, "create_provider", fake_create_provider)
+
+    assert cli.main([
+        "--scan", "sample.py",
+        "--llm",
+        "--llm-prompt-template", str(template_file),
+        "--json",
+    ]) == 1
+
+    assert len(created_providers) == 1
+    assert created_providers[0].prompt_template == "CUSTOM_CLI: {kind}"
+    report = json.loads(capsys.readouterr().out)
+    assert "explained with template" in report["findings"][0]["llm_explanation"]

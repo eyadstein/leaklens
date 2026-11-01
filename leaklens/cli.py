@@ -54,6 +54,7 @@ def main(argv=None) -> int:
     p.add_argument("--llm-base-url", help="LLM provider base URL")
     p.add_argument("--llm-model", help="LLM model name")
     p.add_argument("--llm-max-findings", type=int, default=10, help="maximum findings to explain (default: 10)")
+    p.add_argument("--llm-prompt-template", help="path to custom prompt template file")
     p.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     p.add_argument("--html", help="write a shareable single-file HTML report")
     p.add_argument("--badge", help="write a shields.io endpoint JSON with the trust score")
@@ -100,7 +101,12 @@ def main(argv=None) -> int:
     explanations = None
     if a.llm:
         try:
-            provider = llm.create_provider(a.llm_provider, a.llm_base_url, a.llm_model)
+            provider = llm.create_provider(
+                a.llm_provider,
+                a.llm_base_url,
+                a.llm_model,
+                prompt_template=a.llm_prompt_template,
+            )
             explanations = llm.explain_findings(fs, provider, a.llm_max_findings)
         except llm.LLMError as exc:
             p.error(str(exc))
