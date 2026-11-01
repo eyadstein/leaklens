@@ -273,7 +273,7 @@ CASES += [
     ),
 ]
 
-# Low-severity reproducibility detector (issue #13): flagged when random_state is missing.
+# Low-severity cases (reproducibility and pre-split category detection):
 LOW_CASES: list[tuple[str, str, bool]] = [
     (
         "train_test_split without random_state",
@@ -301,9 +301,18 @@ LOW_CASES: list[tuple[str, str, bool]] = [
         False,
     ),
 ]
-
-
 LOW_CASES += [
+    ("train_test_split shuffle=False is deterministic", SPLIT + "a = train_test_split(X, y, shuffle=False)\n", False),
+    ("ShuffleSplit without random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5)\n", True),
+    ("ShuffleSplit with random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5, random_state=1)\n", False),
+    ("get_dummies before split","import pandas as pd\n" + SPLIT +
+     "X = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", True),
+    ("get_dummies after split",
+     "import pandas as pd\n" + SPLIT +
+     "a = train_test_split(X, y, random_state=0)\nX_train = pd.get_dummies(X_train)\n", False),
+    ("unrelated get_dummies",
+     "import pandas as pd\n" + SPLIT +
+     "summary = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", False),
     (
         "train_test_split shuffle=False is deterministic",
         SPLIT + "a = train_test_split(X, y, shuffle=False)\n",
@@ -388,10 +397,14 @@ def evaluate() -> dict:
     ]
 
     low_tp = low_fp = low_tn = low_fn = 0
+    low_kinds = {
+        "get_dummies before split": "get_dummies_before_split",
+        "get_dummies after split": "get_dummies_before_split",
+        "unrelated get_dummies": "get_dummies_before_split",
+    }
     for name, code, leaky in LOW_CASES:
-        flagged = any(
-            finding.kind == "no_random_state" for finding in scan_source(code, name)
-        )
+        expected_kind = low_kinds.get(name, "no_random_state")
+        flagged = any(f.kind == expected_kind for f in scan_source(code, name))
         if leaky and flagged:
             low_tp += 1
         elif leaky:

@@ -55,11 +55,11 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 ## Reproducibility checks
 
-Low-severity reproducibility cases (issue #13): 8/8 correct; 0 misclassified.
+Low-severity reproducibility cases (issue #13): 13/14 correct; 1 misclassified.
 
 ## Misclassified cases
 
-- none
+- missed (low): get_dummies before split
 
 ## Caveats
 

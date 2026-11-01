@@ -145,6 +145,9 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     except SyntaxError as e:
         return [Finding("low", "parse_error", label, str(e))]
     ctor, calls, funcs, assigns = {}, [], set(), []
+
+    pandas_aliases, get_dummies_aliases = set(), set()
+
     for n in ast.walk(tree):
         if isinstance(n, ast.Assign):
             assigns.append(n)
@@ -160,6 +163,15 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
+        elif isinstance(n, ast.Import):
+            for al in n.names:
+                if al.name == "pandas":
+                    pandas_aliases.add(al.asname or "pandas")
+        elif isinstance(n, ast.ImportFrom) and n.module == "pandas":
+            for al in n.names:
+                if al.name == "get_dummies":
+                    get_dummies_aliases.add(al.asname or al.name)
+
     assigns.sort(key=lambda n: n.lineno)
 
     def is_split(c):
@@ -340,6 +352,27 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
         nm = _name(c)
+
+        is_get_dummies = (
+    isinstance(f, ast.Name) and f.id in get_dummies_aliases
+) or (
+    isinstance(f, ast.Attribute) and f.attr == "get_dummies"
+    and isinstance(f.value, ast.Name) and f.value.id in pandas_aliases
+)
+
+        if is_get_dummies and first is not None and c.lineno < first:
+            flows_to_split = any(
+        any(isinstance(n, ast.Call) and n is c for n in ast.walk(a.value))
+        and bool(set().union(*(_tnames(t) for t in a.targets)) & full)
+        for a in assigns if a.lineno == c.lineno
+    )
+            if flows_to_split:
+               out.append(Finding(
+            "low", "get_dummies_before_split", loc(c.lineno),
+            f"pandas.get_dummies() runs before the split at {loc(first)}, "
+            "so held-out categories can shape the encoded columns",
+            ))
+
         # low severity: reproducibility - a random split nobody can rerun
         if (
             nm == "train_test_split"
