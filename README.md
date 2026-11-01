@@ -14,7 +14,7 @@
 ## What it catches
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), ID-like columns, train/test row overlap, temporal leakage, entity/group overlap (`--group COL`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), ID-like columns, train/test row overlap, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
 | Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`) |
 
 Every audit returns a 0-100 trust score. The CLI exits with code 1 on a high-severity leak, so it gates CI.
@@ -49,6 +49,7 @@ leaklens train.parquet --target label --fail-under 80   # Parquet input (pip ins
 leaklens train.json --target label   # JSON input, no extra needed
 leaklens train.xlsx --target label   # Excel input (pip install leaklens-ml[excel])
 leaklens train.feather --target label   # Feather input (pip install leaklens-ml[feather])
+leaklens images data/train data/test   # near-duplicate images across splits (pip install leaklens-ml[images])
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -114,6 +115,7 @@ API on http://localhost:8000/docs, UI on http://localhost:8501.
 leaklens demo.csv --target is_fraud --arena --html report.html
 
 A single self-contained file with the trust score, findings and arena table. Easy to attach to a PR or share with your team.
+The findings section includes a color-coded severity legend explaining high, medium and low leakage risks, even when no findings are present.
 
 ## GitHub code scanning
 ```yaml
@@ -138,6 +140,8 @@ repos:
       - id: leaklens
 ```
 Blocks a commit when a notebook or script fits a transformer before the split.
+
+`leaklens init` writes a commented starter `.leaklens.toml` (one key per CLI flag) and prints this snippet. Add `--force` to overwrite an existing file.
 
 ## Trust score badge
 

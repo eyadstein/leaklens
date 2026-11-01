@@ -56,8 +56,10 @@ def test_resample_before_split():
 
 
 def test_notebook(tmp_path):
-    cells = [{"cell_type": "code", "source": ["%matplotlib inline\n", "x = 1"]},
-             {"cell_type": "code", "source": PRE.splitlines(keepends=True)}]
+    cells = [
+        {"cell_type": "code", "source": ["%matplotlib inline\n", "x = 1"]},
+        {"cell_type": "code", "source": PRE.splitlines(keepends=True)},
+    ]
     f = tmp_path / "n.ipynb"
     f.write_text(json.dumps({"cells": cells}), encoding="utf-8")
     fs = scan_file(f)
@@ -71,6 +73,7 @@ def test_cli_scan(tmp_path):
     g = tmp_path / "good.py"
     g.write_text(GOOD, encoding="utf-8")
     assert main(["--scan", str(g)]) == 0
+
 
 TARGET_ENCODE = """
 import pandas as pd
@@ -123,7 +126,9 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
 
 
 def test_target_encode_before_split_is_high():
-    fs = [f for f in scan_source(TARGET_ENCODE) if f.kind == "target_encode_before_split"]
+    fs = [
+        f for f in scan_source(TARGET_ENCODE) if f.kind == "target_encode_before_split"
+    ]
     assert fs and fs[0].severity == "high"
     assert "before the split" in fs[0].detail
 
@@ -143,8 +148,11 @@ def test_group_stat_after_split_is_clean():
 
 
 def test_group_stat_on_x_column_stays_medium():
-    fs = [f for f in scan_source(GROUP_STAT_ON_X_COLUMN)
-          if f.kind in ("group_stat_before_split", "target_encode_before_split")]
+    fs = [
+        f
+        for f in scan_source(GROUP_STAT_ON_X_COLUMN)
+        if f.kind in ("group_stat_before_split", "target_encode_before_split")
+    ]
     assert fs and fs[0].kind == "group_stat_before_split" and fs[0].severity == "medium"
 
 
@@ -158,6 +166,7 @@ def test_agg_summary_is_not_flagged():
 
 def test_fix_hints_exist_for_new_kinds():
     from leaklens.fixes import advice
+
     assert advice("target_encode_before_split")
     assert advice("group_stat_before_split")
 
@@ -187,19 +196,144 @@ def test_manual_scale_with_train_statistics_is_clean():
 
 def test_manual_scale_fix_hint_exists():
     from leaklens.fixes import advice
+
     assert advice("manual_scale_before_split")
 
 
+def test_future_target_shift_before_split_is_high():
+    src = """
+from sklearn.model_selection import train_test_split
+df["future_target"] = df["target"].shift(-1)
+X_train, X_test, y_train, y_test = train_test_split(
+    df.drop(columns=["target"]), df["target"], random_state=42
+)
+"""
+    fs = [f for f in scan_source(src) if f.kind == "future_target_feature_before_split"]
+    assert fs and fs[0].severity == "high"
+
+
+def test_future_target_shift_alias_is_detected():
+    src = """
+from sklearn.model_selection import train_test_split
+future = target.copy()
+next_target = future.shift(-2)
+X_train, X_test, y_train, y_test = train_test_split(X, target, random_state=42)
+"""
+    assert "future_target_feature_before_split" in kinds(src)
+
+
+def test_unrelated_dataframe_column_shift_is_not_flagged():
+    src = """
+from sklearn.model_selection import train_test_split
+future_feature = df["feature"].shift(-1)
+X_train, X_test, y_train, y_test = train_test_split(
+    df.drop(columns=["target"]), df["target"], random_state=42
+)
+"""
+    assert "future_target_feature_before_split" not in kinds(src)
+
+
+def test_negative_keyword_shift_of_target_is_high():
+    src = """
+from sklearn.model_selection import train_test_split
+future = target.shift(periods=-1)
+X_train, X_test, y_train, y_test = train_test_split(X, target, random_state=42)
+"""
+    assert "future_target_feature_before_split" in kinds(src)
+
+
+def test_positive_target_shift_is_a_valid_lag():
+    src = """
+from sklearn.model_selection import train_test_split
+lag = target.shift(1)
+X_train, X_test, y_train, y_test = train_test_split(X, target, random_state=42)
+"""
+    assert "future_target_feature_before_split" not in kinds(src)
+
+
+def test_centered_target_rolling_before_split_is_high():
+    src = """
+from sklearn.model_selection import train_test_split
+smooth = target.rolling(5, center=True).mean()
+X_train, X_test, y_train, y_test = train_test_split(X, target, random_state=42)
+"""
+    assert "future_target_feature_before_split" in kinds(src)
+
+
+def test_trailing_target_rolling_is_not_future_looking():
+    src = """
+from sklearn.model_selection import train_test_split
+smooth = target.rolling(5).mean()
+X_train, X_test, y_train, y_test = train_test_split(X, target, random_state=42)
+"""
+    assert "future_target_feature_before_split" not in kinds(src)
+
+
+def test_get_dummies_on_full_data_before_split_is_low():
+    src = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+encoded = pd.get_dummies(df)
+X_train, X_test, y_train, y_test = train_test_split(encoded, y, random_state=42)
+"""
+    fs = [f for f in scan_source(src) if f.kind == "get_dummies_before_split"]
+    assert fs and fs[0].severity == "low"
+
+
+def test_get_dummies_directly_inside_split_is_low():
+    src = """
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(
+    pd.get_dummies(X), y, random_state=42
+)
+"""
+    fs = [f for f in scan_source(src) if f.kind == "get_dummies_before_split"]
+    assert fs and fs[0].severity == "low"
+
+
+def test_get_dummies_after_split_is_clean():
+    src = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+train_encoded = pd.get_dummies(X_train)
+"""
+    assert "get_dummies_before_split" not in kinds(src)
+
+
+def test_new_leakage_fix_hints_exist():
+    from leaklens.fixes import advice
+
+    assert advice("future_target_feature_before_split")
+    assert advice("get_dummies_before_split")
+
+
 def test_notebook_one_bad_cell_does_not_hide_the_rest(tmp_path):
-    cells = [{"cell_type": "code",
-              "source": ["from sklearn.preprocessing import StandardScaler\n",
-                         "sc = StandardScaler()\n", "X = sc.fit_transform(X)\n"]},
-             {"cell_type": "code",
-              "source": ["%%writefile output.txt\n",
-                         "not python: 1 2 3 !!! ( )))\n", "unmatched '\n"]},
-             {"cell_type": "code",
-              "source": ["from sklearn.model_selection import train_test_split\n",
-                         "a = train_test_split(X, y, random_state=0)\n"]}]
+    cells = [
+        {
+            "cell_type": "code",
+            "source": [
+                "from sklearn.preprocessing import StandardScaler\n",
+                "sc = StandardScaler()\n",
+                "X = sc.fit_transform(X)\n",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "%%writefile output.txt\n",
+                "not python: 1 2 3 !!! ( )))\n",
+                "unmatched '\n",
+            ],
+        },
+        {
+            "cell_type": "code",
+            "source": [
+                "from sklearn.model_selection import train_test_split\n",
+                "a = train_test_split(X, y, random_state=0)\n",
+            ],
+        },
+    ]
     f = tmp_path / "badcell.ipynb"
     f.write_text(json.dumps({"cells": cells}), encoding="utf-8")
     fs = scan_file(f)
@@ -207,3 +341,50 @@ def test_notebook_one_bad_cell_does_not_hide_the_rest(tmp_path):
     assert "preprocess_before_split" in kinds_, fs
     assert "parse_error" in kinds_ and any("cell 1 skipped" in x.detail for x in fs)
     assert any(x.kind == "preprocess_before_split" and "cell 0" in x.column for x in fs)
+
+GET_DUMMIES_BEFORE_SPLIT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X = pd.get_dummies(df)
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+"""
+
+GET_DUMMIES_AFTER_SPLIT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+X_train = pd.get_dummies(X_train)
+X_test = pd.get_dummies(X_test)
+"""
+
+def test_get_dummies_before_split_is_low_severity():
+    findings = [
+        f for f in scan_source(GET_DUMMIES_BEFORE_SPLIT)
+        if f.kind == "get_dummies_before_split"
+    ]
+    assert findings
+    assert findings[0].severity == "low"
+
+def test_get_dummies_after_split_is_clean():
+    findings = scan_source(GET_DUMMIES_AFTER_SPLIT)
+    assert not any(f.kind == "get_dummies_before_split" for f in findings)
+
+def test_unrelated_get_dummies_is_clean():
+    src = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+summary = pd.get_dummies(df)
+a = train_test_split(X, y)
+"""
+    findings = scan_source(src)
+    assert not any(f.kind == "get_dummies_before_split" for f in findings)
+
+def test_get_dummies_import_alias_before_split():
+    src = """
+from pandas import get_dummies as dummies
+from sklearn.model_selection import train_test_split
+X = dummies(df)
+a = train_test_split(X, y)
+"""
+    findings = scan_source(src)
+    assert any(f.kind == "get_dummies_before_split" for f in findings)

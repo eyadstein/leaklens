@@ -18,8 +18,8 @@ FIXES = {
     "manual_scale_before_split": "Compute the statistics (mean, std, min, max, ...) on the training split only and apply them to the test split, or use a scaler inside a Pipeline so held-out rows never help set the scale.",
     "fillna_before_split": "Impute using training data only: split first, then compute the mean/median on the training split and apply it to both splits, or use SimpleImputer inside a Pipeline.",
     "group_stat_before_split": "Compute group statistics on the training split only, or wrap the encoding in a Pipeline and evaluate with cross-validation.",
+    "get_dummies_before_split": "Split first, then fit a OneHotEncoder(handle_unknown='ignore') on the training data inside a sklearn Pipeline so held-out categories do not shape the encoding.",
+    "future_target_feature_before_split": "Do not build features from future target values. Use only information available at prediction time; for time series, construct lag features from past observations and split chronologically.",
 }
-
-
 def advice(kind: str) -> str:
     return FIXES.get(kind, "")

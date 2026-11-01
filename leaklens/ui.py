@@ -5,7 +5,10 @@ import pandas as pd
 import streamlit as st
 
 from leaklens.audit import audit
+from leaklens.fixes import advice
+from leaklens.intelligence import analyze_dataset_impact
 from leaklens.leakage import scan, score, split_overlap, temporal_overlap
+from leaklens.report import render
 from leaklens.scanner import scan_file, scan_source
 
 st.set_page_config(page_title="LeakLens", layout="wide")
@@ -14,14 +17,35 @@ st.caption("Catch data leakage before it fools you.")
 t1, t2, t3 = st.tabs(["Dataset audit", "Code scanner", "Model arena"])
 
 
-def show(fs):
+def show(fs, key, audit_data=None, impact_data=None):
+    findings = [f.to_dict() for f in fs]
+    trust_score = score(fs)
+
     c1, c2 = st.columns(2)
-    c1.metric("Trust score", f"{score(fs)}/100")
+    c1.metric("Trust score", f"{trust_score}/100")
     c2.metric("High-severity leaks", sum(f.severity == "high" for f in fs))
     if fs:
-        st.dataframe(pd.DataFrame([f.to_dict() for f in fs]))
+        st.dataframe(pd.DataFrame(findings))
+        for finding in findings:
+            suggestion = advice(finding["kind"])
+            if suggestion:
+                st.markdown(f"**Suggested fix for {finding['kind']} ({finding['column']}):**")
+                st.write(suggestion)
     else:
         st.success("No leakage found.")
+
+    report = {"trust_score": trust_score, "findings": findings}
+    if audit_data is not None:
+        report["audit"] = audit_data
+    if impact_data is not None:
+        report["impact"] = impact_data
+    st.download_button(
+        "Download HTML report",
+        data=render(report),
+        file_name="leaklens-report.html",
+        mime="text/html",
+        key=f"{key}_report",
+    )
 
 
 with t1:
@@ -32,14 +56,31 @@ with t1:
         thr = st.slider("Leak threshold", 0.80, 1.00, 0.95, 0.01)
         te_up = st.file_uploader("Optional test CSV (checks overlap)", type="csv", key="te")
         fs = scan(df, target, thr)
+        impact_data = None
         if te_up:
             te = pd.read_csv(te_up)
             fs += split_overlap(df, te)
             tc = st.selectbox("Time column (optional)", [""] + list(df.columns))
             if tc and tc in te.columns:
                 fs += temporal_overlap(df, te, tc)
-        show(fs)
-        st.json(audit(df, target), expanded=False)
+            impact = analyze_dataset_impact(
+                df, te, time_col=tc if tc and tc in te.columns else None
+            )
+            impact_data = impact.to_dict()
+            st.subheader("Measured dataset impact")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Duplicate test rows", impact.duplicate_test_rows)
+            m2.metric("Duplicate test rows (%)", f"{impact.duplicate_test_pct:.2f}%")
+            m3.metric("Test rows", impact.test_rows)
+            if impact.time_column:
+                st.write({
+                    "Temporal boundary overlap": impact.temporal_overlap,
+                    "Latest training timestamp": impact.train_max_time,
+                    "Earliest test timestamp": impact.test_min_time,
+                })
+        audit_data = audit(df, target)
+        show(fs, key="dataset", audit_data=audit_data, impact_data=impact_data)
+        st.json(audit_data, expanded=False)
 
 with t2:
     code = st.text_area("Paste Python code", height=220)
@@ -48,9 +89,9 @@ with t2:
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / Path(nb.name).name
             p.write_bytes(nb.getvalue())
-            show(scan_file(p))
+            show(scan_file(p), key="code")
     elif code.strip():
-        show(scan_source(code, "pasted"))
+        show(scan_source(code, "pasted"), key="code")
 
 with t3:
     up3 = st.file_uploader("Training CSV", type="csv", key="ar")
