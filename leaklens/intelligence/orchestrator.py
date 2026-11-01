@@ -9,6 +9,7 @@ from leaklens.leakage import Finding
 
 from .confidence import assess_confidence
 from .context import AnalysisContext, build_context
+from .impact import DatasetImpact
 from .schemas import ConfidenceAssessment, Evidence, Recommendation, RootCause
 
 
@@ -21,6 +22,7 @@ class IntelligenceReport:
     root_causes: tuple[RootCause, ...]
     recommendations: tuple[Recommendation, ...]
     finding_count: int
+    impact: DatasetImpact | None = None
     engine: str = "deterministic"
     ai_enriched: bool = False
 
@@ -238,8 +240,10 @@ def _recommendation_for(kind: str, severity: str) -> Recommendation:
     )
 
 
-def analyze_findings(findings: Iterable[Finding]) -> IntelligenceReport:
-    """Produce a deterministic intelligence report without requiring an LLM."""
+def analyze_findings(
+    findings: Iterable[Finding], *, impact: DatasetImpact | None = None
+) -> IntelligenceReport:
+    """Produce deterministic intelligence, optionally including measured dataset impact."""
 
     context: AnalysisContext = build_context(findings)
     confidence = assess_confidence(context.evidence)
@@ -291,4 +295,5 @@ def analyze_findings(findings: Iterable[Finding]) -> IntelligenceReport:
         root_causes=tuple(root_causes),
         recommendations=tuple(recommendations),
         finding_count=context.finding_count,
+        impact=impact,
     )

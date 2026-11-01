@@ -1,4 +1,4 @@
-from leaklens.intelligence import analyze_findings
+from leaklens.intelligence import DatasetImpact, analyze_findings
 from leaklens.leakage import Finding
 
 
@@ -58,6 +58,20 @@ def test_empty_analysis_returns_valid_empty_report():
     assert report.root_causes == ()
     assert report.recommendations == ()
     assert report.confidence.level == "very_low"
+
+
+def test_analysis_can_include_dataset_impact():
+    impact = DatasetImpact(
+        train_rows=100,
+        test_rows=20,
+        duplicate_test_rows=2,
+        duplicate_test_pct=10.0,
+    )
+
+    report = analyze_findings([], impact=impact)
+
+    assert report.impact == impact
+    assert report.to_dict()["impact"]["duplicate_test_rows"] == 2
 
 
 def test_report_serializes_to_dictionary():

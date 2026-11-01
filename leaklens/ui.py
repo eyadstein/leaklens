@@ -6,6 +6,7 @@ import streamlit as st
 
 from leaklens.audit import audit
 from leaklens.fixes import advice
+from leaklens.intelligence import analyze_dataset_impact
 from leaklens.leakage import scan, score, split_overlap, temporal_overlap
 from leaklens.report import render
 from leaklens.scanner import scan_file, scan_source
@@ -16,7 +17,7 @@ st.caption("Catch data leakage before it fools you.")
 t1, t2, t3 = st.tabs(["Dataset audit", "Code scanner", "Model arena"])
 
 
-def show(fs, key, audit_data=None):
+def show(fs, key, audit_data=None, impact_data=None):
     findings = [f.to_dict() for f in fs]
     trust_score = score(fs)
 
@@ -36,6 +37,8 @@ def show(fs, key, audit_data=None):
     report = {"trust_score": trust_score, "findings": findings}
     if audit_data is not None:
         report["audit"] = audit_data
+    if impact_data is not None:
+        report["impact"] = impact_data
     st.download_button(
         "Download HTML report",
         data=render(report),
@@ -53,14 +56,30 @@ with t1:
         thr = st.slider("Leak threshold", 0.80, 1.00, 0.95, 0.01)
         te_up = st.file_uploader("Optional test CSV (checks overlap)", type="csv", key="te")
         fs = scan(df, target, thr)
+        impact_data = None
         if te_up:
             te = pd.read_csv(te_up)
             fs += split_overlap(df, te)
             tc = st.selectbox("Time column (optional)", [""] + list(df.columns))
             if tc and tc in te.columns:
                 fs += temporal_overlap(df, te, tc)
+            impact = analyze_dataset_impact(
+                df, te, time_col=tc if tc and tc in te.columns else None
+            )
+            impact_data = impact.to_dict()
+            st.subheader("Measured dataset impact")
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Duplicate test rows", impact.duplicate_test_rows)
+            m2.metric("Duplicate test rows (%)", f"{impact.duplicate_test_pct:.2f}%")
+            m3.metric("Test rows", impact.test_rows)
+            if impact.time_column:
+                st.write({
+                    "Temporal boundary overlap": impact.temporal_overlap,
+                    "Latest training timestamp": impact.train_max_time,
+                    "Earliest test timestamp": impact.test_min_time,
+                })
         audit_data = audit(df, target)
-        show(fs, key="dataset", audit_data=audit_data)
+        show(fs, key="dataset", audit_data=audit_data, impact_data=impact_data)
         st.json(audit_data, expanded=False)
 
 with t2:
