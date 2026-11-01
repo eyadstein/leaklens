@@ -105,6 +105,7 @@ API on http://localhost:8000/docs, UI on http://localhost:8501.
 leaklens demo.csv --target is_fraud --arena --html report.html
 
 A single self-contained file with the trust score, findings and arena table. Easy to attach to a PR or share with your team.
+The findings section includes a color-coded severity legend explaining high, medium and low leakage risks, even when no findings are present.
 
 ## GitHub code scanning
 ```yaml
