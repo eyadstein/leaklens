@@ -1,19 +1,66 @@
 # Scanner benchmark
 
-69 hand-written labeled snippets (37 leaky, 32 clean). A snippet counts as flagged when the scanner reports a high or medium finding.
+The benchmark contains the original regression baseline and an expanded set of categorized cases.
+
+## Combined benchmark
 
 | Metric | Value |
-|---|---|
+|---|---:|
+| Cases | 105 |
+| Leaky / clean | 55 / 50 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True / false positives | 37 / 0 |
-| True negatives / false negatives | 32 / 0 |
+| True positives | 55 |
+| False positives | 0 |
+| True negatives | 50 |
+| False negatives | 0 |
 
-Low-severity cases (reproducibility and pre-split category detection): 11/11 correct, 0 misclassified.
+## Original regression baseline
 
-Misclassified:
-- none
+| Metric | Value |
+|---|---:|
+| Cases | 69 |
+| Leaky / clean | 37 / 32 |
+| Precision | 1.00 |
+| Recall | 1.00 |
+| F1 | 1.00 |
+| True positives | 37 |
+| False positives | 0 |
+| True negatives | 32 |
+| False negatives | 0 |
+
+## Additional categorized cases
+
+| Metric | Value |
+|---|---:|
+| Cases | 36 |
+| Leaky / clean | 18 / 18 |
+| Precision | 1.00 |
+| Recall | 1.00 |
+| F1 | 1.00 |
+| True positives | 18 |
+| False positives | 0 |
+| True negatives | 18 |
+| False negatives | 0 |
+
+## Category breakdown
+
+| Category | Cases | Leaky | Clean | Precision | Recall | F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| encoding | 1 | 1 | 0 | 1.00 | 1.00 | 1.00 |
+| future_target | 4 | 2 | 2 | 1.00 | 1.00 | 1.00 |
+| imputation | 15 | 7 | 8 | 1.00 | 1.00 | 1.00 |
+| scaling | 16 | 8 | 8 | 1.00 | 1.00 | 1.00 |
+
+## Reproducibility checks
+
+Low-severity reproducibility cases (issue #13): 13/14 correct; 1 misclassified.
+
+## Misclassified cases
+
+- missed (low): get_dummies before split
 
 ## Caveats
-The set is small, hand-written and partly shaped by the scanner's own rules, so it guards against regressions; it does not measure real-world accuracy. For prevalence on real notebooks, see [STUDY.md](STUDY.md) (also a heuristic).
+
+These cases are hand-written regression tests, not a representative sample of real-world notebooks. Some examples are deliberately shaped around supported scanner rules. A perfect score therefore does not establish real-world precision or recall. Unsupported patterns should be tracked separately as known detection gaps rather than counted as successful positive cases.
