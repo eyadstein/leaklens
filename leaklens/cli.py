@@ -269,9 +269,25 @@ def main(argv=None) -> int:
     rep = {"trust_score": score(fs), **rep, "findings": [f.to_dict() for f in fs]}
     intelligence_report = None
     if a.intelligence:
-        from .intelligence import analyze_findings
+        from .intelligence import analyze_dataset_impact, analyze_findings
 
-        intelligence_report = analyze_findings(fs).to_dict()
+        impact = None
+        if a.train and a.test:
+            impact = analyze_dataset_impact(
+                tr,
+                te,
+                group_col=(
+                    a.group
+                    if a.group and a.group in tr.columns and a.group in te.columns
+                    else None
+                ),
+                time_col=(
+                    a.time
+                    if a.time and a.time in tr.columns and a.time in te.columns
+                    else None
+                ),
+            )
+        intelligence_report = analyze_findings(fs, impact=impact).to_dict()
         rep["intelligence"] = intelligence_report
     if explanations is not None:
         for finding_report, explanation in zip(rep["findings"], explanations):

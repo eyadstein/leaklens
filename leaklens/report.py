@@ -93,6 +93,63 @@ def _intelligence_section(data: dict) -> str:
     return "".join(sections)
 
 
+def _impact_section(data: dict) -> str:
+    """Render measured dataset impact, escaping all dataset-derived values."""
+    if not data:
+        return ""
+
+    rows = [
+        ("Training rows", data.get("train_rows")),
+        ("Test rows", data.get("test_rows")),
+        (
+            "Duplicate test rows",
+            (f"{data.get('duplicate_test_rows', 0)} "
+             f"({data.get('duplicate_test_pct', 0):.2f}%)"),
+        ),
+    ]
+
+    group_column = data.get("group_column")
+    if group_column:
+        rows.extend([
+            ("Group column", group_column),
+            ("Shared group values", data.get("shared_group_count", 0)),
+            (
+                "Test rows in shared groups",
+                (f"{data.get('shared_group_test_rows', 0)} "
+                 f"({data.get('shared_group_test_pct', 0):.2f}%)"),
+            ),
+        ])
+
+    time_column = data.get("time_column")
+    if time_column:
+        temporal = data.get("temporal_overlap")
+        temporal_label = (
+            "Not measurable" if temporal is None
+            else "Yes" if temporal
+            else "No"
+        )
+        rows.extend([
+            ("Time column", time_column),
+            ("Temporal boundary overlap", temporal_label),
+            ("Latest training timestamp", data.get("train_max_time") or "Unavailable"),
+            ("Earliest test timestamp", data.get("test_min_time") or "Unavailable"),
+        ])
+
+    body = "".join(
+        f"<tr><th>{html.escape(str(label))}</th>"
+        f"<td>{html.escape(str(value))}</td></tr>"
+        for label, value in rows
+        if value is not None
+    )
+    return (
+        "<h2>Dataset impact</h2>"
+        f'<div class="card"><table>{body}</table>'
+        '<p class="sub">These are measured split statistics, not estimates '
+        "of model-performance loss or proof that every flagged feature row is affected.</p>"
+        "</div>"
+    )
+
+
 def render(rep: dict, title: str = "LeakLens report") -> str:
     s = int(rep["trust_score"])
     color = "#2ea043" if s >= 85 else "#d29922" if s >= 60 else "#f85149"
@@ -112,6 +169,7 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
     intelligence = (
         _intelligence_section(rep["intelligence"]) if rep.get("intelligence") else ""
     )
+    impact = _impact_section(rep.get("impact"))
     return (
         PAGE.replace("@@TITLE@@", html.escape(title))
         .replace("@@COLOR@@", color)
@@ -119,5 +177,5 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         .replace("@@AUDIT@@", audit)
         .replace("@@FINDINGS@@", fnd)
         .replace("@@ARENA@@", arena)
-        .replace("</body>", intelligence + "</body>")
+        .replace("</body>", impact + intelligence + "</body>")
     )
