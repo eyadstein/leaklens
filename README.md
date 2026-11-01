@@ -79,6 +79,10 @@ You can also pass `--llm-base-url` and `--llm-model` on the command line. The AP
 ## Model arena
 Auto-drops leaking and ID columns, then trains linear, gradient-boosted tree and neural-net models inside leak-safe pipelines (imputation, scaling and encoding are fitted on training data only). Runs are tracked in local MLflow (SQLite) and the winner is saved to `models/best.joblib`. Add `--time COL` for a temporal split.
 
+## MCP integration
+
+AI assistants can scan Python snippets and local notebooks via the optional read-only MCP server (Python 3.11+). See [MCP setup and security](docs/MCP.md).
+
 ## API and UI
 
 uvicorn leaklens.api:app --port 8000 # docs at /docs
