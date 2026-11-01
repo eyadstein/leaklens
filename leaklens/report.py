@@ -26,8 +26,71 @@ def _table(rows):
         return ""
     heads = list(rows[0])
     h = "".join(f"<th>{html.escape(str(k))}</th>" for k in heads)
-    b = "".join("<tr>" + "".join(f"<td>{html.escape(str(r.get(k, '')))}</td>" for k in heads) + "</tr>" for r in rows)
+    b = "".join(
+        "<tr>"
+        + "".join(f"<td>{html.escape(str(r.get(k, '')))}</td>" for k in heads)
+        + "</tr>"
+        for r in rows
+    )
     return f"<table><tr>{h}</tr>{b}</table>"
+
+
+def _intelligence_section(data: dict) -> str:
+    """Render optional intelligence data while escaping all untrusted text."""
+    confidence = data.get("confidence", {})
+    level = html.escape(str(confidence.get("level", "unknown")))
+    try:
+        score_text = f"{float(confidence.get('score', 0)):.2f}"
+    except (TypeError, ValueError):
+        score_text = "unavailable"
+
+    reasons = "".join(
+        f"<li>{html.escape(str(reason))}</li>"
+        for reason in confidence.get("reasons", [])
+    )
+    sections = [
+        "<h2>Intelligence analysis</h2>",
+        '<div class="card">',
+        f"<p><b>Confidence:</b> {level} ({score_text})</p>",
+        f"<ul>{reasons}</ul>" if reasons else "",
+        "</div>",
+    ]
+
+    root_causes = data.get("root_causes", [])
+    if root_causes:
+        sections.append("<h2>Root-cause analysis</h2>")
+        for cause in root_causes:
+            title = html.escape(str(cause.get("title", "")))
+            explanation = html.escape(str(cause.get("explanation", "")))
+            category = html.escape(str(cause.get("category", "")))
+            sections.append(
+                f'<div class="card"><h3>{title}</h3>'
+                f'<p class="sub">{category}</p><p>{explanation}</p></div>'
+            )
+
+    recommendations = data.get("recommendations", [])
+    if recommendations:
+        sections.append("<h2>Remediation recommendations</h2>")
+        for item in recommendations:
+            title = html.escape(str(item.get("title", "")))
+            description = html.escape(str(item.get("description", "")))
+            priority = html.escape(str(item.get("priority", "")))
+            actions = "".join(
+                f"<li>{html.escape(str(action))}</li>"
+                for action in item.get("actions", [])
+            )
+            validation = "".join(
+                f"<li>{html.escape(str(step))}</li>"
+                for step in item.get("validation_steps", [])
+            )
+            sections.append(
+                f'<div class="card"><h3>{title}</h3>'
+                f"<p><b>Priority:</b> {priority}</p><p>{description}</p>"
+                f"<b>Actions</b><ul>{actions}</ul>"
+                f"<b>Validation</b><ul>{validation}</ul></div>"
+            )
+
+    return "".join(sections)
 
 
 def render(rep: dict, title: str = "LeakLens report") -> str:
@@ -36,13 +99,25 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
     a = rep.get("audit")
     audit = ""
     if a:
-        kv = "".join(f"<span><b>{html.escape(k)}</b> {html.escape(str(a[k]))}</span>"
-                     for k in ("rows", "cols", "duplicate_rows", "minority_rate") if k in a)
+        kv = "".join(
+            f"<span><b>{html.escape(k)}</b> {html.escape(str(a[k]))}</span>"
+            for k in ("rows", "cols", "duplicate_rows", "minority_rate")
+            if k in a
+        )
         audit = f'<div class="card kv">{kv}</div>'
     fnd = _table(rep.get("findings", [])) or '<div class="card">No leakage found.</div>'
     arena = ""
     if rep.get("arena"):
         arena = "<h2>Model arena</h2>" + _table(rep["arena"])
-    return (PAGE.replace("@@TITLE@@", html.escape(title)).replace("@@COLOR@@", color)
-            .replace("@@SCORE@@", str(s)).replace("@@AUDIT@@", audit)
-            .replace("@@FINDINGS@@", fnd).replace("@@ARENA@@", arena))
+    intelligence = (
+        _intelligence_section(rep["intelligence"]) if rep.get("intelligence") else ""
+    )
+    return (
+        PAGE.replace("@@TITLE@@", html.escape(title))
+        .replace("@@COLOR@@", color)
+        .replace("@@SCORE@@", str(s))
+        .replace("@@AUDIT@@", audit)
+        .replace("@@FINDINGS@@", fnd)
+        .replace("@@ARENA@@", arena)
+        .replace("</body>", intelligence + "</body>")
+    )

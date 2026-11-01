@@ -6,11 +6,17 @@ import os
 import sys
 from pathlib import Path
 
-import pandas as pd
 from . import __version__, llm
 from .audit import audit
-from .leakage import group_overlap, group_risk, scan, score, split_overlap, temporal_overlap
 from .fixes import advice
+from .leakage import (
+    group_overlap,
+    group_risk,
+    scan,
+    score,
+    split_overlap,
+    temporal_overlap,
+)
 from .readers import read_dataset
 from .scanner import scan_path
 
@@ -65,15 +71,21 @@ def init(argv) -> int:
         prog="leaklens init",
         description="Write a starter .leaklens.toml",
     )
-    p.add_argument("dir", nargs="?", default=".", help="folder to write .leaklens.toml into")
-    p.add_argument("--force", action="store_true", help="overwrite an existing .leaklens.toml")
+    p.add_argument(
+        "dir", nargs="?", default=".", help="folder to write .leaklens.toml into"
+    )
+    p.add_argument(
+        "--force", action="store_true", help="overwrite an existing .leaklens.toml"
+    )
     a = p.parse_args(argv)
     path = Path(a.dir) / ".leaklens.toml"
     if path.exists() and not a.force:
         p.error(f"{path} already exists (use --force to overwrite)")
     path.write_text(STARTER_CONFIG, encoding="utf-8")
     print(f"Wrote {path}")
-    print("\nAdd this to .pre-commit-config.yaml to scan notebooks and scripts on every commit:\n")
+    print(
+        "\nAdd this to .pre-commit-config.yaml to scan notebooks and scripts on every commit:\n"
+    )
     print(PRE_COMMIT_SNIPPET, end="")
     return 0
 
@@ -85,10 +97,15 @@ def images(argv) -> int:
     )
     p.add_argument("train_dir")
     p.add_argument("test_dir")
-    p.add_argument("--max-distance", type=int, default=6,
-                   help="largest dHash Hamming distance (0-64) that counts as a duplicate")
-    p.add_argument("--samples", type=int, default=5,
-                   help="number of example pairs to print")
+    p.add_argument(
+        "--max-distance",
+        type=int,
+        default=6,
+        help="largest dHash Hamming distance (0-64) that counts as a duplicate",
+    )
+    p.add_argument(
+        "--samples", type=int, default=5, help="number of example pairs to print"
+    )
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
@@ -122,7 +139,7 @@ def images(argv) -> int:
         )
         for f in fs:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
-        for m in pairs[:a.samples]:
+        for m in pairs[: a.samples]:
             print(f"    {m['test']} ~ {m['train']} (distance {m['distance']})")
         if not fs:
             print("No leakage found.")
@@ -136,29 +153,66 @@ def main(argv=None) -> int:
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
-    p = argparse.ArgumentParser(prog="leaklens", description="Audit datasets and ML code for leakage")
+    p = argparse.ArgumentParser(
+        prog="leaklens", description="Audit datasets and ML code for leakage"
+    )
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("train", nargs="?")
     p.add_argument("--target")
     p.add_argument("--test")
     p.add_argument("--time")
-    p.add_argument("--group", help="entity column (patient, customer...) to check for group leakage")
+    p.add_argument(
+        "--group",
+        help="entity column (patient, customer...) to check for group leakage",
+    )
     p.add_argument("--threshold", type=float, default=0.95)
-    p.add_argument("--scan", nargs="+", help="file or folder of .py/.ipynb to scan for pipeline leaks")
-    p.add_argument("--arena", action="store_true", help="compare 3 model families, tracked in MLflow")
+    p.add_argument(
+        "--scan",
+        nargs="+",
+        help="file or folder of .py/.ipynb to scan for pipeline leaks",
+    )
+    p.add_argument(
+        "--arena",
+        action="store_true",
+        help="compare 3 model families, tracked in MLflow",
+    )
     p.add_argument("--out", default="models")
     p.add_argument("--tracking-uri", default="sqlite:///mlflow.db")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--explain", action="store_true", help="print a suggested fix under each finding")
-    p.add_argument("--llm", action="store_true", help="ask the configured provider to explain findings")
-    p.add_argument("--llm-provider", choices=("ollama", "openai-compatible"), default="ollama")
+    p.add_argument(
+        "--explain",
+        action="store_true",
+        help="print a suggested fix under each finding",
+    )
+    p.add_argument(
+        "--intelligence",
+        action="store_true",
+        help="include deterministic confidence, root-cause, and remediation analysis",
+    )
+    p.add_argument(
+        "--llm",
+        action="store_true",
+        help="ask the configured provider to explain findings",
+    )
+    p.add_argument(
+        "--llm-provider", choices=("ollama", "openai-compatible"), default="ollama"
+    )
     p.add_argument("--llm-base-url", help="LLM provider base URL")
     p.add_argument("--llm-model", help="LLM model name")
-    p.add_argument("--llm-max-findings", type=int, default=10, help="maximum findings to explain (default: 10)")
+    p.add_argument(
+        "--llm-max-findings",
+        type=int,
+        default=10,
+        help="maximum findings to explain (default: 10)",
+    )
     p.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     p.add_argument("--html", help="write a shareable single-file HTML report")
-    p.add_argument("--badge", help="write a shields.io endpoint JSON with the trust score")
-    p.add_argument("--fail-under", type=float, help="exit with code 1 if trust score is below N")
+    p.add_argument(
+        "--badge", help="write a shields.io endpoint JSON with the trust score"
+    )
+    p.add_argument(
+        "--fail-under", type=float, help="exit with code 1 if trust score is below N"
+    )
     a = p.parse_args(argv)
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
@@ -213,27 +267,52 @@ def main(argv=None) -> int:
             )
 
     rep = {"trust_score": score(fs), **rep, "findings": [f.to_dict() for f in fs]}
+    intelligence_report = None
+    if a.intelligence:
+        from .intelligence import analyze_findings
+
+        intelligence_report = analyze_findings(fs).to_dict()
+        rep["intelligence"] = intelligence_report
     if explanations is not None:
         for finding_report, explanation in zip(rep["findings"], explanations):
             if explanation is not None:
                 finding_report["llm_explanation"] = explanation
     if a.sarif:
         from .sarif import to_sarif
+
         with open(a.sarif, "w", encoding="utf-8") as fh:
             json.dump(to_sarif(fs, a.train or "."), fh, indent=2)
     if a.html:
         from .report import render
+
         with open(a.html, "w", encoding="utf-8") as fh:
             fh.write(render(rep))
     if a.badge:
         s = rep["trust_score"]
         col = "brightgreen" if s >= 85 else "yellow" if s >= 60 else "red"
         with open(a.badge, "w", encoding="utf-8") as fh:
-            json.dump({"schemaVersion": 1, "label": "leakage trust", "message": f"{s}/100", "color": col}, fh)
+            json.dump(
+                {
+                    "schemaVersion": 1,
+                    "label": "leakage trust",
+                    "message": f"{s}/100",
+                    "color": col,
+                },
+                fh,
+            )
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
         print(f"LeakLens trust score: {rep['trust_score']}/100")
+        if intelligence_report is not None:
+            confidence = intelligence_report["confidence"]
+            print(
+                f"Intelligence confidence: {confidence['level']} ({confidence['score']:.2f})"
+            )
+            for cause in intelligence_report["root_causes"]:
+                print(f"    Root cause: {cause['title']}")
+            for recommendation in intelligence_report["recommendations"]:
+                print(f"    Recommendation: {recommendation['title']}")
         for index, f in enumerate(fs):
             print(f"{_severity_label(f.severity)} {f.kind} :: {f.column} :: {f.detail}")
             if explanations is not None and explanations[index] is not None:
@@ -241,10 +320,23 @@ def main(argv=None) -> int:
             if a.explain and advice(f.kind):
                 print(f"    fix: {advice(f.kind)}")
         if fs:
-            print(", ".join(f"{sum(f.severity == lvl for f in fs)} {lvl}" for lvl in ("high", "medium", "low") if any(f.severity == lvl for f in fs)))
+            print(
+                ", ".join(
+                    f"{sum(f.severity == lvl for f in fs)} {lvl}"
+                    for lvl in ("high", "medium", "low")
+                    if any(f.severity == lvl for f in fs)
+                )
+            )
         else:
             print("No leakage found.")
         if res is not None:
-            print(f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})")
+            print(
+                f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
+            )
             print(res.round(4).to_string(index=False))
-    return 1 if any(f.severity == "high" for f in fs) or (a.fail_under is not None and rep["trust_score"] < a.fail_under) else 0
+    return (
+        1
+        if any(f.severity == "high" for f in fs)
+        or (a.fail_under is not None and rep["trust_score"] < a.fail_under)
+        else 0
+    )
