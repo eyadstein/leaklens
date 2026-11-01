@@ -255,7 +255,12 @@ def main(argv=None) -> int:
     explanations = None
     if a.llm:
         try:
-            provider = llm.create_provider(a.llm_provider, a.llm_base_url, a.llm_model)
+            provider = llm.create_provider(
+                a.llm_provider,
+                a.llm_base_url,
+                a.llm_model,
+                prompt_template=a.llm_prompt_template,
+            )
             explanations = llm.explain_findings(fs, provider, a.llm_max_findings)
         except llm.LLMError as exc:
             p.error(str(exc))

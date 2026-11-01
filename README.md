@@ -76,6 +76,16 @@ leaklens --scan notebooks/ --llm --llm-provider openai-compatible
 
 You can also pass `--llm-base-url` and `--llm-model` on the command line. The API key is read only from `LEAKLENS_LLM_API_KEY`.
 
+### Custom prompt templates
+
+By default, LeakLens uses the prompt template stored in `leaklens/prompts/explain.txt`. You can override it with a custom template file using `--llm-prompt-template` or the `LEAKLENS_LLM_PROMPT_TEMPLATE` environment variable:
+
+```sh
+leaklens --scan notebooks/ --llm --llm-prompt-template my_template.txt
+```
+
+Templates support the placeholders `{severity}`, `{kind}`, `{location}`, `{location_label}`, and `{detail}`. LeakLens will also automatically load a project-level template from `.leaklens/prompt.txt` if present.
+
 ## Model arena
 Auto-drops leaking and ID columns, then trains linear, gradient-boosted tree and neural-net models inside leak-safe pipelines (imputation, scaling and encoding are fitted on training data only). Runs are tracked in local MLflow (SQLite) and the winner is saved to `models/best.joblib`. Add `--time COL` for a temporal split.
 
