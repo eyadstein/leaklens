@@ -207,3 +207,50 @@ def test_notebook_one_bad_cell_does_not_hide_the_rest(tmp_path):
     assert "preprocess_before_split" in kinds_, fs
     assert "parse_error" in kinds_ and any("cell 1 skipped" in x.detail for x in fs)
     assert any(x.kind == "preprocess_before_split" and "cell 0" in x.column for x in fs)
+
+GET_DUMMIES_BEFORE_SPLIT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X = pd.get_dummies(df)
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+"""
+
+GET_DUMMIES_AFTER_SPLIT = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y)
+X_train = pd.get_dummies(X_train)
+X_test = pd.get_dummies(X_test)
+"""
+
+def test_get_dummies_before_split_is_low_severity():
+    findings = [
+        f for f in scan_source(GET_DUMMIES_BEFORE_SPLIT)
+        if f.kind == "get_dummies_before_split"
+    ]
+    assert findings
+    assert findings[0].severity == "low"
+
+def test_get_dummies_after_split_is_clean():
+    findings = scan_source(GET_DUMMIES_AFTER_SPLIT)
+    assert not any(f.kind == "get_dummies_before_split" for f in findings)
+
+def test_unrelated_get_dummies_is_clean():
+    src = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+summary = pd.get_dummies(df)
+a = train_test_split(X, y)
+"""
+    findings = scan_source(src)
+    assert not any(f.kind == "get_dummies_before_split" for f in findings)
+
+def test_get_dummies_import_alias_before_split():
+    src = """
+from pandas import get_dummies as dummies
+from sklearn.model_selection import train_test_split
+X = dummies(df)
+a = train_test_split(X, y)
+"""
+    findings = scan_source(src)
+    assert any(f.kind == "get_dummies_before_split" for f in findings)

@@ -109,7 +109,7 @@ CASES += [
      _N + "Z = (A - B.mean()) / B.std()\na = train_test_split(X, y, random_state=0)\n", False),
 ]
 
-# Low-severity reproducibility detector (issue #13): flagged when random_state is missing.
+# Low-severity cases (reproducibility and pre-split category detection):
 LOW_CASES: list[tuple[str, str, bool]] = [
     ("train_test_split without random_state",
      SPLIT + "a = train_test_split(X, y)\n", True),
@@ -128,6 +128,15 @@ LOW_CASES += [
     ("train_test_split shuffle=False is deterministic", SPLIT + "a = train_test_split(X, y, shuffle=False)\n", False),
     ("ShuffleSplit without random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5)\n", True),
     ("ShuffleSplit with random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5, random_state=1)\n", False),
+    ("get_dummies before split","import pandas as pd\n" + SPLIT +
+     "X = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", True),
+    ("get_dummies after split",
+     "import pandas as pd\n" + SPLIT +
+     "a = train_test_split(X, y, random_state=0)\nX_train = pd.get_dummies(X_train)\n", False),
+    ("unrelated get_dummies",
+     "import pandas as pd\n" + SPLIT +
+     "summary = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", False),
+
 ]
 
 
@@ -148,8 +157,14 @@ def evaluate() -> dict:
             tn += 1
     # low-severity reproducibility cases, scored the same way on their own list
     low_tp = low_fp = low_tn = low_fn = 0
+    low_kinds = {
+        "get_dummies before split": "get_dummies_before_split",
+        "get_dummies after split": "get_dummies_before_split",
+        "unrelated get_dummies": "get_dummies_before_split",
+    }
     for name, code, leaky in LOW_CASES:
-        flagged = any(f.kind == "no_random_state" for f in scan_source(code, name))
+        expected_kind = low_kinds.get(name, "no_random_state")
+        flagged = any(f.kind == expected_kind for f in scan_source(code, name))
         if leaky and flagged:
             low_tp += 1
         elif leaky:
@@ -224,7 +239,7 @@ def markdown(m: dict) -> str:
         "| Metric | Value |\n|---|---|\n"
         f"| Precision | {m['precision']:.2f} |\n| Recall | {m['recall']:.2f} |\n| F1 | {m['f1']:.2f} |\n"
         f"| True / false positives | {m['tp']} / {m['fp']} |\n| True negatives / false negatives | {m['tn']} / {m['fn']} |\n\n"
-        f"Low-severity reproducibility cases (issue #13): {m['low_tp'] + m['low_tn']}/{m['low_n']} correct, "
+        f"Low-severity cases (reproducibility and pre-split category detection): {m['low_tp'] + m['low_tn']}/{m['low_n']} correct, "
         f"{m['low_fp'] + m['low_fn']} misclassified.\n\n"
         f"Misclassified:\n{miss}\n\n"
         "## Caveats\n"

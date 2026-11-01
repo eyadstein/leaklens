@@ -1,16 +1,16 @@
 # Scanner benchmark
 
-52 hand-written labeled snippets (26 leaky, 26 clean). A snippet counts as flagged when the scanner reports a high or medium finding.
+69 hand-written labeled snippets (37 leaky, 32 clean). A snippet counts as flagged when the scanner reports a high or medium finding.
 
 | Metric | Value |
 |---|---|
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True / false positives | 26 / 0 |
-| True negatives / false negatives | 26 / 0 |
+| True / false positives | 37 / 0 |
+| True negatives / false negatives | 32 / 0 |
 
-Low-severity reproducibility cases (issue #13): 8/8 correct, 0 misclassified.
+Low-severity cases (reproducibility and pre-split category detection): 11/11 correct, 0 misclassified.
 
 Misclassified:
 - none
