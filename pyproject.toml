@@ -25,6 +25,7 @@ Homepage = "https://github.com/eyadstein/leaklens"
 Issues = "https://github.com/eyadstein/leaklens/issues"
 
 [project.optional-dependencies]
+mcp = ["mcp>=2,<3; python_version >= '3.11'"]
 arena = ["mlflow>=2.9"]
 parquet = ["pyarrow>=14"]
 feather = ["pyarrow>=14"]
@@ -45,6 +46,7 @@ dev = [
 
 [project.scripts]
 leaklens = "leaklens.cli:main"
+leaklens-mcp = "leaklens.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["leaklens*"]
