@@ -5,7 +5,9 @@ import pandas as pd
 import streamlit as st
 
 from leaklens.audit import audit
+from leaklens.fixes import advice
 from leaklens.leakage import scan, score, split_overlap, temporal_overlap
+from leaklens.report import render
 from leaklens.scanner import scan_file, scan_source
 
 st.set_page_config(page_title="LeakLens", layout="wide")
@@ -14,14 +16,33 @@ st.caption("Catch data leakage before it fools you.")
 t1, t2, t3 = st.tabs(["Dataset audit", "Code scanner", "Model arena"])
 
 
-def show(fs):
+def show(fs, key, audit_data=None):
+    findings = [f.to_dict() for f in fs]
+    trust_score = score(fs)
+
     c1, c2 = st.columns(2)
-    c1.metric("Trust score", f"{score(fs)}/100")
+    c1.metric("Trust score", f"{trust_score}/100")
     c2.metric("High-severity leaks", sum(f.severity == "high" for f in fs))
     if fs:
-        st.dataframe(pd.DataFrame([f.to_dict() for f in fs]))
+        st.dataframe(pd.DataFrame(findings))
+        for finding in findings:
+            suggestion = advice(finding["kind"])
+            if suggestion:
+                st.markdown(f"**Suggested fix for {finding['kind']} ({finding['column']}):**")
+                st.write(suggestion)
     else:
         st.success("No leakage found.")
+
+    report = {"trust_score": trust_score, "findings": findings}
+    if audit_data is not None:
+        report["audit"] = audit_data
+    st.download_button(
+        "Download HTML report",
+        data=render(report),
+        file_name="leaklens-report.html",
+        mime="text/html",
+        key=f"{key}_report",
+    )
 
 
 with t1:
@@ -38,8 +59,9 @@ with t1:
             tc = st.selectbox("Time column (optional)", [""] + list(df.columns))
             if tc and tc in te.columns:
                 fs += temporal_overlap(df, te, tc)
-        show(fs)
-        st.json(audit(df, target), expanded=False)
+        audit_data = audit(df, target)
+        show(fs, key="dataset", audit_data=audit_data)
+        st.json(audit_data, expanded=False)
 
 with t2:
     code = st.text_area("Paste Python code", height=220)
@@ -48,9 +70,9 @@ with t2:
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / Path(nb.name).name
             p.write_bytes(nb.getvalue())
-            show(scan_file(p))
+            show(scan_file(p), key="code")
     elif code.strip():
-        show(scan_source(code, "pasted"))
+        show(scan_source(code, "pasted"), key="code")
 
 with t3:
     up3 = st.file_uploader("Training CSV", type="csv", key="ar")
