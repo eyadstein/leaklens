@@ -47,3 +47,23 @@ def test_score_and_cli(tmp_path):
     d.to_csv(f, index=False)
     assert score(scan(d, "y")) < 100
     assert main([str(f), "--target", "y"]) == 1
+
+
+def test_single_feature_leaks_skips_uncrossvalidatable_columns(monkeypatch):
+    """A column whose cross-validation raises must be skipped, not crash the scan."""
+    from leaklens import leakage
+
+    d = _df(n=600)
+    real = leakage.cross_val_score
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:  # first candidate column raises
+            raise ValueError("cannot fit")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(leakage, "cross_val_score", flaky)
+    findings = leakage.single_feature_leaks(d, "y", threshold=0.99)
+    # Must not raise, and must still be able to run the remaining columns.
+    assert isinstance(findings, list)

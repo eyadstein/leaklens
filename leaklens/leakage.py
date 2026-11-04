@@ -26,6 +26,15 @@ def _encode(s: pd.Series) -> np.ndarray:
     return s.astype("category").cat.codes.to_numpy().astype(float).reshape(-1, 1)
 
 
+class _SkippedType:
+    """Sentinel marking a column that could not be cross-validated."""
+
+    __slots__ = ()
+
+
+_SKIPPED = _SkippedType()
+
+
 def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
     d = df[df[target].notna()]
     if len(d) > max_rows:
@@ -48,7 +57,9 @@ def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
             sc = float(
                 cross_val_score(make(), _encode(d[c]), y, cv=5, scoring=scoring).mean()
             )
-        except Exception:  # noqa: BLE001, S112 - a column that cannot be cross-validated cannot be single-feature leakage; skip it
+        except Exception:  # noqa: BLE001 - a column that cannot be cross-validated is skipped below
+            sc = _SKIPPED
+        if sc is _SKIPPED:
             continue
         if sc >= threshold:
             sev = "high"
