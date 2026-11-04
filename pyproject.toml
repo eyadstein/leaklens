@@ -62,6 +62,7 @@ include = ["leaklens*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 norecursedirs = [".*", "_darcs", "build", "dist", "CVS", "maintenance-backup", ".venv"]
 
 [tool.bandit]
