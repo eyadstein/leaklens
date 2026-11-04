@@ -114,41 +114,49 @@ def _impact_section(data: dict) -> str:
         ("Test rows", data.get("test_rows")),
         (
             "Duplicate test rows",
-            (f"{data.get('duplicate_test_rows', 0)} "
-             f"({data.get('duplicate_test_pct', 0):.2f}%)"),
+            (
+                f"{data.get('duplicate_test_rows', 0)} "
+                f"({data.get('duplicate_test_pct', 0):.2f}%)"
+            ),
         ),
     ]
 
     group_column = data.get("group_column")
     if group_column:
-        rows.extend([
-            ("Group column", group_column),
-            ("Shared group values", data.get("shared_group_count", 0)),
-            (
-                "Test rows in shared groups",
-                (f"{data.get('shared_group_test_rows', 0)} "
-                 f"({data.get('shared_group_test_pct', 0):.2f}%)"),
-            ),
-        ])
+        rows.extend(
+            [
+                ("Group column", group_column),
+                ("Shared group values", data.get("shared_group_count", 0)),
+                (
+                    "Test rows in shared groups",
+                    (
+                        f"{data.get('shared_group_test_rows', 0)} "
+                        f"({data.get('shared_group_test_pct', 0):.2f}%)"
+                    ),
+                ),
+            ]
+        )
 
     time_column = data.get("time_column")
     if time_column:
         temporal = data.get("temporal_overlap")
         temporal_label = (
-            "Not measurable" if temporal is None
-            else "Yes" if temporal
-            else "No"
+            "Not measurable" if temporal is None else "Yes" if temporal else "No"
         )
-        rows.extend([
-            ("Time column", time_column),
-            ("Temporal boundary overlap", temporal_label),
-            ("Latest training timestamp", data.get("train_max_time") or "Unavailable"),
-            ("Earliest test timestamp", data.get("test_min_time") or "Unavailable"),
-        ])
+        rows.extend(
+            [
+                ("Time column", time_column),
+                ("Temporal boundary overlap", temporal_label),
+                (
+                    "Latest training timestamp",
+                    data.get("train_max_time") or "Unavailable",
+                ),
+                ("Earliest test timestamp", data.get("test_min_time") or "Unavailable"),
+            ]
+        )
 
     body = "".join(
-        f"<tr><th>{html.escape(str(label))}</th>"
-        f"<td>{html.escape(str(value))}</td></tr>"
+        f"<tr><th>{html.escape(str(label))}</th><td>{html.escape(str(value))}</td></tr>"
         for label, value in rows
         if value is not None
     )

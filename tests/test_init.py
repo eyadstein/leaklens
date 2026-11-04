@@ -6,7 +6,11 @@ from leaklens.cli import PRE_COMMIT_SNIPPET, main
 
 
 def _keys(text):
-    return [l[2:].split(" = ")[0] for l in text.splitlines() if l.startswith("# ") and " = " in l]
+    return [
+        l[2:].split(" = ")[0]
+        for l in text.splitlines()
+        if l.startswith("# ") and " = " in l
+    ]
 
 
 def test_init_writes_starter_config(tmp_path, capsys):
@@ -33,7 +37,9 @@ def test_starter_config_is_valid_toml(tmp_path):
     main(["init", str(tmp_path)])
     text = (tmp_path / ".leaklens.toml").read_text(encoding="utf-8")
     assert tomllib.loads(text) == {}
-    uncommented = "\n".join(l[2:] for l in text.splitlines() if l.startswith("# ") and " = " in l)
+    uncommented = "\n".join(
+        l[2:] for l in text.splitlines() if l.startswith("# ") and " = " in l
+    )
     assert len(tomllib.loads(uncommented)) == len(_keys(text))
 
 

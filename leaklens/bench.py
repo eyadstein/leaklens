@@ -302,17 +302,42 @@ LOW_CASES: list[tuple[str, str, bool]] = [
     ),
 ]
 LOW_CASES += [
-    ("train_test_split shuffle=False is deterministic", SPLIT + "a = train_test_split(X, y, shuffle=False)\n", False),
-    ("ShuffleSplit without random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5)\n", True),
-    ("ShuffleSplit with random_state", "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5, random_state=1)\n", False),
-    ("get_dummies before split","import pandas as pd\n" + SPLIT +
-     "X = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", True),
-    ("get_dummies after split",
-     "import pandas as pd\n" + SPLIT +
-     "a = train_test_split(X, y, random_state=0)\nX_train = pd.get_dummies(X_train)\n", False),
-    ("unrelated get_dummies",
-     "import pandas as pd\n" + SPLIT +
-     "summary = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n", False),
+    (
+        "train_test_split shuffle=False is deterministic",
+        SPLIT + "a = train_test_split(X, y, shuffle=False)\n",
+        False,
+    ),
+    (
+        "ShuffleSplit without random_state",
+        "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5)\n",
+        True,
+    ),
+    (
+        "ShuffleSplit with random_state",
+        "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5, random_state=1)\n",
+        False,
+    ),
+    (
+        "get_dummies before split",
+        "import pandas as pd\n"
+        + SPLIT
+        + "X = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n",
+        True,
+    ),
+    (
+        "get_dummies after split",
+        "import pandas as pd\n"
+        + SPLIT
+        + "a = train_test_split(X, y, random_state=0)\nX_train = pd.get_dummies(X_train)\n",
+        False,
+    ),
+    (
+        "unrelated get_dummies",
+        "import pandas as pd\n"
+        + SPLIT
+        + "summary = pd.get_dummies(df)\na = train_test_split(X, y, random_state=0)\n",
+        False,
+    ),
     (
         "train_test_split shuffle=False is deterministic",
         SPLIT + "a = train_test_split(X, y, shuffle=False)\n",
@@ -470,6 +495,38 @@ CASES += [
 
 
 _F = "from sklearn.preprocessing import MinMaxScaler, StandardScaler, OneHotEncoder\nfrom sklearn.compose import ColumnTransformer\nfrom sklearn.model_selection import StratifiedKFold, train_test_split, permutation_test_score\n"
+# Stage 2.4: tuning on the test set (high severity).
+CASES += [
+    (  # GridSearchCV fitted on test data
+        "GridSearchCV fitted on test data",
+        "from sklearn.model_selection import GridSearchCV\n"
+        "gs = GridSearchCV(model, grid)\n"
+        "gs.fit(X_test, y_test)\n",
+        True,
+    ),
+    (  # GridSearchCV fitted on train data
+        "GridSearchCV fitted on train data",
+        "from sklearn.model_selection import GridSearchCV, train_test_split\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+        "gs = GridSearchCV(model, grid, cv=5)\n"
+        "gs.fit(X_train, y_train)\n",
+        False,
+    ),
+    (  # RandomizedSearchCV fitted on test data
+        "RandomizedSearchCV fitted on test data",
+        "from sklearn.model_selection import RandomizedSearchCV\n"
+        "rs = RandomizedSearchCV(model, dists)\n"
+        "rs.fit(X_test, y_test)\n",
+        True,
+    ),
+    (  # HalvingGridSearchCV fitted on test data
+        "HalvingGridSearchCV fitted on test data",
+        "from sklearn.model_selection import HalvingGridSearchCV\n"
+        "gs = HalvingGridSearchCV(model, grid)\n"
+        "gs.fit(X_test, y_test)\n",
+        True,
+    ),
+]
 CASES += [
     (
         "scaler on all data then manual KFold loop",

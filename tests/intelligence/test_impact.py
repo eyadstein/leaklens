@@ -40,12 +40,18 @@ def test_measures_temporal_boundary_without_claiming_row_count():
 
 
 def test_empty_test_data_does_not_divide_by_zero():
-    train = pd.DataFrame({"x": [1, 2], "group": ["A", "B"], "when": ["2025-01-01", "2025-01-02"]})
-    test = pd.DataFrame({"x": pd.Series(dtype=int), "group": pd.Series(dtype=str), "when": pd.Series(dtype=str)})
-
-    impact = analyze_dataset_impact(
-        train, test, group_col="group", time_col="when"
+    train = pd.DataFrame(
+        {"x": [1, 2], "group": ["A", "B"], "when": ["2025-01-01", "2025-01-02"]}
     )
+    test = pd.DataFrame(
+        {
+            "x": pd.Series(dtype=int),
+            "group": pd.Series(dtype=str),
+            "when": pd.Series(dtype=str),
+        }
+    )
+
+    impact = analyze_dataset_impact(train, test, group_col="group", time_col="when")
 
     assert impact.test_rows == 0
     assert impact.duplicate_test_rows == 0

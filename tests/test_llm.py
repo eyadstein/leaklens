@@ -57,25 +57,32 @@ def test_explanations_are_capped_by_severity_and_sanitized():
     assert explanations == [None, "safe output", "safe output"]
 
 
-def test_cli_reports_truncation_and_keeps_llm_text_out_of_sarif(monkeypatch, capsys, tmp_path):
+def test_cli_reports_truncation_and_keeps_llm_text_out_of_sarif(
+    monkeypatch, capsys, tmp_path
+):
     high = Finding("high", "preprocess_before_split", "model.py:8", "leak")
     low = Finding("low", "parse_error", "data.py:2", "parse warning")
     monkeypatch.setattr(cli, "scan_path", lambda _path: [low, high])
-    monkeypatch.setattr(llm, "create_provider", lambda *_args: FakeProvider("suggestion"))
+    monkeypatch.setattr(
+        llm, "create_provider", lambda *_args: FakeProvider("suggestion")
+    )
 
     sarif_path = tmp_path / "report.sarif"
-    assert cli.main(
-        [
-            "--scan",
-            "sample.py",
-            "--llm",
-            "--llm-max-findings",
-            "1",
-            "--json",
-            "--sarif",
-            str(sarif_path),
-        ]
-    ) == 1
+    assert (
+        cli.main(
+            [
+                "--scan",
+                "sample.py",
+                "--llm",
+                "--llm-max-findings",
+                "1",
+                "--json",
+                "--sarif",
+                str(sarif_path),
+            ]
+        )
+        == 1
+    )
 
     captured = capsys.readouterr()
     report = json.loads(captured.out)
@@ -110,22 +117,29 @@ def test_cli_uses_provider_only_when_llm_is_enabled(monkeypatch, capsys):
 
 
 def test_provider_rejects_non_http_urls():
-    with pytest.raises(llm.LLMError, match="(?i)http"):
-        llm.create_provider("openai-compatible", "ftp://api.example.com/v1", api_key="secret")
+    with pytest.raises(llm.LLMError, match=r"(?i)http"):
+        llm.create_provider(
+            "openai-compatible", "ftp://api.example.com/v1", api_key="secret"
+        )
 
 
 def test_openai_compatible_provider_refuses_api_key_over_remote_http():
     with pytest.raises(llm.LLMError, match="plain HTTP"):
-        llm.create_provider("openai-compatible", "http://api.example.com/v1", api_key="secret")
+        llm.create_provider(
+            "openai-compatible", "http://api.example.com/v1", api_key="secret"
+        )
 
 
 def test_openai_compatible_provider_allows_https_and_local_http():
-    secure = llm.create_provider("openai-compatible", "https://api.example.com/v1", api_key="secret")
-    local = llm.create_provider("openai-compatible", "http://localhost:8000/v1", api_key="secret")
+    secure = llm.create_provider(
+        "openai-compatible", "https://api.example.com/v1", api_key="secret"
+    )
+    local = llm.create_provider(
+        "openai-compatible", "http://localhost:8000/v1", api_key="secret"
+    )
 
     assert isinstance(secure, llm.OpenAICompatibleProvider)
     assert isinstance(local, llm.OpenAICompatibleProvider)
-
 
 
 def test_openai_provider_refuses_redirects_without_following_them(monkeypatch):

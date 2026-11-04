@@ -77,24 +77,26 @@ def test_intelligence_report_escapes_untrusted_text():
 
 
 def test_report_renders_dataset_impact_and_escapes_dataset_values():
-    report = render({
-        "trust_score": 80,
-        "findings": [],
-        "impact": {
-            "train_rows": 100,
-            "test_rows": 20,
-            "duplicate_test_rows": 2,
-            "duplicate_test_pct": 10.0,
-            "group_column": "<script>bad()</script>",
-            "shared_group_count": 1,
-            "shared_group_test_rows": 3,
-            "shared_group_test_pct": 15.0,
-            "time_column": "event_time",
-            "temporal_overlap": True,
-            "train_max_time": "2025-01-05T00:00:00",
-            "test_min_time": "2025-01-04T00:00:00",
-        },
-    })
+    report = render(
+        {
+            "trust_score": 80,
+            "findings": [],
+            "impact": {
+                "train_rows": 100,
+                "test_rows": 20,
+                "duplicate_test_rows": 2,
+                "duplicate_test_pct": 10.0,
+                "group_column": "<script>bad()</script>",
+                "shared_group_count": 1,
+                "shared_group_test_rows": 3,
+                "shared_group_test_pct": 15.0,
+                "time_column": "event_time",
+                "temporal_overlap": True,
+                "train_max_time": "2025-01-05T00:00:00",
+                "test_min_time": "2025-01-04T00:00:00",
+            },
+        }
+    )
 
     assert "Dataset impact" in report
     assert "Duplicate test rows" in report

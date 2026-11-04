@@ -17,9 +17,20 @@ from leaklens.leakage import Finding
 def ui(monkeypatch):
     fake_st = ModuleType("streamlit")
     for name in (
-        "set_page_config", "title", "caption", "tabs", "columns", "metric",
-        "file_uploader", "text_area", "dataframe", "success", "markdown",
-        "write", "download_button", "json",
+        "set_page_config",
+        "title",
+        "caption",
+        "tabs",
+        "columns",
+        "metric",
+        "file_uploader",
+        "text_area",
+        "dataframe",
+        "success",
+        "markdown",
+        "write",
+        "download_button",
+        "json",
     ):
         setattr(fake_st, name, Mock())
 
@@ -36,7 +47,9 @@ def ui(monkeypatch):
 
 def test_ui_shows_fix_tip_and_downloads_dataset_report(ui):
     show, st = ui
-    finding = Finding("high", "target_leakage", "suspicious_column", "looks like a label")
+    finding = Finding(
+        "high", "target_leakage", "suspicious_column", "looks like a label"
+    )
     show([finding], key="dataset", audit_data={"rows": 42, "cols": 2})
 
     st.markdown.assert_called_once()

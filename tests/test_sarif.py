@@ -21,4 +21,7 @@ def test_sarif_structure(tmp_path):
     res = run["results"][0]
     assert res["ruleId"] in ids and res["level"] == "error"
     loc = res["locations"][0]["physicalLocation"]
-    assert isinstance(loc["region"]["startLine"], int) and "\\" not in loc["artifactLocation"]["uri"]
+    assert (
+        isinstance(loc["region"]["startLine"], int)
+        and "\\" not in loc["artifactLocation"]["uri"]
+    )

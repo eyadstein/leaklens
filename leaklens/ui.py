@@ -29,7 +29,9 @@ def show(fs, key, audit_data=None, impact_data=None):
         for finding in findings:
             suggestion = advice(finding["kind"])
             if suggestion:
-                st.markdown(f"**Suggested fix for {finding['kind']} ({finding['column']}):**")
+                st.markdown(
+                    f"**Suggested fix for {finding['kind']} ({finding['column']}):**"
+                )
                 st.write(suggestion)
     else:
         st.success("No leakage found.")
@@ -52,15 +54,19 @@ with t1:
     up = st.file_uploader("Training CSV", type="csv", key="tr")
     if up:
         df = pd.read_csv(up)
-        target = st.selectbox("Target column", list(df.columns), index=len(df.columns) - 1)
+        target = st.selectbox(
+            "Target column", list(df.columns), index=len(df.columns) - 1
+        )
         thr = st.slider("Leak threshold", 0.80, 1.00, 0.95, 0.01)
-        te_up = st.file_uploader("Optional test CSV (checks overlap)", type="csv", key="te")
+        te_up = st.file_uploader(
+            "Optional test CSV (checks overlap)", type="csv", key="te"
+        )
         fs = scan(df, target, thr)
         impact_data = None
         if te_up:
             te = pd.read_csv(te_up)
             fs += split_overlap(df, te)
-            tc = st.selectbox("Time column (optional)", [""] + list(df.columns))
+            tc = st.selectbox("Time column (optional)", ["", *list(df.columns)])
             if tc and tc in te.columns:
                 fs += temporal_overlap(df, te, tc)
             impact = analyze_dataset_impact(
@@ -73,11 +79,13 @@ with t1:
             m2.metric("Duplicate test rows (%)", f"{impact.duplicate_test_pct:.2f}%")
             m3.metric("Test rows", impact.test_rows)
             if impact.time_column:
-                st.write({
-                    "Temporal boundary overlap": impact.temporal_overlap,
-                    "Latest training timestamp": impact.train_max_time,
-                    "Earliest test timestamp": impact.test_min_time,
-                })
+                st.write(
+                    {
+                        "Temporal boundary overlap": impact.temporal_overlap,
+                        "Latest training timestamp": impact.train_max_time,
+                        "Earliest test timestamp": impact.test_min_time,
+                    }
+                )
         audit_data = audit(df, target)
         show(fs, key="dataset", audit_data=audit_data, impact_data=impact_data)
         st.json(audit_data, expanded=False)
@@ -97,8 +105,12 @@ with t3:
     up3 = st.file_uploader("Training CSV", type="csv", key="ar")
     if up3:
         df3 = pd.read_csv(up3)
-        tgt = st.selectbox("Target", list(df3.columns), index=len(df3.columns) - 1, key="tg")
-        tcol = st.selectbox("Time column (optional)", [""] + list(df3.columns), key="tc")
+        tgt = st.selectbox(
+            "Target", list(df3.columns), index=len(df3.columns) - 1, key="tg"
+        )
+        tcol = st.selectbox(
+            "Time column (optional)", ["", *list(df3.columns)], key="tc"
+        )
         if st.button("Run arena"):
             try:
                 from leaklens.arena import run
@@ -107,6 +119,8 @@ with t3:
             else:
                 with st.spinner("Training 3 model families..."):
                     res = run(df3, tgt, tcol or None)
-                st.write(f"Ranked by {res.attrs['primary']}. Auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'}")
+                st.write(
+                    f"Ranked by {res.attrs['primary']}. Auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'}"
+                )
                 st.dataframe(res.round(4))
                 st.caption("Best model saved to models/best.joblib")

@@ -23,7 +23,18 @@ def test_no_fix_without_flag(tmp_path, capsys):
 
 
 def test_every_kind_has_advice():
-    for k in ("preprocess_before_split", "transformer_before_split", "resample_before_split", "fit_on_eval_data",
-              "encoder_before_split", "target_leakage", "id_like", "split_overlap", "temporal_leakage",
-              "group_overlap", "group_leakage_risk", "get_dummies_before_split"):
+    for k in (
+        "preprocess_before_split",
+        "transformer_before_split",
+        "resample_before_split",
+        "fit_on_eval_data",
+        "encoder_before_split",
+        "target_leakage",
+        "id_like",
+        "split_overlap",
+        "temporal_leakage",
+        "group_overlap",
+        "group_leakage_risk",
+        "get_dummies_before_split",
+    ):
         assert advice(k)

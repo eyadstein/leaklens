@@ -34,16 +34,24 @@ def health():
 
 
 @app.post("/audit")
-async def audit_csv(file: UploadFile = File(...), target: str = Form(...), threshold: float = Form(0.95)):
+async def audit_csv(
+    file: UploadFile = File(...),  # noqa: B008
+    target: str = Form(...),
+    threshold: float = Form(0.95),
+):
     try:
         data = io.BytesIO(await file.read())
         df = read_dataset(data, file.filename or "")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - re-wrap as HTTP 400 (fail closed)
         raise HTTPException(400, f"bad input: {e}")
     if target not in df.columns:
         raise HTTPException(422, f"target '{target}' not in columns")
     fs = scan(df, target, threshold)
-    return {"trust_score": score(fs), "audit": audit(df, target), "findings": [f.to_dict() for f in fs]}
+    return {
+        "trust_score": score(fs),
+        "audit": audit(df, target),
+        "findings": [f.to_dict() for f in fs],
+    }
 
 
 @app.post("/scan")
@@ -56,7 +64,9 @@ def scan_code(req: ScanReq):
 def predict(req: PredictReq):
     p = Path(req.model_path)
     if not p.exists():
-        raise HTTPException(404, "model not found; run: leaklens data.csv --target T --arena")
+        raise HTTPException(
+            404, "model not found; run: leaklens data.csv --target T --arena"
+        )
     b = joblib.load(p)
     df = pd.DataFrame(req.rows)
     miss = [c for c in b["features"] if c not in df.columns]
@@ -73,7 +83,12 @@ def predict(req: PredictReq):
         out = []
         for pr in pipe.predict_proba(X):
             i = int(np.argmax(pr))
-            out.append({"label": b["classes"][i], "score": float(pr[1] if len(pr) == 2 else pr[i])})
+            out.append(
+                {
+                    "label": b["classes"][i],
+                    "score": float(pr[1] if len(pr) == 2 else pr[i]),
+                }
+            )
     else:
         out = [{"value": float(v)} for v in pipe.predict(X)]
     return {"model": b["model"], "task": b["task"], "predictions": out}

@@ -14,7 +14,9 @@ def test_json_input_supported(tmp_path, capsys):
 
     response = TestClient(app).post(
         "/audit",
-        files={"file": ("data.json", json_path.read_bytes(), "application/octet-stream")},
+        files={
+            "file": ("data.json", json_path.read_bytes(), "application/octet-stream")
+        },
         data={"target": "y"},
     )
     assert response.status_code == 200, response.text
@@ -31,7 +33,9 @@ def test_excel_input_supported(tmp_path, capsys):
 
     response = TestClient(app).post(
         "/audit",
-        files={"file": ("data.xlsx", xlsx_path.read_bytes(), "application/octet-stream")},
+        files={
+            "file": ("data.xlsx", xlsx_path.read_bytes(), "application/octet-stream")
+        },
         data={"target": "y"},
     )
     assert response.status_code == 200, response.text
@@ -48,7 +52,13 @@ def test_feather_input_supported(tmp_path, capsys):
 
     response = TestClient(app).post(
         "/audit",
-        files={"file": ("data.feather", feather_path.read_bytes(), "application/octet-stream")},
+        files={
+            "file": (
+                "data.feather",
+                feather_path.read_bytes(),
+                "application/octet-stream",
+            )
+        },
         data={"target": "y"},
     )
     assert response.status_code == 200, response.text

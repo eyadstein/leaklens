@@ -42,7 +42,12 @@ def test_dhash_is_64_bits_and_stable(splits):
 def test_near_duplicate_found_distinct_not(splits):
     train, test = splits
     fs, pairs, stats = image_overlap(train, test)
-    assert stats == {"train_images": 4, "test_images": 3, "unreadable": 0, "near_duplicates": 1}
+    assert stats == {
+        "train_images": 4,
+        "test_images": 3,
+        "unreadable": 0,
+        "near_duplicates": 1,
+    }
     assert [(p["test"], p["train"]) for p in pairs] == [("copy.jpg", "cats/2.png")]
     assert [(f.severity, f.kind) for f in fs] == [("high", "image_overlap")]
 

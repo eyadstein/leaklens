@@ -31,6 +31,7 @@ feather = ["pyarrow>=14"]
 excel = ["openpyxl>=3.1"]
 images = ["pillow>=9.1"]
 app = ["fastapi>=0.110", "uvicorn>=0.27", "python-multipart>=0.0.9", "streamlit>=1.30"]
+taintwatch = ["taintwatch>=0.1.0,<0.2"]
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
@@ -41,6 +42,8 @@ dev = [
     "pyarrow>=14",
     "openpyxl>=3.1",
     "pillow>=9.1",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
@@ -52,3 +55,16 @@ include = ["leaklens*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 norecursedirs = [".*", "_darcs", "build", "dist", "CVS", "maintenance-backup", ".venv"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "examples", "scripts", ".venv", "maintenance-backup"]
+# B101 (assert_used) is a testing idiom; skip in tests via exclude_dirs above.
+skips = ["B101"]
+
+[tool.ruff.lint]
+extend-select = ["B02", "BLE0", "F4", "I00", "ISC0", "PLW15", "RUF0", "S10"]
+ignore = ["ISC004", "RUF100", "PLW1510"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+"scripts/**" = ["S101", "S103", "S603", "S607"]

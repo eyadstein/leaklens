@@ -9,7 +9,25 @@ models/
 *.csv
 dist/
 build/
-
 LAUNCH.txt
-
 study_sample.txt
+
+# Local environments and run artifacts (never commit)
+.clean-v310/
+.clean-v311/
+.clean-v312/
+.clean-v313/
+.venv*/
+venv/
+.venvs/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.pip-freeze.txt
+.clean-v312-pip-freeze.txt
+.coverage.*-pip-freeze.txt
+
+# Local maintenance backups (never commit)
+.impact-patch-backup/
+maintenance-backup/

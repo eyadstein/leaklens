@@ -23,6 +23,42 @@ def _open_without_redirects(request: Request, timeout: float):
     return opener.open(request, timeout=timeout)
 
 
+def _taintwatch_guard():
+    """Return a TaintWatch guard when the optional extra is enabled, else None.
+
+    Enabled only when the ``taintwatch`` extra is installed *and*
+    ``LEAKLENS_TAINTWATCH=1``. Any import or setup failure returns None so
+    LLM explanations keep working without the optional dependency (which
+    requires Python >=3.11).
+    """
+    import os as _os
+
+    if _os.getenv("LEAKLENS_TAINTWATCH") != "1":
+        return None
+    try:
+        from taintwatch.guard import Guard
+
+        return Guard.default()
+    except Exception:  # noqa: BLE001 - optional dependency; never break explanations
+        return None
+
+
+def _check_with_taintwatch(guard, sink_name: str, data: str) -> None:
+    """Run payload through the TaintWatch guard when enabled.
+
+    Blocks confidential data from being sent to the HTTP sink. Raises
+    LLMError on policy violation so the caller fails closed.
+    """
+    if guard is None:
+        return
+    try:
+        guard.check_call(sink_name, {"payload": data})
+    except LLMError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - re-wrap as LLMError (fail closed)
+        raise LLMError(f"TaintWatch blocked LLM request: {exc}") from exc
+
+
 def _validate_base_url(base_url: str, *, sends_api_key: bool = False) -> None:
     """Reject unsafe provider URLs before sending finding data or credentials."""
     from urllib.parse import urlsplit
@@ -32,10 +68,23 @@ def _validate_base_url(base_url: str, *, sends_api_key: bool = False) -> None:
         hostname = parsed.hostname
     except ValueError as exc:
         raise LLMError("invalid LLM provider base URL") from exc
-    if parsed.scheme not in {"http", "https"} or not hostname or parsed.username or parsed.password:
-        raise LLMError("LLM provider base URL must use HTTP or HTTPS without embedded credentials")
-    if sends_api_key and parsed.scheme == "http" and hostname.lower() not in {"localhost", "127.0.0.1"}:
-        raise LLMError("refusing to send LEAKLENS_LLM_API_KEY over plain HTTP to a non-local host")
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or parsed.username
+        or parsed.password
+    ):
+        raise LLMError(
+            "LLM provider base URL must use HTTP or HTTPS without embedded credentials"
+        )
+    if (
+        sends_api_key
+        and parsed.scheme == "http"
+        and hostname.lower() not in {"localhost", "127.0.0.1"}
+    ):
+        raise LLMError(
+            "refusing to send LEAKLENS_LLM_API_KEY over plain HTTP to a non-local host"
+        )
 
 
 class ExplanationProvider(Protocol):
@@ -103,16 +152,23 @@ def _sanitize_llm_output(value: str) -> str:
 
 
 class OllamaProvider:
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "qwen2.5:7b", timeout: float = 30):
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "qwen2.5:7b",
+        timeout: float = 30,
+    ):
         _validate_base_url(base_url)
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
 
     def explain(self, finding) -> str:
+        content = _prompt(finding)
+        _check_with_taintwatch(_taintwatch_guard(), "http_post", content)
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": _prompt(finding)}],
+            "messages": [{"role": "user", "content": content}],
             "stream": False,
         }
         request = Request(
@@ -141,9 +197,11 @@ class OpenAICompatibleProvider:
         self.timeout = timeout
 
     def explain(self, finding) -> str:
+        content = _prompt(finding)
+        _check_with_taintwatch(_taintwatch_guard(), "http_post", content)
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": _prompt(finding)}],
+            "messages": [{"role": "user", "content": content}],
         }
         request = Request(
             f"{self.base_url}/chat/completions",
@@ -174,16 +232,21 @@ def create_provider(
     """Build a provider only when the caller explicitly enables LLM explanations."""
     if name == "ollama":
         return OllamaProvider(
-            base_url=base_url or os.getenv("LEAKLENS_LLM_BASE_URL", "http://localhost:11434"),
+            base_url=base_url
+            or os.getenv("LEAKLENS_LLM_BASE_URL", "http://localhost:11434"),
             model=model or os.getenv("LEAKLENS_LLM_MODEL", "qwen2.5:7b"),
         )
     if name == "openai-compatible":
         endpoint = base_url or os.getenv("LEAKLENS_LLM_BASE_URL")
         if not endpoint:
-            raise LLMError("--llm-base-url or LEAKLENS_LLM_BASE_URL is required for this provider")
+            raise LLMError(
+                "--llm-base-url or LEAKLENS_LLM_BASE_URL is required for this provider"
+            )
         key = api_key or os.getenv("LEAKLENS_LLM_API_KEY")
         if not key:
-            raise LLMError("LEAKLENS_LLM_API_KEY is required for the openai-compatible provider")
+            raise LLMError(
+                "LEAKLENS_LLM_API_KEY is required for the openai-compatible provider"
+            )
         selected_model = model or os.getenv("LEAKLENS_LLM_MODEL", "gpt-4o-mini")
         return OpenAICompatibleProvider(endpoint, selected_model, key)
     raise LLMError(f"unknown LLM provider: {name}")

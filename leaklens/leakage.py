@@ -45,8 +45,10 @@ def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
         if c == target:
             continue
         try:
-            sc = float(cross_val_score(make(), _encode(d[c]), y, cv=5, scoring=scoring).mean())
-        except Exception:
+            sc = float(
+                cross_val_score(make(), _encode(d[c]), y, cv=5, scoring=scoring).mean()
+            )
+        except Exception:  # noqa: BLE001, S112 - a column that cannot be cross-validated cannot be single-feature leakage; skip it
             continue
         if sc >= threshold:
             sev = "high"
@@ -54,7 +56,11 @@ def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
             sev = "medium"
         else:
             continue
-        out.append(Finding(sev, "target_leakage", c, f"alone predicts target ({scoring}={sc:.3f})"))
+        out.append(
+            Finding(
+                sev, "target_leakage", c, f"alone predicts target ({scoring}={sc:.3f})"
+            )
+        )
     return out
 
 
@@ -67,7 +73,14 @@ def id_like(df, target, ratio=0.98):
             continue
         r = df[c].nunique(dropna=True) / len(df)
         if r >= ratio:
-            out.append(Finding("medium", "id_like", c, f"{r:.1%} unique values; likely an identifier"))
+            out.append(
+                Finding(
+                    "medium",
+                    "id_like",
+                    c,
+                    f"{r:.1%} unique values; likely an identifier",
+                )
+            )
     return out
 
 
@@ -77,24 +90,104 @@ def split_overlap(train, test):
     n = int(pd.util.hash_pandas_object(test[cols], index=False).isin(a).sum())
     if n == 0:
         return []
-    return [Finding("high", "split_overlap", "*", f"{n} test rows ({n / len(test):.1%}) also appear in train")]
+    return [
+        Finding(
+            "high",
+            "split_overlap",
+            "*",
+            f"{n} test rows ({n / len(test):.1%}) also appear in train",
+        )
+    ]
 
 
 def temporal_overlap(train, test, time_col):
     a = pd.to_datetime(train[time_col], errors="coerce")
     b = pd.to_datetime(test[time_col], errors="coerce")
     if a.max() > b.min():
-        return [Finding("high", "temporal_leakage", time_col, f"train extends to {a.max()} but test starts {b.min()}")]
+        return [
+            Finding(
+                "high",
+                "temporal_leakage",
+                time_col,
+                f"train extends to {a.max()} but test starts {b.min()}",
+            )
+        ]
     return []
 
 
+def categorical_target_leaks(df, target, threshold=0.95, min_rows=50):
+    """High-cardinality categorical columns that encode the target.
+
+    Distinct from id_like (which checks uniqueness ratio >=0.98): this checks
+    whether knowing the category alone determines (or strongly predicts) the
+    target via conditional-entropy reduction. A column is flagged when each
+    category is near-pure w.r.t. the target while having many categories.
+    Requires >=50 rows to avoid small-sample false positives.
+    """
+    out = []
+    if len(df) < min_rows or target not in df.columns:
+        return out
+    y = df[target].astype("category").cat.codes
+    y_counts = y.value_counts(normalize=True)
+    if len(y_counts) < 2:
+        return out
+    base_entropy = float(-(y_counts * np.log(y_counts)).sum())
+    if base_entropy == 0:
+        return out
+    for c in df.columns:
+        if c == target:
+            continue
+        s = df[c]
+        # Only categorical/object/string columns with many categories qualify.
+        if s.dtype.kind not in "OSU" and str(s.dtype) not in ("category", "object"):
+            continue
+        n_unique = s.nunique(dropna=True)
+        # High cardinality: at least 10 categories, but not so many it's an ID
+        # (id_like handles the >=98% uniqueness case; require <= 50% unique ratio).
+        if n_unique < 10 or n_unique / max(len(df), 1) > 0.5:
+            continue
+        codes = s.astype("category").cat.codes
+        if codes.min() < 0:
+            continue
+        # Conditional entropy H(Y|X)
+        cond = 0.0
+        sizes = codes.value_counts()
+        for code, count in sizes.items():
+            mask = codes == code
+            yy = y[mask]
+            yc = yy.value_counts(normalize=True)
+            cond += (count / len(df)) * float(-(yc * np.log(yc)).sum())
+        gain = 1.0 - (cond / base_entropy)
+        if gain >= 0.9:
+            sev = "high"
+        elif gain >= 0.8:
+            sev = "medium"
+        else:
+            continue
+        out.append(
+            Finding(
+                sev,
+                "categorical_target_leakage",
+                c,
+                f"category almost determines target (entropy reduction={gain:.2f}, "
+                f"{n_unique} categories in {len(df)} rows); the column likely encodes the target",
+            )
+        )
+    return out
+
+
 def scan(df, target, threshold=0.95):
-    return single_feature_leaks(df, target, threshold) + id_like(df, target)
+    return (
+        single_feature_leaks(df, target, threshold)
+        + id_like(df, target)
+        + categorical_target_leaks(df, target)
+    )
 
 
 def score(findings) -> int:
     pen = {"high": 35, "medium": 15, "low": 5}
     return max(0, 100 - sum(pen.get(f.severity, 0) for f in findings))
+
 
 def group_risk(df, group_col):
     if group_col not in df.columns:
@@ -103,8 +196,14 @@ def group_risk(df, group_col):
     share = float(sizes[sizes > 1].sum() / max(len(df), 1))
     if share < 0.5:
         return []
-    return [Finding("medium", "group_leakage_risk", group_col,
-                    f"{share:.0%} of rows share a {group_col} with other rows; a random split leaks entities, split by group")]
+    return [
+        Finding(
+            "medium",
+            "group_leakage_risk",
+            group_col,
+            f"{share:.0%} of rows share a {group_col} with other rows; a random split leaks entities, split by group",
+        )
+    ]
 
 
 def group_overlap(train, test, group_col):
@@ -114,5 +213,11 @@ def group_overlap(train, test, group_col):
     if not shared:
         return []
     n = int(test[group_col].isin(shared).sum())
-    return [Finding("high", "group_overlap", group_col,
-                    f"{len(shared)} {group_col} values in both splits ({n / len(test):.1%} of test rows)")]
+    return [
+        Finding(
+            "high",
+            "group_overlap",
+            group_col,
+            f"{len(shared)} {group_col} values in both splits ({n / len(test):.1%} of test rows)",
+        )
+    ]

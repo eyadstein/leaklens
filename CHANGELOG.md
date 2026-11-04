@@ -1,9 +1,13 @@
 # Changelog
 
 ## Unreleased
-- Excel, JSON and Feather input alongside CSV and Parquet, via the new `excel` and `feather` extras for the optional formats
 - `leaklens init` writes a commented starter `.leaklens.toml` and prints the pre-commit snippet
 - `leaklens images TRAIN_DIR TEST_DIR` finds near-duplicate images across splits with a 64-bit dHash (`--max-distance`, default 6); needs the new `images` extra (Pillow)
+- New detector: hyperparameter search (`GridSearchCV` / `RandomizedSearchCV` / `HalvingGridSearchCV` / …) fitted on test data (`tuning_on_test_data`, high) — 4 new benchmark cases
+- New detector: high-cardinality categorical columns that encode the target via entropy reduction (`categorical_target_leakage`, high/medium) — complements the existing `id_like` detector
+- Security: CI `bandit` + `pip-audit` steps, expanded `SECURITY.md` threat model, optional TaintWatch guard for `--llm` (`LEAKLENS_TAINTWATCH=1`, `taintwatch` extra)
+- Real-world notebook validation: 60 public notebooks in `realworld/` with hand-reviewed labels (`realworld/labels.json`); only the 8 definitive labels (5 `confirmed_leakage` + 3 `legitimate`) contribute to precision/recall/F1 — the other 52 are reported but excluded (see [docs/REALWORLD.md](docs/REALWORLD.md)). Corpus is kept separate from the synthetic benchmark
+- Tests: direct unit coverage for `leaklens/intelligence/` (`analyze_findings`, `analyze_dataset_impact`, `assess_confidence`) and `cvcheck.py`
 
 ## 0.12.0
 - Add opt-in LLM explanations for findings (#30, thanks @Vamsi-2581)

@@ -6,8 +6,13 @@ import warnings
 from .leakage import Finding
 from .scanner import BENIGN, FUNCS, HINTS, RESAMPLE, _all_names, _name, _sev
 
-REPLACEABLE = {"fit_on_full_data", "transformer_before_split", "preprocess_before_split",
-               "resample_before_split", "encoder_before_split"}
+REPLACEABLE = {
+    "fit_on_full_data",
+    "transformer_before_split",
+    "preprocess_before_split",
+    "resample_before_split",
+    "encoder_before_split",
+}
 
 
 def _targets(t) -> set:
@@ -28,7 +33,9 @@ def _targets(t) -> set:
 
 def _inner_cls(node, cls: str) -> str:
     """Classify a ColumnTransformer by the steps inside it."""
-    names = [_name(n) for n in ast.walk(node) if isinstance(n, ast.Call) and n is not node]
+    names = [
+        _name(n) for n in ast.walk(node) if isinstance(n, ast.Call) and n is not node
+    ]
     hints = [n for n in names if any(h in n for h in HINTS)]
     if not hints:
         return cls
@@ -75,7 +82,9 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         node_of[t.id] = n.value
         elif isinstance(n, ast.Call):
             calls.append(n)
-        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith("sklearn.preprocessing"):
+        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
+            "sklearn.preprocessing"
+        ):
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
@@ -85,8 +94,12 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         if _name(c) == "train_test_split":
             return True
         f = c.func
-        return (isinstance(f, ast.Attribute) and f.attr == "split" and isinstance(f.value, ast.Name)
-                and any(k in ctor.get(f.value.id, "") for k in ("Fold", "Split")))
+        return (
+            isinstance(f, ast.Attribute)
+            and f.attr == "split"
+            and isinstance(f.value, ast.Name)
+            and any(k in ctor.get(f.value.id, "") for k in ("Fold", "Split"))
+        )
 
     splits = sorted((c for c in calls if is_split(c)), key=lambda c: c.lineno)
     if not splits:
@@ -114,9 +127,11 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 taint |= _targets(t)
             if not taint:
                 continue
-            events = sorted([("a", b.lineno, b) for b in assigns if b.lineno > a.lineno]
-                            + [("s", s.lineno, s) for s in splits if s.lineno > a.lineno],
-                            key=lambda e: (e[1], e[0] == "s"))
+            events = sorted(
+                [("a", b.lineno, b) for b in assigns if b.lineno > a.lineno]
+                + [("s", s.lineno, s) for s in splits if s.lineno > a.lineno],
+                key=lambda e: (e[1], e[0] == "s"),
+            )
             hit = None
             for kind, _, node in events:
                 if kind == "a":
@@ -129,7 +144,9 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     else:
                         taint -= tg
                 else:
-                    args = list(node.args) + [kw.value for kw in node.keywords if kw.arg in ("X", "y")]
+                    args = list(node.args) + [
+                        kw.value for kw in node.keywords if kw.arg in ("X", "y")
+                    ]
                     if any(_all_names(x) & taint for x in args):
                         hit = node
                         break
@@ -143,8 +160,14 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 kd = "transformer_before_split"
             else:
                 kd = "preprocess_before_split"
-            out.append(Finding(_sev(cls), kd, loc(c.lineno),
-                               f"{call}() output feeds the split at {loc(hit.lineno)}, so the split rows already shaped it"))
+            out.append(
+                Finding(
+                    _sev(cls),
+                    kd,
+                    loc(c.lineno),
+                    f"{call}() output feeds the split at {loc(hit.lineno)}, so the split rows already shaped it",
+                )
+            )
     return out
 
 

@@ -10,24 +10,24 @@ def test_benchmark_has_no_errors():
 def test_legacy_baseline_is_preserved():
     metrics = evaluate()["legacy"]
 
-    assert metrics["n"] == 69
-    assert metrics["leaky"] == 37
-    assert metrics["clean"] == 32
-    assert metrics["tp"] == 37
+    assert metrics["n"] == 73
+    assert metrics["leaky"] == 40
+    assert metrics["clean"] == 33
+    assert metrics["tp"] == 40
     assert metrics["fp"] == 0
-    assert metrics["tn"] == 32
+    assert metrics["tn"] == 33
     assert metrics["fn"] == 0
 
 
 def test_expanded_benchmark_counts():
     metrics = evaluate()
 
-    assert metrics["n"] == 105
-    assert metrics["leaky"] == 55
-    assert metrics["clean"] == 50
-    assert metrics["tp"] == 55
+    assert metrics["n"] == 109
+    assert metrics["leaky"] == 58
+    assert metrics["clean"] == 51
+    assert metrics["tp"] == 58
     assert metrics["fp"] == 0
-    assert metrics["tn"] == 50
+    assert metrics["tn"] == 51
     assert metrics["fn"] == 0
 
 

@@ -353,25 +353,30 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         f = c.func
         nm = _name(c)
 
-        is_get_dummies = (
-    isinstance(f, ast.Name) and f.id in get_dummies_aliases
-) or (
-    isinstance(f, ast.Attribute) and f.attr == "get_dummies"
-    and isinstance(f.value, ast.Name) and f.value.id in pandas_aliases
-)
+        is_get_dummies = (isinstance(f, ast.Name) and f.id in get_dummies_aliases) or (
+            isinstance(f, ast.Attribute)
+            and f.attr == "get_dummies"
+            and isinstance(f.value, ast.Name)
+            and f.value.id in pandas_aliases
+        )
 
         if is_get_dummies and first is not None and c.lineno < first:
             flows_to_split = any(
-        any(isinstance(n, ast.Call) and n is c for n in ast.walk(a.value))
-        and bool(set().union(*(_tnames(t) for t in a.targets)) & full)
-        for a in assigns if a.lineno == c.lineno
-    )
+                any(isinstance(n, ast.Call) and n is c for n in ast.walk(a.value))
+                and bool(set().union(*(_tnames(t) for t in a.targets)) & full)
+                for a in assigns
+                if a.lineno == c.lineno
+            )
             if flows_to_split:
-               out.append(Finding(
-            "low", "get_dummies_before_split", loc(c.lineno),
-            f"pandas.get_dummies() runs before the split at {loc(first)}, "
-            "so held-out categories can shape the encoded columns",
-            ))
+                out.append(
+                    Finding(
+                        "low",
+                        "get_dummies_before_split",
+                        loc(c.lineno),
+                        f"pandas.get_dummies() runs before the split at {loc(first)}, "
+                        "so held-out categories can shape the encoded columns",
+                    )
+                )
 
         # low severity: reproducibility - a random split nobody can rerun
         if (
@@ -647,7 +652,7 @@ def scan_file(path) -> list[Finding]:
         parts[idx] = "\n".join(["pass"] * (parts[idx].count("\n") + 1))
     out = scan_source("\n".join(parts), str(p), cells)
     skipped = [f"cell {cells[idx][1]} skipped: {e}" for idx, e in bad]
-    return out + [Finding("low", "parse_error", str(p), "; ".join(skipped))]
+    return [*out, Finding("low", "parse_error", str(p), "; ".join(skipped))]
 
 
 def scan_path(path) -> list[Finding]:

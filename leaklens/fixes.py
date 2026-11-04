@@ -20,6 +20,10 @@ FIXES = {
     "group_stat_before_split": "Compute group statistics on the training split only, or wrap the encoding in a Pipeline and evaluate with cross-validation.",
     "get_dummies_before_split": "Split first, then fit a OneHotEncoder(handle_unknown='ignore') on the training data inside a sklearn Pipeline so held-out categories do not shape the encoding.",
     "future_target_feature_before_split": "Do not build features from future target values. Use only information available at prediction time; for time series, construct lag features from past observations and split chronologically.",
+    "tuning_on_test_data": "Tune hyperparameters on training data with cross-validation (GridSearchCV with cv=5 on X_train). Use the test set once, only for final evaluation of the selected model.",
+    "categorical_target_leakage": "Check whether the high-cardinality categorical column is derived from the target or a post-outcome field. Remove it or replace it with a legitimate feature available at prediction time.",
 }
+
+
 def advice(kind: str) -> str:
     return FIXES.get(kind, "")

@@ -6,9 +6,21 @@ import warnings
 from .leakage import Finding
 from .scanner import BENIGN, FUNCS, HINTS, RESAMPLE, _all_names, _name, _sev, _tnames
 
-CV_FUNCS = {"cross_val_score", "cross_validate", "cross_val_predict", "learning_curve", "validation_curve",
-            "permutation_test_score"}
-SEARCH = ("GridSearchCV", "RandomizedSearchCV", "HalvingGridSearchCV", "HalvingRandomSearchCV", "BayesSearchCV")
+CV_FUNCS = {
+    "cross_val_score",
+    "cross_validate",
+    "cross_val_predict",
+    "learning_curve",
+    "validation_curve",
+    "permutation_test_score",
+}
+SEARCH = (
+    "GridSearchCV",
+    "RandomizedSearchCV",
+    "HalvingGridSearchCV",
+    "HalvingRandomSearchCV",
+    "BayesSearchCV",
+)
 
 
 def _fit_cls(c, ctor, funcs):
@@ -50,7 +62,9 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         ctor[t.id] = _name(n.value)
         elif isinstance(n, ast.Call):
             calls.append(n)
-        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith("sklearn.preprocessing"):
+        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
+            "sklearn.preprocessing"
+        ):
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
@@ -62,7 +76,10 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     fitted = {}
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
-        if not (isinstance(f, ast.Attribute) and f.attr in ("fit", "fit_transform", "fit_resample")):
+        if not (
+            isinstance(f, ast.Attribute)
+            and f.attr in ("fit", "fit_transform", "fit_resample")
+        ):
             continue
         b = f.value
         if not isinstance(b, ast.Name):
@@ -82,9 +99,14 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         hit = None
         for c in ast.walk(a.value):
             if isinstance(c, ast.Call):
-                if (isinstance(c.func, ast.Attribute) and c.func.attr == "transform"
-                        and isinstance(c.func.value, ast.Name)):
-                    events = [e for e in fitted.get(c.func.value.id, []) if e[0] <= a.lineno]
+                if (
+                    isinstance(c.func, ast.Attribute)
+                    and c.func.attr == "transform"
+                    and isinstance(c.func.value, ast.Name)
+                ):
+                    events = [
+                        e for e in fitted.get(c.func.value.id, []) if e[0] <= a.lineno
+                    ]
                     if events:
                         line, cls, argn = events[-1]
                         if not any(b in cls for b in BENIGN):
@@ -117,6 +139,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         return f"{label}:{line}"
 
     groups: dict = {}
+    test_tuned: list[Finding] = []
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
         fname = _name(c)
@@ -126,7 +149,11 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             who = fname
         elif isinstance(f, ast.Attribute) and f.attr == "fit":
             b = f.value
-            cls = ctor.get(b.id, "") if isinstance(b, ast.Name) else (_name(b) if isinstance(b, ast.Call) else "")
+            cls = (
+                ctor.get(b.id, "")
+                if isinstance(b, ast.Name)
+                else (_name(b) if isinstance(b, ast.Call) else "")
+            )
             if any(s in cls for s in SEARCH):
                 xs = c.args[:1] + [kw.value for kw in c.keywords if kw.arg == "X"]
                 who = cls
@@ -140,6 +167,26 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     break
             if hit:
                 break
+        # 2.4: hyperparameter search fitted/scored on the test partition itself.
+        # Checked independently of `hit` (preprocessing taint) — a search fitted
+        # on the test set is a leak even when no preprocessing was done.
+        if who in SEARCH or any(s in who for s in SEARCH):
+            arg_names = set()
+            for e in xs:
+                arg_names |= _all_names(e)
+            if any(
+                "test" in n.lower() or n.lower().startswith("x_te") for n in arg_names
+            ):
+                test_tuned.append(
+                    Finding(
+                        "high",
+                        "tuning_on_test_data",
+                        loc(c.lineno),
+                        f"{who}.fit() uses test data for hyperparameter tuning; the test "
+                        f"set must only be used once for final evaluation. Tune on training "
+                        f"data with cross-validation instead.",
+                    )
+                )
         if not hit:
             continue
         line, cls, argn = hit
@@ -148,13 +195,21 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         sev = _sev(cls)
         if not resample and _on_partition(argn) and any(s < line for s in split_lines):
             sev = "low"
-        g = groups.setdefault((line, kind), {"first": c, "who": who, "n": 0, "cls": cls, "sev": sev})
+        g = groups.setdefault(
+            (line, kind), {"first": c, "who": who, "n": 0, "cls": cls, "sev": sev}
+        )
         g["n"] += 1
     out = []
     for (line, kind), g in groups.items():
         more = g["n"] - 1
         extra = f" (and {more} more call{'s' if more > 1 else ''})" if more else ""
-        out.append(Finding(g["sev"], kind, loc(g["first"].lineno),
-                           f"{g['who']}(){extra} is given data transformed by {g['cls']} at {loc(line)}; the transform "
-                           f"has seen every fold's validation rows. Put it inside a Pipeline passed to {g['who']}"))
-    return out
+        out.append(
+            Finding(
+                g["sev"],
+                kind,
+                loc(g["first"].lineno),
+                f"{g['who']}(){extra} is given data transformed by {g['cls']} at {loc(line)}; the transform "
+                f"has seen every fold's validation rows. Put it inside a Pipeline passed to {g['who']}",
+            )
+        )
+    return out + test_tuned

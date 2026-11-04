@@ -20,11 +20,15 @@ def test_tts_with_random_state_is_clean():
 
 def test_tts_star_kwargs_not_flagged():
     # a ** expansion can carry random_state; the scanner must not assume absence
-    assert "no_random_state" not in kinds(SPLIT + "opts = {'random_state': 0}\na = train_test_split(X, y, **opts)\n")
+    assert "no_random_state" not in kinds(
+        SPLIT + "opts = {'random_state': 0}\na = train_test_split(X, y, **opts)\n"
+    )
 
 
 def test_kfold_shuffle_without_seed():
-    fs = scan_source("from sklearn.model_selection import KFold\nkf = KFold(5, shuffle=True)\n")
+    fs = scan_source(
+        "from sklearn.model_selection import KFold\nkf = KFold(5, shuffle=True)\n"
+    )
     assert "no_random_state" in {f.kind for f in fs}
 
 
@@ -46,8 +50,10 @@ def test_stratified_kfold_shuffle_without_seed():
 def test_repeated_kfold_always_shuffles():
     src = "from sklearn.model_selection import RepeatedKFold\nrkf = RepeatedKFold(n_splits=5, n_repeats=2)\n"
     assert "no_random_state" in kinds(src)
-    src2 = ("from sklearn.model_selection import RepeatedKFold\n"
-            "rkf = RepeatedKFold(n_splits=5, n_repeats=2, random_state=7)\n")
+    src2 = (
+        "from sklearn.model_selection import RepeatedKFold\n"
+        "rkf = RepeatedKFold(n_splits=5, n_repeats=2, random_state=7)\n"
+    )
     assert "no_random_state" not in kinds(src2)
 
 
@@ -57,8 +63,11 @@ def test_module_attribute_call_form():
 
 
 def test_combined_with_leak_reports_both():
-    src = ("from sklearn.preprocessing import StandardScaler\n" + SPLIT +
-           "X = StandardScaler().fit_transform(X)\na = train_test_split(X, y)\n")
+    src = (
+        "from sklearn.preprocessing import StandardScaler\n"
+        + SPLIT
+        + "X = StandardScaler().fit_transform(X)\na = train_test_split(X, y)\n"
+    )
     assert {"preprocess_before_split", "no_random_state"} <= kinds(src)
 
 

@@ -5,7 +5,9 @@ from leaklens.leakage import group_overlap, group_risk
 
 
 def _df():
-    return pd.DataFrame({"pid": [1, 1, 2, 2, 3, 3], "x": range(6), "y": [0, 1, 0, 1, 0, 1]})
+    return pd.DataFrame(
+        {"pid": [1, 1, 2, 2, 3, 3], "x": range(6), "y": [0, 1, 0, 1, 0, 1]}
+    )
 
 
 def test_group_risk():

@@ -9,7 +9,8 @@ from leaklens.intelligence import (
     build_context,
 )
 from leaklens.intelligence.confidence import assess_confidence as _ac
-from leaklens.intelligence.context import AnalysisContext, build_context as _bc
+from leaklens.intelligence.context import AnalysisContext
+from leaklens.intelligence.context import build_context as _bc
 from leaklens.leakage import Finding
 
 
@@ -25,6 +26,7 @@ def _ev(kind, severity="high", description="detail", supports=True):
 
 
 # --- assess_confidence ---
+
 
 def test_assess_confidence_empty():
     c = assess_confidence([])
@@ -88,6 +90,7 @@ def test_confidence_reason_always_has_heuristic_warning():
 
 # --- build_context ---
 
+
 def test_build_context_preserves_order_and_metadata():
     findings = [
         Finding("high", "target_leakage", "col_x", "detail A"),
@@ -108,11 +111,13 @@ def test_build_context_preserves_order_and_metadata():
 
 
 def test_build_context_evidence_for():
-    ctx = build_context([
-        Finding("high", "target_leakage", "a", "1"),
-        Finding("low", "target_leakage", "b", "2"),
-        Finding("medium", "id_like", "c", "3"),
-    ])
+    ctx = build_context(
+        [
+            Finding("high", "target_leakage", "a", "1"),
+            Finding("low", "target_leakage", "b", "2"),
+            Finding("medium", "id_like", "c", "3"),
+        ]
+    )
     assert len(ctx.evidence_for("target_leakage")) == 2
     assert ctx.evidence_for("nonexistent") == ()
 
@@ -129,6 +134,7 @@ def test_build_context_empty():
 
 
 # --- analyze_findings ---
+
 
 def test_analyze_findings_empty():
     report = analyze_findings([])
@@ -199,10 +205,17 @@ def test_analyze_findings_to_dict_roundtrip():
     d = report.to_dict()
     assert d["finding_count"] == 1
     assert d["engine"] == "deterministic"
-    assert d["confidence"]["level"] in ("very_low", "low", "moderate", "high", "very_high")
+    assert d["confidence"]["level"] in (
+        "very_low",
+        "low",
+        "moderate",
+        "high",
+        "very_high",
+    )
 
 
 # --- analyze_dataset_impact ---
+
 
 def test_analyze_dataset_impact_basic():
     train = pd.DataFrame({"a": [1, 2, 3], "b": ["x", "y", "z"]})
@@ -295,15 +308,24 @@ def test_analyze_dataset_impact_rounds_percentages():
 
 # --- schemas validation ---
 
+
 def test_evidence_validation():
     with pytest.raises(ValueError):
         Evidence(evidence_id="", source="scanner", kind="x", description="d")
     with pytest.raises(ValueError):
         Evidence(evidence_id="e", source="bad_source", kind="x", description="d")
     with pytest.raises(ValueError):
-        Evidence(evidence_id="e", source="scanner", kind="x", description="d", finding_index=-1)
+        Evidence(
+            evidence_id="e",
+            source="scanner",
+            kind="x",
+            description="d",
+            finding_index=-1,
+        )
     with pytest.raises(ValueError):
-        Evidence(evidence_id="e", source="scanner", kind="x", description="d", location="   ")
+        Evidence(
+            evidence_id="e", source="scanner", kind="x", description="d", location="   "
+        )
     ok = Evidence(evidence_id="e", source="scanner", kind="x", description="d")
     assert ok.to_dict()["evidence_id"] == "e"
 

@@ -6,28 +6,28 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 | Metric | Value |
 |---|---:|
-| Cases | 105 |
-| Leaky / clean | 55 / 50 |
+| Cases | 109 |
+| Leaky / clean | 58 / 51 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 55 |
+| True positives | 58 |
 | False positives | 0 |
-| True negatives | 50 |
+| True negatives | 51 |
 | False negatives | 0 |
 
 ## Original regression baseline
 
 | Metric | Value |
 |---|---:|
-| Cases | 69 |
-| Leaky / clean | 37 / 32 |
+| Cases | 73 |
+| Leaky / clean | 40 / 33 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 37 |
+| True positives | 40 |
 | False positives | 0 |
-| True negatives | 32 |
+| True negatives | 33 |
 | False negatives | 0 |
 
 ## Additional categorized cases
@@ -55,11 +55,11 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 ## Reproducibility checks
 
-Low-severity reproducibility cases (issue #13): 13/14 correct; 1 misclassified.
+Low-severity reproducibility cases (issue #13): 14/14 correct; 0 misclassified.
 
 ## Misclassified cases
 
-- missed (low): get_dummies before split
+- none
 
 ## Caveats
 

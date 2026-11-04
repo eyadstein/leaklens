@@ -18,3 +18,13 @@ jobs:
       - run: pytest --cov=leaklens --cov-report=term-missing -q
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev]"
+      - run: bandit -r leaklens
+      - run: pip-audit

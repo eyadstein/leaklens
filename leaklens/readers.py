@@ -35,5 +35,7 @@ def read_dataset(source, name=None):
     ext = _suffix(source, name)
     reader, module, extra = _FORMATS.get(ext, _FORMATS[".csv"])
     if module and not _available(module):
-        raise ImportError(f'{ext} input needs {module}: pip install "leaklens-ml[{extra}]"')
+        raise ImportError(
+            f'{ext} input needs {module}: pip install "leaklens-ml[{extra}]"'
+        )
     return reader(source)

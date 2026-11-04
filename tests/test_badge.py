@@ -14,6 +14,9 @@ def test_badge(tmp_path):
 
 def test_fail_under(tmp_path):
     f = tmp_path / "leak.py"
-    f.write_text("from sklearn.preprocessing import StandardScaler\nscaler = StandardScaler()\nscaler.fit(X_test)\n", encoding="utf-8")
+    f.write_text(
+        "from sklearn.preprocessing import StandardScaler\nscaler = StandardScaler()\nscaler.fit(X_test)\n",
+        encoding="utf-8",
+    )
     assert main(["--scan", str(f), "--fail-under", "90"]) == 1
     assert main(["--scan", str(f), "--fail-under", "50"]) == 1

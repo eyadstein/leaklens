@@ -30,7 +30,9 @@ def test_function_style_scale_is_high():
 
 def test_column_transformer_is_medium():
     fs = scan_source(CT)
-    assert fs and fs[0].severity == "medium" and fs[0].kind == "transformer_before_split"
+    assert (
+        fs and fs[0].severity == "medium" and fs[0].kind == "transformer_before_split"
+    )
 
 
 def test_unrelated_scale_ignored():
