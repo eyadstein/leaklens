@@ -35,8 +35,9 @@ We appreciate responsible reports and will credit reporters in the advisory unle
 - Reads the CSV/Parquet/JSON/Excel/Feather file you point it at. Dataset contents stay on your machine; nothing is uploaded unless you use an optional feature below.
 
 ### FastAPI service (`leaklens.api`)
-- `POST /predict` loads model files with `joblib` from a caller-supplied path. `joblib`/`pickle` deserialisation can execute arbitrary code.
+- `POST /predict` loads model files with `joblib` from `./models/` only; absolute and traversal paths outside that directory are rejected. `joblib`/`pickle` deserialisation can still execute arbitrary code.
 - **Only load models you trust.** Do not expose `/predict` (or the API) to untrusted users or networks.
+- Uploads are capped (8 MiB and 50,000 rows); ZIP/gzip containers are size-checked (256 MiB decompressed) and ZIP entry paths are validated before parsing.
 - The API is designed for local or trusted deployment (e.g. Docker on `localhost`), not as a public service.
 
 ### LLM explanations (`--llm`) — opt-in only
@@ -48,7 +49,9 @@ We appreciate responsible reports and will credit reporters in the advisory unle
 - Optional: install the `taintwatch` extra (`pip install "leaklens-ml[taintwatch]"`) and set `LEAKLENS_TAINTWATCH=1` to additionally gate the provider call with information-flow checks.
 
 ### Dependencies and CI
-- CI runs `bandit` (static code security checks) and `pip-audit` (known-vulnerability scan of dependencies) on every push/pull request.
+- CI runs `bandit` (static code security checks), `pip-audit` (known-vulnerability scan of dependencies), and `pip-licenses` on every push/pull request.
+- A separate CodeQL workflow runs `security-extended` Python analysis and uploads results to GitHub code scanning.
+- The release workflow generates a CycloneDX SBOM and uploads it alongside the wheel and sdist.
 
 ## Out of scope
 

@@ -31,4 +31,17 @@ jobs:
       - run: pip install --upgrade "setuptools>=84.1.0"
       - run: pip install -e ".[dev]"
       - run: bandit -r leaklens
-      - run: pip-audit
+      - run: pip show setuptools
+      - run: pip-audit --desc
+      - run: pip-licenses --format=csv
+      - run: python -m leaklens --version
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install "ruff>=0.17"
+      - run: ruff check leaklens tests scripts
+      - run: ruff format --check leaklens tests scripts

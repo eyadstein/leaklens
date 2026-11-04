@@ -47,13 +47,54 @@ A leaked column makes accuracy look perfect. LeakLens drops it and shows the hon
 
 ## Install
 
-Base package (no optional dependencies):
+Base package (no optional dependencies) — works on Windows, Linux and macOS:
 
 ```sh
-pip install leaklens-ml
+python -m pip install --upgrade leaklens-ml
+leaklens --version
+leaklens doctor
 ```
 
-CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--sarif` / `--html` / `--badge` work with the base install.
+On Windows, use `py -3 -m pip ...` if `python` is not on your PATH. On Linux and macOS, the same commands work with `python3`/`pip3` if your distribution does not alias `python`. If pip reports `externally-managed-environment` (PEP 668, common with Homebrew or distro Python), create a virtual environment first: `python3 -m venv .venv`, then `. .venv/bin/activate` (Windows: `.venv\Scripts\Activate.ps1`).
+
+Windows quick-start (PowerShell, creates `.venv`, installs, verifies, prints usage — no admin needed):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+# Optional extras:
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Extras "arena,parquet"
+```
+
+Linux/macOS development checkout:
+
+```sh
+git clone https://github.com/eyadstein/leaklens.git
+cd leaklens
+python -m venv .venv
+. .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
+pip install -e ".[dev,app]"
+```
+
+Verify outside the repo (clean environment):
+
+```sh
+leaklens doctor
+leaklens --version
+```
+
+CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
+
+### `leaklens doctor`
+
+`leaklens doctor` checks the install without network access and without reading secrets: Python is >=3.10, the LeakLens version and install location, the `leaklens` entry point, core dependencies (pandas, numpy, scikit-learn), which optional extras are importable, and whether `.leaklens.toml` or `pyproject.toml` (whichever it finds first) is valid TOML.
+
+```sh
+leaklens doctor             # human-readable report; exit 1 on a failed check
+leaklens doctor --json      # the same report as JSON
+leaklens doctor --help      # usage
+```
+
+Optional extras that are missing are listed but do not fail the check; a missing core dependency, Python <3.10, or invalid config returns exit code 1.
 
 ### Optional extras
 
@@ -68,7 +109,7 @@ Every optional extra declared in `pyproject.toml`:
 | `images` | Near-duplicate image check (`leaklens images`) with Pillow | `pip install "leaklens-ml[images]"` |
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
-| `dev` | Test, bandit, pip-audit, and the above dev tools | `pip install "leaklens-ml[dev]"` |
+| `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
 Development checkout:
 
@@ -213,7 +254,17 @@ streamlit run leaklens/ui.py
 
 Endpoints: `GET /health`, `POST /audit`, `POST /scan`, `POST /predict`.
 
-> `POST /predict` loads model files with `joblib` from a caller-supplied path. Only load models you trust and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
+> `POST /predict` loads model files with `joblib` only from `./models/` below the API's working directory. Absolute paths and traversal outside that directory are rejected. `joblib` uses pickle, which can execute arbitrary code while loading; only load models you trust and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
+
+### Upload and archive limits
+
+The API and the Streamlit CSV uploaders are meant for local or trusted use and enforce the same dataset limits:
+
+- **8 MiB** maximum per uploaded file, and **50,000 rows** maximum.
+- ZIP/gzip containers (including `.xlsx`, which is a ZIP archive) are inspected before parsing: total decompressed size must stay at or below **256 MiB**, ZIP entries with absolute or traversal paths are rejected, and nested gzip is limited to 5 layers.
+- `POST /scan` rejects source text larger than 8 MiB.
+
+The CLI reads files from disk, so it has no 8 MiB/50k-row upload cap, but the same 256 MiB decompressed-container check applies. Compressed files are not an additional input format: LeakLens does not decompress arbitrary `.zip`/`.gz` files into a dataset. The container checks protect the formats it does read (for example `.xlsx`).
 
 ## Docker
 
@@ -247,7 +298,7 @@ docker run --rm -p 8501:8501 leaklens streamlit run /app/leaklens/ui.py --server
 ## GitHub Action
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
 - uses: eyadstein/leaklens@main
   with:
     path: notebooks
@@ -266,17 +317,31 @@ The findings section includes a color-coded severity legend explaining high, med
 
 ```yaml
 permissions:
+  contents: read
   security-events: write
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
   - run: pip install leaklens-ml
   - run: leaklens --scan . --sarif leaklens.sarif || true
-  - uses: github/codeql-action/upload-sarif@v3
+  - uses: github/codeql-action/upload-sarif@v4
     with:
       sarif_file: leaklens.sarif
 ```
 
 Findings then appear in the repository's Security tab and as PR annotations.
+
+## SBOM and security automation
+
+The release workflow builds the wheel and sdist, installs the wheel, and writes a CycloneDX 1.5 SBOM to `sbom/sbom.json` with `scripts/generate_sbom.py`. The SBOM is kept outside `dist/` so it cannot be picked up by the PyPI publisher. Both the Python packages and the SBOM are uploaded as workflow artifacts; the wheel and sdist are then published to PyPI.
+
+```sh
+python scripts/generate_sbom.py              # dist/sbom.json
+python scripts/generate_sbom.py out/sbom.json
+```
+
+The generator reads runtime dependencies and optional extras from `pyproject.toml`, records installed versions when available, and excludes the `dev` extra. It needs Python 3.10+ (with `tomli` on 3.10) and does not require `cyclonedx-py`.
+
+CI runs `bandit`, `pip-audit`, and `pip-licenses` on every push and pull request. The separate CodeQL workflow runs `security-extended` Python analysis and uploads results to GitHub code scanning.
 
 ## Pre-commit hook
 

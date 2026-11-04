@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from . import __version__
 from .audit import audit
 from .leakage import scan, score
-from .readers import read_dataset
+from .readers import DatasetLimitError, read_dataset
 from .scanner import scan_source
 
 app = FastAPI(title="LeakLens", version=__version__)
@@ -25,7 +25,31 @@ class ScanReq(BaseModel):
 
 class PredictReq(BaseModel):
     rows: list[dict]
-    model_path: str = "models/best.joblib"
+    model_path: str = "models/best.joblib"  # relative path; resolved against CWD below
+
+
+class UploadLimits:
+    """DoS guard for uploaded datasets in POST /audit (size cap, no secrets in logs)."""
+
+    MAX_BYTES = 8 * 1024 * 1024  # 8 MiB
+    MAX_ROWS = 50_000
+
+
+def validate_upload_size(name: str, byte_count: int) -> None:
+    if byte_count > UploadLimits.MAX_BYTES:
+        raise HTTPException(413, f"upload too large (>8 MiB): {name}")
+
+
+def _check_upload(name: str, data: bytes) -> None:
+    validate_upload_size(name, len(data))
+    # Text formats are row-counted here. Binary containers (xlsx, parquet,
+    # feather, json) are deliberately not newline-counted -- their row count
+    # is only known after decompression, which is enforced in read_dataset().
+    if name.lower().endswith((".xlsx", ".parquet", ".feather", ".json")):
+        return
+    rows = data.count(b"\n")
+    if rows > UploadLimits.MAX_ROWS:
+        raise HTTPException(413, f"too many rows (>50k): {name}")
 
 
 @app.get("/health")
@@ -41,7 +65,12 @@ async def audit_csv(
 ):
     try:
         data = io.BytesIO(await file.read())
-        df = read_dataset(data, file.filename or "")
+        _check_upload(file.filename or "upload", data.getvalue())
+        df = read_dataset(data, file.filename or "", max_rows=UploadLimits.MAX_ROWS)
+    except DatasetLimitError as e:
+        raise HTTPException(413, str(e)) from None
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001 - re-wrap as HTTP 400 (fail closed)
         raise HTTPException(400, f"bad input: {e}")
     if target not in df.columns:
@@ -56,6 +85,8 @@ async def audit_csv(
 
 @app.post("/scan")
 def scan_code(req: ScanReq):
+    if len(req.source) > UploadLimits.MAX_BYTES:
+        raise HTTPException(413, f"scan source too large (>8 MiB): {req.name}")
     fs = scan_source(req.source, req.name)
     return {"trust_score": score(fs), "findings": [f.to_dict() for f in fs]}
 
@@ -63,11 +94,31 @@ def scan_code(req: ScanReq):
 @app.post("/predict")
 def predict(req: PredictReq):
     p = Path(req.model_path)
-    if not p.exists():
+    # Reject absolute or traversal paths; the model must live under the deployer's
+    # models/ tree so callers cannot load arbitrary (e.g. attacker-supplied) jobs.
+    # WARNING: joblib.load() unpickles the file; it is pickle-based deserialization
+    # and can execute arbitrary code if the model file is malicious. Only place
+    # model artifacts you trust in ./models/. Path validation alone does not make
+    # an untrusted joblib file safe.
+    resolved = (Path.cwd() / p).resolve()
+    models_root = (Path.cwd() / "models").resolve()
+    if models_root not in resolved.parents:
+        raise HTTPException(
+            422, f"model_path must be under ./models/ (got: {req.model_path})"
+        )
+    if not resolved.exists():
         raise HTTPException(
             404, "model not found; run: leaklens data.csv --target T --arena"
         )
-    b = joblib.load(p)
+    try:
+        b = joblib.load(resolved)
+    except Exception:  # noqa: BLE001 - re-wrap as HTTP 400 (fail closed)
+        # Corrupt/malicious pickle surfaces as EOFError, UnpicklingError
+        # (KeyError/ValueError inside) or OSError; treat any load failure
+        # as invalid model rather than leaking internal traces. pickle
+        # can execute arbitrary code, but the trusted ./models/ gate
+        # above already ensures only operator-placed artifacts reach here.
+        raise HTTPException(400, "invalid model file") from None
     df = pd.DataFrame(req.rows)
     miss = [c for c in b["features"] if c not in df.columns]
     if miss:

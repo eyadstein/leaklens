@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from fastapi import HTTPException
 
 from leaklens.audit import audit
 from leaklens.fixes import advice
@@ -53,7 +54,16 @@ def show(fs, key, audit_data=None, impact_data=None):
 with t1:
     up = st.file_uploader("Training CSV", type="csv", key="tr")
     if up:
-        df = pd.read_csv(up)
+        from leaklens.api import UploadLimits, validate_upload_size
+        from leaklens.readers import DatasetLimitError, read_dataset
+
+        try:
+            validate_upload_size(up.name or "upload", up.size or len(up.getvalue()))
+            up.seek(0)
+            df = read_dataset(up, up.name, max_rows=UploadLimits.MAX_ROWS)
+        except (DatasetLimitError, HTTPException, ValueError) as exc:
+            st.error(f"Invalid dataset: {exc}")
+            st.stop()
         target = st.selectbox(
             "Target column", list(df.columns), index=len(df.columns) - 1
         )
@@ -64,7 +74,15 @@ with t1:
         fs = scan(df, target, thr)
         impact_data = None
         if te_up:
-            te = pd.read_csv(te_up)
+            try:
+                validate_upload_size(
+                    te_up.name or "upload", te_up.size or len(te_up.getvalue())
+                )
+                te_up.seek(0)
+                te = read_dataset(te_up, te_up.name, max_rows=UploadLimits.MAX_ROWS)
+            except (DatasetLimitError, HTTPException, ValueError) as exc:
+                st.error(f"Invalid test dataset: {exc}")
+                st.stop()
             fs += split_overlap(df, te)
             tc = st.selectbox("Time column (optional)", ["", *list(df.columns)])
             if tc and tc in te.columns:
@@ -104,7 +122,16 @@ with t2:
 with t3:
     up3 = st.file_uploader("Training CSV", type="csv", key="ar")
     if up3:
-        df3 = pd.read_csv(up3)
+        from leaklens.api import UploadLimits, validate_upload_size
+        from leaklens.readers import DatasetLimitError, read_dataset
+
+        try:
+            validate_upload_size(up3.name or "upload", up3.size or len(up3.getvalue()))
+            up3.seek(0)
+            df3 = read_dataset(up3, up3.name, max_rows=UploadLimits.MAX_ROWS)
+        except (DatasetLimitError, HTTPException, ValueError) as exc:
+            st.error(f"Invalid dataset: {exc}")
+            st.stop()
         tgt = st.selectbox(
             "Target", list(df3.columns), index=len(df3.columns) - 1, key="tg"
         )

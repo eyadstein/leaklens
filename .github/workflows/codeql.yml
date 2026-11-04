@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Static security analysis for Python (uploads only; does not rebuild the
+# release). Least privilege: actions are pinned to major versions and the
+# job root is read-only; security-events: write is required only by the
+# upload step below.
+
+on:
+  push:
+    branches: [main]
+    # Path filters avoid needless CodeQL rebuilds on docs-only changes.
+    paths:
+      - "leaklens/**/*.py"
+      - "pyproject.toml"
+      - ".github/workflows/codeql.yml"
+  pull_request:
+    paths:
+      - "leaklens/**/*.py"
+      - "pyproject.toml"
+      - ".github/workflows/codeql.yml"
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          queries: security-extended
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/languages/python"

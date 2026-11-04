@@ -147,14 +147,116 @@ def images(argv) -> int:
     return 1 if fs else 0
 
 
+def doctor(argv) -> int:
+    from importlib import metadata as _meta
+
+    EXTRAS = {
+        "arena": "mlflow",
+        "parquet": "pyarrow",
+        "feather": "pyarrow",
+        "excel": "openpyxl",
+        "images": "PIL",
+        "app": "fastapi",
+        "taintwatch": "taintwatch",
+    }
+
+    def _import_ok(mod):
+        import importlib.util
+
+        return importlib.util.find_spec(mod) is not None
+
+    def _pkg_version(pkg):
+        try:
+            return _meta.version(pkg)
+        except _meta.PackageNotFoundError:
+            return None
+
+    report = {
+        "python_version": sys.version.split()[0],
+        "python_ok": sys.version_info >= (3, 10),
+        "leaklens_version": __version__,
+        "leaklens_location": __file__,
+        "cli_available": True,
+        "entry_point": "leaklens:main",
+        "required_ok": all(_import_ok(m) for m in ("pandas", "numpy", "sklearn")),
+        "extras": {extra: _import_ok(m) for extra, m in EXTRAS.items()},
+        "extras_available": [],
+        "toml_config_present": None,
+    }
+    report["extras_available"] = sorted(
+        e for e, ok in report["extras"].items() if ok and e != "taintwatch"
+    )
+    report["config_valid"] = True
+    report["config_error"] = None
+    for name in (".leaklens.toml", "pyproject.toml"):
+        path = Path(name)
+        if path.exists():
+            report["toml_config_present"] = name
+            try:
+                try:
+                    import tomllib
+                except ModuleNotFoundError:  # Python 3.10
+                    import tomli as tomllib
+
+                tomllib.loads(path.read_text(encoding="utf-8"))
+            except (
+                OSError,
+                ValueError,
+                UnicodeDecodeError,
+            ) as exc:  # invalid TOML in repo config
+                report["config_valid"] = False
+                report["config_error"] = str(exc)
+            break
+    else:
+        report["toml_config_present"] = None
+        report["config_valid"] = True
+    if argv and argv[0] in ("--help", "-h"):
+        print(
+            "usage: leaklens doctor [--json]\n\nCheck Python/LeakLens versions, install location, required and optional dependencies, and config validity."
+        )
+        return 0
+    text = [
+        f"Python      : {report['python_version']} (required >=3.10) {'OK' if report['python_ok'] else 'FAIL: python<3.10'}",
+        f"LeakLens    : {report['leaklens_version']} at {report['leaklens_location']}",
+        f"CLI         : {report['entry_point']} OK",
+        f"Core deps   : {'OK' if report['required_ok'] else 'FAIL: pandas/numpy/scikit-learn missing -> pip install --upgrade leaklens-ml'}",
+        f"Extras      : {', '.join(report['extras_available']) or 'none'} (of {', '.join([e for e in EXTRAS if e != 'taintwatch'])})",
+        f"Config      : {report['toml_config_present'] or 'none (ok)'}"
+        + (f" INVALID: {report['config_error']}" if not report["config_valid"] else ""),
+    ]
+    if (
+        not report["python_ok"]
+        or not report["required_ok"]
+        or not report["config_valid"]
+    ):
+        text.append(
+            "Result      : DOCTOR FAILED - see FAIL rows above; install/reinstall leaklens-ml or fix config"
+        )
+        print("\n".join(text))
+        return 1
+    if argv and "--json" in argv:
+        print(json.dumps(report, indent=2))
+        return 0
+    text.append("Result      : DOCTOR OK (no secrets, no network calls)")
+    print("\n".join(text))
+    return 0
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "init":
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "doctor":
+        return doctor(argv[1:])
     p = argparse.ArgumentParser(
-        prog="leaklens", description="Audit datasets and ML code for leakage"
+        prog="leaklens",
+        description="Audit datasets and ML code for leakage",
+        epilog=(
+            "Run 'leaklens doctor' to check your install, and "
+            "'leaklens init' to write a starter .leaklens.toml config."
+        ),
     )
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("train", nargs="?")

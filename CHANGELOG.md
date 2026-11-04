@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+
+## 0.13.0
+- `leaklens doctor` checks Python/LeakLens versions, install location, core and optional dependencies, and TOML config validity (text or `--json`; no network calls); Python 3.10 uses `tomli`
+- Upload protection for the API and Streamlit UI: 8 MiB / 50,000-row limits, ZIP/gzip decompressed-size limit (256 MiB), ZIP path-traversal rejection, and nested-gzip cap
+- CI: `ruff check` / `ruff format --check` lint job; `ruff` added to the `dev` extra
+- Security automation: CodeQL `security-extended` workflow; CycloneDX 1.5 SBOM generation (`scripts/generate_sbom.py`) kept outside `dist/` and uploaded with release packages; CI also runs `pip-licenses`
+- Windows PowerShell installer (`scripts/install.ps1`) that creates/reuses a venv, installs LeakLens, and runs `leaklens doctor`
+- Release workflow fixes: `contents: read` for checkout, wheel/sdist artifact upload, and SBOM generated after the build
+- Docs: document `leaklens doctor`, upload/archive limits, `/predict`'s `./models/` restriction, SBOM/security automation, and cross-platform install notes
 - `leaklens init` writes a commented starter `.leaklens.toml` and prints the pre-commit snippet
 - `leaklens images TRAIN_DIR TEST_DIR` finds near-duplicate images across splits with a 64-bit dHash (`--max-distance`, default 6); needs the new `images` extra (Pillow)
 - New detector: hyperparameter search (`GridSearchCV` / `RandomizedSearchCV` / `HalvingGridSearchCV` / …) fitted on test data (`tuning_on_test_data`, high) — 4 new benchmark cases

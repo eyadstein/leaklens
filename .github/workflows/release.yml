@@ -8,6 +8,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -16,4 +17,19 @@ jobs:
           python-version: "3.11"
       - run: pip install build
       - run: python -m build
+      # Install the built wheel so the SBOM can record resolved runtime versions.
+      - run: pip install dist/*.whl
+      # Keep the SBOM outside dist/: the PyPI publish action uploads every file
+      # in its packages directory, and a .json file there would fail twine check.
+      - run: python scripts/generate_sbom.py sbom/sbom.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: python-package
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom/sbom.json
       - uses: pypa/gh-action-pypi-publish@release/v1
