@@ -3,25 +3,116 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (vX.Y.Z; must match pyproject.toml)"
+        required: true
+        type: string
+
+# Never let two publishing runs overlap. A queued run waits for the active one.
+concurrency:
+  group: pypi-publish
+  cancel-in-progress: false
+
 jobs:
   pypi:
+    # Manual dispatch is allowed only from main. The tag itself is validated and
+    # checked out below; published releases are validated the same way.
+    if: >-
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       contents: read
       id-token: write
     steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
+          DISPATCH_TAG: ${{ github.event.inputs.tag || '' }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "release" ]; then
+            tag="$RELEASE_TAG"
+          else
+            tag="$DISPATCH_TAG"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::No release tag supplied."
+            exit 1
+          fi
+          if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag '$tag' is not in vX.Y.Z format."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      # Check out the trusted default branch first. No code from the release tag
+      # runs until its commit is proven to be on main and its version matches.
       - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      - name: Validate tag, version, and main history
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main \
+            "refs/tags/$TAG:refs/tags/$TAG"
+          tag_commit="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::Release tag $TAG ($tag_commit) is not in origin/main history."
+            exit 1
+          fi
+          git show "$TAG:pyproject.toml" > "$RUNNER_TEMP/release-pyproject.toml"
+          python scripts/validate_release.py \
+            --tag "$TAG" \
+            --pyproject "$RUNNER_TEMP/release-pyproject.toml" \
+            --event "$EVENT_NAME" \
+            --ref "$REF"
+          echo "Release $TAG is version-matched and on main."
+      - name: Check out validated release tag
+        run: git checkout --detach "${{ steps.release.outputs.tag }}"
       - run: pip install build
       - run: python -m build
+      - name: Verify dist contains only the wheel and sdist
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          files = sorted(p.name for p in Path("dist").iterdir() if p.is_file())
+          wheels = [name for name in files if name.endswith(".whl")]
+          sdists = [name for name in files if name.endswith(".tar.gz")]
+          if len(files) != 2 or len(wheels) != 1 or len(sdists) != 1:
+              raise SystemExit(
+                  "dist/ must contain exactly one wheel and one sdist; "
+                  f"found {files}"
+              )
+          print("Publishing files:", ", ".join(files))
+          PY
       # Install the built wheel so the SBOM can record resolved runtime versions.
       - run: pip install dist/*.whl
       # Keep the SBOM outside dist/: the PyPI publish action uploads every file
       # in its packages directory, and a .json file there would fail twine check.
       - run: python scripts/generate_sbom.py sbom/sbom.json
+      - name: Verify SBOM is outside dist
+        run: |
+          set -euo pipefail
+          test -f sbom/sbom.json
+          if [ -e dist/sbom.json ]; then
+            echo "::error::SBOM must not be inside dist/."
+            exit 1
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: python-package
@@ -33,3 +124,5 @@ jobs:
           name: sbom
           path: sbom/sbom.json
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
