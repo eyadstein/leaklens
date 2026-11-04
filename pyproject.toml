@@ -48,3 +48,7 @@ leaklens = "leaklens.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["leaklens*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = [".*", "_darcs", "build", "dist", "CVS", "maintenance-backup", ".venv"]
