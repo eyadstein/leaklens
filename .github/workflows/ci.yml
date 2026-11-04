@@ -25,6 +25,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+      # Build isolation (PEP 517) only upgrades the build env. The runtime
+      # setuptools shipped with setup-python is audited by pip-audit, so
+      # upgrade it explicitly before the audit.
+      - run: pip install --upgrade "setuptools>=84.1.0"
       - run: pip install -e ".[dev]"
       - run: bandit -r leaklens
       - run: pip-audit
