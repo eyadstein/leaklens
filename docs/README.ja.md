@@ -493,4 +493,4 @@ python -m leaklens.bench
 
 @jay23606（Parquet入力）、@slopggobblercobbler81（`--fail-under`）、@tyza66（Excel、JSON、Feather入力）、@rahul05ranjan（`random_state`の再現性チェック）、@have-you-tried-restarting（重大度の概要）、@Rashmi-R444（信頼スコアのドキュメント）、@Thecoolss（ベンチマークの例）、@ElDShell（アラビア語版README）、@Aaqibhafeezkhan（重大度ラベルの色分けと`CITATION.cff`）、@Cami0111（リークのチュートリアルノートブック）、@rahul-jain-dev（`--version`）、@Vamsi-2581（検出結果のオプトイン式LLM説明）に感謝します。
 
-本ソフトウェアはMITライセンスのもとで公開されています。
+MIT licensed.
