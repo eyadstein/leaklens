@@ -18,6 +18,7 @@ jobs:
       - run: pytest --cov=leaklens --cov-report=term-missing -q
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
+      - run: python -m leaklens.bench_data
   security:
     runs-on: ubuntu-latest
     steps:
