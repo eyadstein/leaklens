@@ -153,8 +153,9 @@
 
   /* --- Landing: replay the recorded audit fix --------------------------- */
   const audit = doc.querySelector("[data-audit]");
-  if (audit) {
-    const button = audit.querySelector("[data-audit-toggle]");
+  const auditButton = audit?.querySelector("[data-audit-toggle]");
+  if (audit && auditButton) {
+    const button = auditButton;
     const ring = audit.querySelector(".score-ring");
     const score = audit.querySelector("[data-audit-score]");
     const verdict = audit.querySelector("[data-audit-verdict]");

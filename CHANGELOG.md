@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Deployment readiness (0.14.0 phase 3.1)
+
+- Validated `render.yaml` against Render's published Blueprint JSON schema and replaced the deprecated `autoDeploy: true` with `autoDeployTrigger: checksPass`, so a push to `main` redeploys the backend only after GitHub Actions passes. Added a `buildFilter` so docs-only or site-only commits do not rebuild the API.
+- Documented the exact owner-run deployment path in [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md): the Render Blueprint shortcut, free-plan review, `/health` and `/capabilities` checks, `scripts/smoke_public_api.py --url`, the `?api=` test, the `live-config.js` switch and the rollback to disconnected.
+- `scripts/build_site.py` and `tests/test_site.py` now accept an empty `apiBase` or a clean HTTPS origin in `docs/assets/live-config.js`; credentials, paths, queries and plain HTTP are rejected. The default remains empty and the deployed site remains disconnected.
+- Built and ran `Dockerfile.api` locally (Linux image, non-root uid 10001, healthy, one worker). The real-HTTP smoke test and additional end-to-end checks passed against the container: real findings and score arithmetic, clean datasets and clean code, report generation and HTML escaping, CORS allow/deny, malformed and mismatched uploads, traversal, oversized/row-limit rejection, rate limiting, generic errors, and no filesystem changes after uploads. `docker stop` exited 0 in under a second.
+- Drove the actual `docs/live.html` frontend against the container in headless Chrome: `?api=` connection, real `/inspect`, target selection, real `/audit`, rendered score/findings, and an HTML report download all worked with no console errors. That check exposed a null-guard bug in `docs/assets/site.js` on pages with an empty audit container; it is fixed, and `check_site_layout.mjs` now fails on uncaught page errors.
+- **No Render account credentials were available in this environment, so no public backend is deployed and the GitHub Pages site is still disconnected.** The repository cannot deploy itself.
+
 ### Live scanning platform (0.14.0 phase 3)
 
 - Added `leaklens.public_api`: a separate hardened FastAPI app for untrusted uploads, with `GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` (optional held-out file, group and time columns) and `POST /scan`. It has no `/predict`, no model deserialisation, no accounts and no persistent storage.

@@ -91,6 +91,7 @@ class Cdp {
   constructor(url) {
     this.id = 0;
     this.pending = new Map();
+    this.events = [];
     this.ws = new WebSocket(url);
     this.ws.addEventListener("message", (event) => {
       const message = JSON.parse(event.data);
@@ -99,6 +100,8 @@ class Cdp {
         this.pending.delete(message.id);
         if (message.error) reject(new Error(message.error.message));
         else done(message.result);
+      } else if (message.method) {
+        this.events.push(message);
       }
     });
   }
@@ -208,6 +211,7 @@ const main = async () => {
         sessionId
       );
       for (const page of pages) {
+        cdp.events.length = 0;
         await navigate(cdp, sessionId, `${base}/${page}`);
         const label = `${page} @ ${viewport.name}`;
         const result = await evaluate(
@@ -419,6 +423,26 @@ const main = async () => {
             `${label}: docs contents toggle visibility is wrong`
           );
         }
+
+        const pageErrors = cdp.events.filter(
+          (event) =>
+            event.method === "Runtime.exceptionThrown" ||
+            (event.method === "Runtime.consoleAPICalled" && event.params.type === "error")
+        );
+        check(
+          pageErrors.length === 0,
+          `${label}: ${pageErrors.length} uncaught/console error(s): ${pageErrors
+            .map((event) =>
+              String(
+                event.params.exceptionDetails?.exception?.description ||
+                  event.params.exceptionDetails?.text ||
+                  event.params.args?.map((arg) => arg.value ?? arg.description).join(" ") ||
+                  "unknown"
+              ).replace(/\s+/g, " ")
+            )
+            .join(" | ")
+            .slice(0, 400)}`
+        );
 
         if (screenshotDir) {
           const shot = await cdp.send(

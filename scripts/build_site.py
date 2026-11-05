@@ -361,6 +361,27 @@ def check_site_structure(payload: dict) -> None:
                 f"assets/{name}: hard-coded backend URL; use live-config.js "
                 "or the in-page field instead"
             )
+    config = (DOCS / "assets" / "live-config.js").read_text(encoding="utf-8")
+    configured = re.search(r'^[ \t]*apiBase:[ \t]*"([^"]*)"', config, re.MULTILINE)
+    if configured is None:
+        fail("assets/live-config.js: missing apiBase")
+    else:
+        api_base = configured.group(1)
+        if api_base:
+            parts = urlsplit(api_base)
+            if (
+                parts.scheme != "https"
+                or not parts.hostname
+                or parts.username
+                or parts.password
+                or parts.query
+                or parts.fragment
+                or parts.path not in {"", "/"}
+            ):
+                fail(
+                    "assets/live-config.js: apiBase must be empty or a clean "
+                    "HTTPS origin (no credentials, path, query or fragment)"
+                )
     live = (DOCS / "live.html").read_text(encoding="utf-8")
     for needle in (
         "data-connection",

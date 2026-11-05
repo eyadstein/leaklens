@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -155,8 +156,21 @@ def test_live_javascript_has_no_hard_coded_backend():
     for name in ("live.js", "live-engine.mjs"):
         text = (DOCS / "assets" / name).read_text(encoding="utf-8")
         assert not re.search(r"https?://", text), name
+    # The only allowed place for a backend URL is live-config.js. It ships
+    # empty; after a verified deployment it may hold a clean HTTPS origin.
     config = (DOCS / "assets" / "live-config.js").read_text(encoding="utf-8")
-    assert 'apiBase: ""' in config
+    match = re.search(r'^[ \t]*apiBase:[ \t]*"([^"]*)"', config, re.MULTILINE)
+    assert match, "live-config.js must define apiBase"
+    api = match.group(1)
+    if not api:
+        assert 'apiBase: ""' in config
+        return
+    parsed = urlsplit(api)
+    assert parsed.scheme == "https", api
+    assert parsed.hostname, api
+    assert not parsed.username and not parsed.password, api
+    assert not parsed.query and not parsed.fragment, api
+    assert parsed.path in {"", "/"}, api
 
 
 def test_landing_page_no_longer_contains_the_old_generated_report():

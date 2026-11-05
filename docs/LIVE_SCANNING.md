@@ -88,6 +88,12 @@ The API tests use the real detectors and real HTTP multipart requests:
 pytest tests/test_public_api.py tests/test_upload_guard.py -q
 ```
 
+During the phase 3.1 verification pass, `Dockerfile.api` was built and run
+locally against Docker Desktop's Linux engine. The image ran as uid 10001, the
+container healthcheck passed, the real-HTTP smoke test passed against it, and
+uploads left no filesystem changes. That validates the artifact; it is not a
+Render deployment.
+
 ### Connecting the static page
 
 The page accepts, in priority order:
@@ -126,14 +132,46 @@ not offer a continuous free web service.
 
 ### Steps
 
-1. Push this repository to GitHub.
-2. In Render: **New → Blueprint**, select the repository. Render reads
-   `render.yaml` and builds `Dockerfile.api`.
-3. After the first deploy, copy the `https://<name>.onrender.com` URL.
-4. Open `docs/live.html?api=https://<name>.onrender.com` and confirm
-   `/health` and `/capabilities` respond.
-5. Optionally set `apiBase` in `docs/assets/live-config.js` and publish the
-   static site. Until then the site remains disconnected.
+A Render account and access to the GitHub repository are required. This
+repository does not include Render credentials, so it cannot deploy the service
+by itself.
+
+1. Open the Blueprint shortcut:
+   <https://render.com/deploy?repo=https://github.com/eyadstein/leaklens>
+   (or in Render: **New → Blueprint**, select the repository). Sign in to the
+   Render account that should own the service and install Render's GitHub App
+   if Render asks for it.
+2. Review the single `leaklens-live-api` Docker web service. Confirm **Free**
+   is selected and approve the Blueprint. Render reads `render.yaml` and builds
+   `Dockerfile.api`; no secrets are needed.
+3. Wait for the first deploy and copy the `https://<name>.onrender.com` URL
+   from the service page. The first request after idle can take about a minute
+   to wake the service.
+4. Verify the real backend before connecting the site:
+
+   ```sh
+   API=https://<name>.onrender.com
+   curl -fsS "$API/health"
+   curl -fsS "$API/capabilities"
+   python scripts/smoke_public_api.py --url "$API" --timeout 180
+   ```
+
+   `smoke_public_api.py` runs real inspections, an audit with a held-out split,
+   a Python scan, and rejection checks over HTTP. It fails loudly if the
+   deployed engine does not return real findings.
+5. Test the site before committing the URL:
+   `https://eyadstein.github.io/leaklens/live.html?api=https://<name>.onrender.com`.
+   Confirm the page reports **Connected**, inspect a CSV, and run a scan.
+6. To make that backend the default for every visitor, set `apiBase` in
+   `docs/assets/live-config.js` to the same HTTPS URL and push to `main`. The
+   `?api=` override still works for other backends.
+7. Revert the `apiBase` value to `""` to return the site to its honest
+   disconnected state (for example if the free instance is removed).
+
+`render.yaml` uses `autoDeployTrigger: checksPass`, so later pushes to `main`
+redeploy the backend only after the GitHub Actions checks pass, and only when
+`leaklens/**`, `pyproject.toml`, `Dockerfile.api` or `render.yaml` change. The
+service has no persistent disk and stores no uploads.
 
 A local Docker run is equivalent:
 

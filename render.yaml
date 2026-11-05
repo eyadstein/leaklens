@@ -20,7 +20,15 @@ services:
     dockerfilePath: ./Dockerfile.api
     dockerContext: .
     healthCheckPath: /health
-    autoDeploy: true
+    # Only redeploy after the commit's GitHub Actions checks pass, and only
+    # when the backend or its build inputs actually change.
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - leaklens/**
+        - pyproject.toml
+        - Dockerfile.api
+        - render.yaml
     envVars:
       - key: LEAKLENS_PUBLIC_MAX_BYTES
         value: "4194304"
