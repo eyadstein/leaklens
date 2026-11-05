@@ -18,7 +18,7 @@
 | データ | 目的変数のリーク（ラベルをほぼ完全に予測する特徴量）、カテゴリ変数の高カーディナリティを利用した目的変数リーク、IDのようなカラム、学習用データとテスト用データの行の重複、ラベルが異なる特徴ベクトルの重複、大文字小文字や空白だけが異なる近似重複、時間的リーク、エンティティやグループの重複（`--group COL`）、分割フォルダ間の近似重複画像（`leaklens images`） |
 | コード（`.py`、`.ipynb`） | 分割前にスケーラー／エンコーダー／欠損値補完器を学習させる処理、分割前のSMOTE、全行から作成した目的変数エンコーディング／頻度エンコーディング、分割前の特徴選択（SelectKBest、RFE、SelectFromModel）、テスト／検証データまたは分割後の全データで学習される変換器、`StandardScaler().fit_transform(X)`のような連結呼び出し、`cross_val_score`／`GridSearchCV`の前に行われる前処理やリサンプリング（`preprocess_outside_cv`）、テストセットでのハイパーパラメーター調整（`tuning_on_test_data`）、分割前または全データでの調整（`tuning_before_split`、`tuning_on_full_data`）、テスト行に対する交差検証（`cv_on_test_data`）、`groups=`を指定しないグループ交差検証、時系列順データのシャッフル分割、実行順が前後したノートブック |
 
-検出結果の確度は、それぞれの説明に明記されます。たとえば、`X_test`で検索処理を学習させたことが確認できた場合は重大度「高」のリークとして報告し、頻度エンコーディングを分割前に行った場合のように正当な可能性もあるパターンは重大度「低」または「中」とし、観測した内容を示します。各検出結果には`--explain`で修正のヒントが表示されます。
+検出結果の確度は、それぞれの説明に明記されます。たとえば、探索処理に`X_test`を使ったことが確認できた場合は重大度「高」のリークとして報告します。一方、分割前の頻度エンコーディングのように、正当な処理である可能性もあるパターンは重大度「低」または「中」とし、観測内容を示します。各検出結果には`--explain`で修正のヒントが表示されます。
 
 監査結果には0〜100の信頼スコアが付きます。重大度の高いリークが見つかると、CLIは終了コード1を返すため、CIのゲートとして利用できます。
 
@@ -39,7 +39,7 @@ tree_ensemble 0.8242 0.3562 0.4103
 
 リークしたカラムがあると、精度が完璧に見えてしまいます。LeakLensはそのカラムを除外し、実際の性能を示します。
 
-[ウェブサイト](https://eyadstein.github.io/leaklens/)は、バンドラーを使わず、外部依存も伴わない静的なGitHub Pagesサイトで、`docs/`から配信されます。[デモ](https://eyadstein.github.io/leaklens/demo.html)では、リポジトリに含まれるサンプルの実際のスキャナー出力を再生します。GitHub PagesではPythonを実行できないため、デモは**録画済み**と明記しています。[ライブスキャンページ](https://eyadstein.github.io/leaklens/live.html)は、別途デプロイされた実際の`leaklens.public_api`バックエンドに接続し、シミュレーション用の代替動作はありません。バックエンドが設定されていない場合は**バックエンド未接続**と表示し、録画済みデモへのリンクを示します。このリポジトリでは公開バックエンドをデプロイしません。無料のRenderへのデプロイ方法、制限、コールドスタート、セキュリティモデルについては[docs/LIVE_SCANNING.md](LIVE_SCANNING.md)をご覧ください。
+[ウェブサイト](https://eyadstein.github.io/leaklens/)は、バンドラーを使わず、外部依存も伴わない静的なGitHub Pagesサイトで、`docs/`から配信されます。[デモ](https://eyadstein.github.io/leaklens/demo.html)では、リポジトリに含まれるサンプルの実際のスキャナー出力を再生します。GitHub PagesではPythonを実行できないため、デモは**事前収録デモ**と明記しています。[ライブスキャンページ](https://eyadstein.github.io/leaklens/live.html)は、別途デプロイされた実際の`leaklens.public_api`バックエンドに接続し、シミュレーションによる代替表示はありません。バックエンドが設定されていない場合は**バックエンド未接続**と表示し、事前収録デモへのリンクを示します。このリポジトリから公開バックエンドはデプロイされません。無料のRenderへのデプロイ方法、制限、コールドスタート、セキュリティモデルについては[docs/LIVE_SCANNING.md](LIVE_SCANNING.md)をご覧ください。
 
 フィクスチャを再生成し、すべてのリンク、アセット、アクセシビリティ上のランドマークを検証するには、次を実行します。
 
@@ -73,7 +73,7 @@ Windowsでのクイックスタート（PowerShell。`.venv`を作成し、イ�
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1
-# オプションの追加機能:
+# オプションの追加依存関係:
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Extras "arena,parquet"
 ```
 
@@ -98,7 +98,7 @@ CSV／JSON入力、データセット監査、コードスキャン、`--explain
 
 ### `leaklens doctor`
 
-`leaklens doctor`は、ネットワークに接続せず、機密情報も読み取らずにインストール状態を確認します。Pythonが3.10以上か、LeakLensのバージョンとインストール先、`leaklens`のエントリーポイント、基本依存関係（pandas、numpy、scikit-learn）、読み込み可能なオプション追加機能、そして`.leaklens.toml`または`pyproject.toml`（先に見つかった方）が有効なTOMLかを確認します。
+`leaklens doctor`は、ネットワークに接続せず、機密情報も読み取らずにインストール状態を確認します。Pythonが3.10以上か、LeakLensのバージョンとインストール先、`leaklens`のエントリーポイント、基本依存関係（pandas、numpy、scikit-learn）、読み込み可能なオプション依存関係、そして`.leaklens.toml`または`pyproject.toml`（先に見つかった方）が有効なTOMLかを確認します。
 
 ```sh
 leaklens doctor             # 人が読める形式のレポート。確認失敗時は終了コード1
@@ -106,13 +106,13 @@ leaklens doctor --json      # 同じレポートをJSONで出力
 leaklens doctor --help      # 使い方
 ```
 
-不足しているオプション追加機能は一覧に表示しますが、確認失敗にはなりません。基本依存関係の不足、Python 3.10未満、無効な設定がある場合は終了コード1を返します。
+不足しているオプション依存関係は一覧に表示しますが、確認失敗にはなりません。基本依存関係の不足、Python 3.10未満、無効な設定がある場合は終了コード1を返します。
 
-### オプション追加機能
+### オプション依存関係
 
-`pyproject.toml`で宣言しているオプション追加機能:
+`pyproject.toml`で宣言しているオプション依存関係:
 
-| 追加機能 | 用途 | インストールコマンド |
+| 追加依存関係 | 用途 | インストールコマンド |
 |---|---|---|
 | `arena` | MLflowで実行結果を追跡するモデルアリーナ（`--arena`） | `pip install "leaklens-ml[arena]"` |
 | `parquet` | `pyarrow`で`.parquet`を読み込む | `pip install "leaklens-ml[parquet]"` |
@@ -167,7 +167,7 @@ leaklens train.csv --target label --test test.csv --group patient_id
 leaklens train.csv --target label --json     # JSON出力
 leaklens train.csv --target label --threshold 0.95
 leaklens train.csv --target label --fail-under 80   # 信頼スコアが80未満なら終了コード1
-leaklens train.csv --target label --arena    # [arena]追加機能が必要
+leaklens train.csv --target label --arena    # [arena]追加依存関係が必要
 leaklens train.csv --target label --html report.html
 leaklens train.csv --target label --intelligence   # 決定的な信頼度判定と根本原因の分析
 leaklens train.csv --target label --ai             # 実験的なオフラインAI仮説
@@ -181,7 +181,7 @@ leaklens train.csv --target label --ai             # 実験的なオフライン
 | `--time` | 時間的リーク確認に使うタイムスタンプカラム |
 | `--group` | グループリーク確認用のエンティティカラム（患者、顧客など） |
 | `--threshold` | リークとみなす単一特徴量のスコア（既定値0.95） |
-| `--arena` | 3つのモデルファミリーを比較し、MLflowで記録する（`arena`追加機能が必要） |
+| `--arena` | 3つのモデルファミリーを比較し、MLflowで記録する（`arena`追加依存関係が必要） |
 | `--out` | モデルアリーナの最良モデルの出力先（既定値`models`） |
 | `--tracking-uri` | MLflowのトラッキングURI（既定値`sqlite:///mlflow.db`） |
 | `--json` | JSONを出力 |
@@ -196,7 +196,7 @@ leaklens train.csv --target label --ai             # 実験的なオフライン
 | `--fail-under` | 信頼スコアがN未満なら終了コード1を返す |
 | `--version` | バージョンを表示して終了 |
 
-拡張子が不明な入力、または拡張子のない入力はCSVとして読み込みます。オプション形式（Parquet／Feather／Excel）では、その形式を提供する追加機能の名前を含む`ImportError`が発生します。
+拡張子が不明な入力、または拡張子のない入力はCSVとして読み込みます。オプション形式（Parquet／Feather／Excel）では、その形式を提供する追加依存関係の名前を含む`ImportError`が発生します。
 
 `--test`を指定すると、LeakLensは次の3種類の重複確認を順に行い、最大1件を報告します。1) 共有する全カラム（ラベルを含む）が一致する行の重複、2) ラベルを除いた特徴ベクトルが一致してラベルが異なる行、3) 正規化後の近似重複（テキストは小文字化して空白を除去、数値は小数点以下4桁に丸める）。特徴量の重複確認では最大50,000行、近似重複確認では最大20,000行をサンプリングするため、大きなファイルでも高速に処理できます。これらはヒューリスティックです。観測された件数とラベルの不一致の有無を報告します。カーディナリティの低い表形式データでは特徴ベクトルの一致が自然に起こることもあるため、重大度「中」の検出はリークの証明とせず、調査のきっかけとして扱ってください。
 
@@ -218,7 +218,7 @@ leaklens --scan notebooks/ --ai          # 実験的なAI仮説（オフライ�
 
 ### `leaklens images TRAIN_DIR TEST_DIR`
 
-学習用／テスト用フォルダー間の近似重複画像を検出します（64ビットdHash、`--max-distance`の既定値は6）。`images`追加機能が必要です。
+学習用／テスト用フォルダー間の近似重複画像を検出します（64ビットdHash、`--max-distance`の既定値は6）。`images`追加依存関係が必要です。
 
 ```sh
 leaklens images data/train data/test
@@ -264,7 +264,7 @@ leaklens --scan notebooks/ --llm --llm-provider openai-compatible
 
 ## 実験的なAIインテリジェンス
 
-LeakLensには、決定的な検出器に根拠のある仮説と根本原因に基づく修正計画を加える、**オプション、オフライン、実験段階のAIレイヤー**があります。既定では無効で、基本インストールで利用できます。中核機能にGPU、ネットワーク、有料サービス、認証情報は必要ありません。
+LeakLensには、決定的な検出器に根拠のある仮説と根本原因に基づく修正計画を加える、**任意で利用できるオフライン動作の実験的なAI機能**があります。既定では無効で、基本インストールで利用できます。中核機能にGPU、ネットワーク、有料サービス、認証情報は必要ありません。
 
 ```sh
 leaklens --scan notebooks/ --ai          # コードに対する仮説
@@ -398,7 +398,7 @@ python scripts/generate_sbom.py              # dist/sbom.json
 python scripts/generate_sbom.py out/sbom.json
 ```
 
-生成スクリプトは`pyproject.toml`から実行時依存関係とオプション追加機能を読み取り、利用可能な場合はインストール済みバージョンを記録します。また、開発用の`dev`追加機能はSBOMに含めません。Python 3.10以上が必要で、3.10では`tomli`が必要です。`cyclonedx-py`は不要です。
+生成スクリプトは`pyproject.toml`から実行時依存関係とオプション依存関係を読み取り、利用可能な場合はインストール済みバージョンを記録します。また、`dev`の追加依存関係はSBOMに含めません。Python 3.10以上が必要で、3.10では`tomli`が必要です。`cyclonedx-py`は不要です。
 
 CIでは、pushとpull requestのたびに`bandit`、`pip-audit`、`pip-licenses`を実行します。独立したCodeQLワークフローでは、Pythonの`security-extended`解析を実行し、結果をGitHub Code Scanningにアップロードします。
 
@@ -475,7 +475,7 @@ LeakLensは信頼スコアを100点から始め、検出結果ごとに重大度
 
 ## 精度とセキュリティ
 
-コードスキャナーは、CIの実行ごとにラベル付き合成回帰ベンチマークで検証されます（`python -m leaklens.bench`、結果は[docs/BENCHMARK.md](BENCHMARK.md)に記載）。データセット検出器には、ケースごとの実行時間を含む別の合成ベンチマークがあります（`python -m leaklens.bench_data`、結果は[docs/DATA_BENCHMARK.md](DATA_BENCHMARK.md)に記載）。どちらも人手で作成し、対応しているルールに合わせたものです。実環境での精度を示すものではなく、回帰を防ぐチェックとして扱ってください。実環境のデータセットは合成ベンチマークと分けて管理しており、ディレクトリとスコア計算も別です。脆弱性の報告方法は[SECURITY.md](../SECURITY.md)をご覧ください。
+コードスキャナーは、CIの実行ごとにラベル付き合成回帰ベンチマークで検証されます（`python -m leaklens.bench`、結果は[docs/BENCHMARK.md](BENCHMARK.md)に記載）。データセット検出器には、ケースごとの実行時間を含む別の合成ベンチマークがあります（`python -m leaklens.bench_data`、結果は[docs/DATA_BENCHMARK.md](DATA_BENCHMARK.md)に記載）。どちらも人手で作成し、対応しているルールに合わせたものです。実環境での精度を示すものではなく、回帰を防ぐチェックとして扱ってください。実環境のノートブック群は合成ベンチマークとは別に管理しており、ディレクトリとスコア計算も分けています。脆弱性の報告方法は[SECURITY.md](../SECURITY.md)をご覧ください。
 
 ## コントリビューション
 
