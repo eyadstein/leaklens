@@ -163,7 +163,7 @@ const viewports = [
   { name: "mobile", width: 390, height: 844 },
 ];
 
-const pages = ["index.html", "demo.html", "docs.html"];
+const pages = ["index.html", "demo.html", "live.html", "docs.html"];
 
 const main = async () => {
   if (!browser) {
@@ -362,6 +362,40 @@ const main = async () => {
           check(demo.active === "leaky_transactions", `${label}: dataset tab did not select a fixture`);
           check(demo.sourceLines > 10, `${label}: code fixture did not render its source`);
           check(demo.highlighted === 1, `${label}: opening a finding did not highlight its source line`);
+        }
+
+        if (page === "live.html") {
+          const live = await evaluate(
+            cdp,
+            sessionId,
+            `(() => {
+              const connection = document.querySelector("[data-connection]");
+              const offline = document.querySelector("[data-offline]");
+              const results = document.querySelector("[data-results]");
+              const input = document.querySelector("[data-file-input]");
+              const scan = document.querySelector("[data-scan]");
+              return {
+                state: connection?.dataset.state,
+                label: document.querySelector("[data-connection-label]")?.textContent,
+                offlineVisible: Boolean(offline) && !offline.hidden,
+                resultsHidden: Boolean(results?.hidden),
+                scanDisabled: Boolean(scan?.disabled),
+                accept: input?.getAttribute("accept") || "",
+                dropzone: Boolean(document.querySelector("[data-dropzone]")),
+                status: Boolean(document.querySelector("[data-live-status]")),
+                previewNote: document.querySelector("[data-preview-note]")?.textContent || "",
+              };
+            })()`
+          );
+          check(live.state === "offline", `${label}: live page should start disconnected, got ${live.state}`);
+          check(/not connected/i.test(live.label || ""), `${label}: live page connection label is not explicit`);
+          check(live.offlineVisible, `${label}: offline fallback is not visible`);
+          check(live.resultsHidden, `${label}: results panel must stay hidden without a scan`);
+          check(live.scanDisabled, `${label}: scan button must be disabled without a backend`);
+          check(live.accept.includes(".csv"), `${label}: file input does not accept CSV`);
+          check(live.dropzone, `${label}: drag-and-drop zone missing`);
+          check(live.status, `${label}: live status region missing`);
+          check(/connect a backend/i.test(live.previewNote), `${label}: preview does not explain the offline state`);
         }
 
         if (page === "docs.html") {

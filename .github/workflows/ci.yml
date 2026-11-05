@@ -46,6 +46,18 @@ jobs:
       - run: pip install "ruff>=0.17"
       - run: ruff check leaklens tests scripts
       - run: ruff format --check leaklens tests scripts
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev,api]"
+      # Upload hardening, contract and real-HTTP smoke checks for the public
+      # live-scan API. No deployed backend is required.
+      - run: pytest tests/test_public_api.py tests/test_upload_guard.py -q
+      - run: python scripts/smoke_public_api.py
   site:
     runs-on: ubuntu-latest
     steps:
@@ -60,4 +72,4 @@ jobs:
       # Fails when the recorded demo fixtures drift from the real scanners,
       # a link or asset is missing, or the static pages lose an a11y landmark.
       - run: python scripts/build_site.py --check
-      - run: node --test tests/site/demo-engine.test.mjs
+      - run: node --test tests/site/demo-engine.test.mjs tests/site/live-engine.test.mjs

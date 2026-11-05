@@ -40,6 +40,14 @@ We appreciate responsible reports and will credit reporters in the advisory unle
 - Uploads are capped (8 MiB and 50,000 rows); ZIP/gzip containers are size-checked (256 MiB decompressed) and ZIP entry paths are validated before parsing.
 - The API is designed for local or trusted deployment (e.g. Docker on `localhost`), not as a public service.
 
+### Public live-scan API (`leaklens.public_api`)
+- A **separate** app for untrusted uploads. It exposes no `/predict`, no model loading and no dataset storage, so the `/predict` pickle risk does not apply.
+- Uploads default to 4 MiB, 5,000 rows, 200 columns and 750k cells. Filenames are sanitised; the extension allowlist and real content sniffing (CSV/JSON/XLSX/Parquet/Feather) reject renamed or malformed files. XLSX ZIPs are checked for traversal, encryption, entry count and decompression expansion.
+- Request bodies are capped before multipart parsing (including chunked bodies). Parsing is bounded and in-memory; uploads are never written to disk and the upload handle is closed even on failure.
+- One scan worker runs at a time; overlapping requests get `503`, and a scan that exceeds its wall-clock budget gets `504`. A bounded per-client rate limiter applies to `POST /inspect`, `POST /audit` and `POST /scan`.
+- Error bodies are generic: parser internals, filesystem paths and stack traces are not returned. Responses carry `nosniff`, `DENY` framing, a restrictive CSP, `no-store` and a request ID; CORS is restricted to an origin allowlist.
+- Deploy it with `Dockerfile.api` / `render.yaml` and review [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md). The repository does **not** deploy a public instance.
+
 ### LLM explanations (`--llm`) — opt-in only
 - **Disabled by default.** Nothing leaves your machine unless you pass `--llm`.
 - Only finding metadata is sent: severity, kind, file name and line, and short diagnostic detail (which may include brief code expressions from the scanned file). **Complete source files, notebooks, dataset rows, and dataset contents are never sent.**

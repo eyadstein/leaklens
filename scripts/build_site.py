@@ -33,7 +33,7 @@ _spec.loader.exec_module(build_site_fixtures)
 
 DOCS = ROOT / "docs"
 FIXTURES = DOCS / "assets" / "fixtures.mjs"
-PAGES = ["index.html", "demo.html", "docs.html", "report.html", "404.html"]
+PAGES = ["index.html", "demo.html", "live.html", "docs.html", "report.html", "404.html"]
 REQUIRED_ASSETS = [
     "assets/site.css",
     "assets/site.js",
@@ -41,6 +41,9 @@ REQUIRED_ASSETS = [
     "assets/demo-engine.mjs",
     "assets/hero3d.js",
     "assets/fixtures.mjs",
+    "assets/live.js",
+    "assets/live-engine.mjs",
+    "assets/live-config.js",
     "assets/logo.svg",
     "assets/favicon.svg",
 ]
@@ -347,10 +350,28 @@ def check_site_structure(payload: dict) -> None:
     for needle in (":focus-visible", ".skip-link", ".sr-only"):
         if needle not in css:
             fail(f"site.css: missing {needle}")
-    for name in ("site.js", "demo.js", "hero3d.js"):
+    for name in ("site.js", "demo.js", "hero3d.js", "demo-engine.mjs"):
         text = (DOCS / "assets" / name).read_text(encoding="utf-8")
         if "http://" in text or "https://" in text:
             fail(f"assets/{name}: network URL found in frontend JavaScript")
+    for name in ("live.js", "live-engine.mjs"):
+        text = (DOCS / "assets" / name).read_text(encoding="utf-8")
+        if re.search(r"https?://", text):
+            fail(
+                f"assets/{name}: hard-coded backend URL; use live-config.js "
+                "or the in-page field instead"
+            )
+    live = (DOCS / "live.html").read_text(encoding="utf-8")
+    for needle in (
+        "data-connection",
+        "data-file-input",
+        "data-progress",
+        "data-results",
+        "No backend connected",
+        "never replays",
+    ):
+        if needle not in live:
+            fail(f"live.html: missing live-scan marker {needle!r}")
     if payload["meta"]["version"] != __version__:
         fail(
             "fixtures version "

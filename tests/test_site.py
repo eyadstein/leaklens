@@ -16,7 +16,7 @@ from leaklens import __version__
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
-PAGES = ["index.html", "demo.html", "docs.html", "report.html", "404.html"]
+PAGES = ["index.html", "demo.html", "live.html", "docs.html", "report.html", "404.html"]
 
 
 def _load_script(name: str):
@@ -137,6 +137,28 @@ def test_demo_page_is_explicitly_prerecorded():
     assert "build_site_fixtures.py" in text
 
 
+def test_live_page_is_explicitly_not_a_mock():
+    text = (DOCS / "live.html").read_text(encoding="utf-8")
+    assert "never replays a recorded result" in text
+    assert "No backend connected" in text
+    assert "GitHub Pages cannot execute Python" in text
+    assert "data-connection" in text
+    assert "data-file-input" in text
+    assert "data-progress" in text
+    assert "data-results" in text
+    assert "Live scan" in text
+    # The live page must not import the recorded fixtures.
+    assert "fixtures.mjs" not in text
+
+
+def test_live_javascript_has_no_hard_coded_backend():
+    for name in ("live.js", "live-engine.mjs"):
+        text = (DOCS / "assets" / name).read_text(encoding="utf-8")
+        assert not re.search(r"https?://", text), name
+    config = (DOCS / "assets" / "live-config.js").read_text(encoding="utf-8")
+    assert 'apiBase: ""' in config
+
+
 def test_landing_page_no_longer_contains_the_old_generated_report():
     text = (DOCS / "index.html").read_text(encoding="utf-8")
     assert "LeakLens report</title>" not in text
@@ -166,7 +188,16 @@ def test_safe_pipeline_example_matches_the_recorded_fixture(fixtures):
 
 
 @pytest.mark.parametrize(
-    "script", ["site.js", "demo.js", "hero3d.js", "demo-engine.mjs"]
+    "script",
+    [
+        "site.js",
+        "demo.js",
+        "hero3d.js",
+        "demo-engine.mjs",
+        "live.js",
+        "live-engine.mjs",
+        "live-config.js",
+    ],
 )
 def test_frontend_javascript_parses(script):
     node = shutil.which("node")

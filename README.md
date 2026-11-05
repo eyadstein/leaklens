@@ -40,11 +40,13 @@ tree_ensemble 0.8242 0.3562 0.4103
 
 A leaked column makes accuracy look perfect. LeakLens drops it and shows the honest numbers.
 
-The [website](https://eyadstein.github.io/leaklens/) is a static GitHub Pages build served from `docs/`, with no bundler and no external dependencies. Its [demo](https://eyadstein.github.io/leaklens/demo.html) replays real scanner output for the checked-in examples, and is explicitly labelled **prerecorded**: GitHub Pages cannot run Python. Regenerate the fixtures and validate every link, asset and accessibility landmark with:
+The [website](https://eyadstein.github.io/leaklens/) is a static GitHub Pages build served from `docs/`, with no bundler and no external dependencies. Its [demo](https://eyadstein.github.io/leaklens/demo.html) replays real scanner output for the checked-in examples, and is explicitly labelled **prerecorded**: GitHub Pages cannot run Python. The [live scan page](https://eyadstein.github.io/leaklens/live.html) connects to a real, separately deployed `leaklens.public_api` backend and has no simulated fallback: without a configured backend it says **No backend connected** and links to the prerecorded demo. No public backend is deployed by this repository; see [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) for the free Render deployment, limits, cold starts and the security model.
+
+Regenerate the fixtures and validate every link, asset and accessibility landmark with:
 
 ```sh
 python scripts/build_site.py
-node --test tests/site/demo-engine.test.mjs
+node --test tests/site/demo-engine.test.mjs tests/site/live-engine.test.mjs
 node scripts/check_site_layout.mjs   # local headless Chrome/Edge check
 ```
 
@@ -119,6 +121,7 @@ Every optional extra declared in `pyproject.toml`:
 | `excel` | Read `.xlsx` with `openpyxl` | `pip install "leaklens-ml[excel]"` |
 | `images` | Near-duplicate image check (`leaklens images`) with Pillow | `pip install "leaklens-ml[images]"` |
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
+| `api` | Hardened public live-scan API (FastAPI + uvicorn, no Streamlit) | `pip install "leaklens-ml[api]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
 | `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
@@ -281,6 +284,20 @@ The API and the Streamlit CSV uploaders are meant for local or trusted use and e
 
 The CLI reads files from disk, so it has no 8 MiB/50k-row upload cap, but the same 256 MiB decompressed-container check applies. Compressed files are not an additional input format: LeakLens does not decompress arbitrary `.zip`/`.gz` files into a dataset. The container checks protect the formats it does read (for example `.xlsx`).
 
+### Public live-scan API (untrusted uploads)
+
+The static website’s live page talks to a separate, hardened app built for untrusted uploads. It has no `/predict`, no model loading and no persistent storage:
+
+```sh
+pip install "leaklens-ml[api]"
+uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000
+python scripts/smoke_public_api.py          # real HTTP smoke test
+```
+
+`GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` and `POST /scan` are the complete surface. Defaults are 4 MiB per file, 5,000 rows, 200 columns, 750k cells, one concurrent scan, a 30-second scan budget, 20 POSTs per client per minute, and CSV/JSON only; every limit is configurable by environment variable. Requests are content-sniffed (not trusted by filename or MIME type), parsed in memory, bounded before detection and never written to disk.
+
+This repository **does not deploy a public backend**. The GitHub Pages live page therefore starts disconnected. A free Render web service is documented in [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) together with verified limits (512 MB, 0.1 CPU, spins down after 15 minutes, ~1 minute cold start, ephemeral disk) and `render.yaml` + `Dockerfile.api`. Hugging Face Docker Spaces, Fly.io and Koyeb were checked and are not free for this use case.
+
 ## Docker
 
 > Docker build/run below is **documented but not verified executed** in this environment (Docker Engine was unavailable on the development machine). Commands are verified against the actual `Dockerfile` and `docker-compose.yml` in the repo root; run them where the daemon is healthy.
@@ -308,6 +325,13 @@ To run the UI container alone, override the API default command:
 
 ```sh
 docker run --rm -p 8501:8501 leaklens streamlit run /app/leaklens/ui.py --server.port=8501 --server.address=0.0.0.0
+```
+
+For the hardened public app, build the smaller, non-root `Dockerfile.api` instead:
+
+```sh
+docker build -f Dockerfile.api -t leaklens-api .
+docker run --rm -p 8000:8000 leaklens-api
 ```
 
 ## GitHub Action

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Live scanning platform (0.14.0 phase 3)
+
+- Added `leaklens.public_api`: a separate hardened FastAPI app for untrusted uploads, with `GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` (optional held-out file, group and time columns) and `POST /scan`. It has no `/predict`, no model deserialisation, no accounts and no persistent storage.
+- Added `leaklens/upload_guard.py`: filename sanitisation, extension allowlist, real content sniffing for CSV/JSON/XLSX/Parquet/Feather, ZIP traversal/encryption/expansion checks, and row/column/cell limits applied before and after parsing. Uploads are parsed from an in-memory buffer and are never written to disk.
+- Added request hardening: declared and chunked body-size limits, bounded per-client sliding-window rate limiting (`leaklens/ratelimit.py`), a single-worker scan runner with a wall-clock timeout and `503 scan_busy`/`504 scan_timeout` envelopes, generic error bodies, conservative security headers, CORS allowlisting and stable request IDs.
+- Added `docs/live.html` and `docs/assets/live.js` + `live-engine.mjs`: a real drag-and-drop live scan page with backend connection, client-side validation, column inspection, target/group/time selectors, threshold, real elapsed progress, cancellation, retry/offline states, severity/kind/search filters, audit and measured split-impact panels, and downloadable HTML/JSON reports. It never replays prerecorded fixtures and explicitly says **No backend connected** when no URL is configured.
+- Deployment: `Dockerfile.api` (non-root, one worker, proxy headers, healthcheck), `render.yaml` free Render Blueprint, and [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) with verified free limits, cold starts, environment variables and the security model. No public backend is deployed by this repository; GitHub Pages remains static and disconnected until a URL is supplied.
+- Added `api` extra (`fastapi`, `uvicorn`, `python-multipart`), `scripts/smoke_public_api.py` (real HTTP smoke test), `tests/test_upload_guard.py` (31 tests), `tests/test_public_api.py` (45 tests) and `tests/site/live-engine.test.mjs` (18 tests). CI now has an `api` job and the `site` job runs both Node suites.
+- Updated the site navigation, landing hero, docs, report link, 404 page and README, and extended `build_site.py`, `test_site.py` and `check_site_layout.mjs` to validate the live page and reject a hard-coded backend URL.
+
 ### Website and demo (0.14.0 phase 2)
 
 - Rebuilt the GitHub Pages site in `docs/` as a real product site: landing page, interactive demo, documentation, example report and a 404, all hand-written HTML/CSS/ES modules with no bundler, external font or third-party script.

@@ -23,6 +23,7 @@
       <span></span>
     </button>
     <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <a href="live.html">Live scan</a>
       <a href="demo.html">Demo</a>
       <a href="index.html#detections">Detections</a>
       <a href="index.html#benchmarks">Benchmarks</a>
@@ -338,6 +339,15 @@ streamlit run leaklens/ui.py</code></pre>
             </table>
           </div>
           <div class="docs-callout"><strong>Uploads are capped</strong> at 8 MiB and 50,000 rows, with archive decompression limits and ZIP path-traversal rejection. <code>/predict</code> only loads models under <code>./models/</code>; joblib artifacts are still pickle files, so only place models you trust there.</div>
+          <h3>Public live-scan API</h3>
+          <p>The static website can connect to a separate, hardened API for real scans in the browser. It intentionally exposes no <code>/predict</code> endpoint and no model deserialization:</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="pip install &quot;leaklens-ml[api]&quot;&#10;uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000">Copy</button></div>
+            <pre><code>pip install "leaklens-ml[api]"
+uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000</code></pre>
+          </div>
+          <p><code>GET /health</code> and <code>GET /capabilities</code> describe the deployment. <code>POST /inspect</code> lists columns, <code>POST /audit</code> runs the dataset detectors (optionally with a held-out file plus group and time columns), and <code>POST /scan</code> runs the static Python scanner. Uploads default to 4 MiB, 5,000 rows and 200 columns, are parsed in memory, and are never retained.</p>
+          <div class="docs-callout"><strong>Deployment status:</strong> the GitHub Pages site is static and ships without a connected backend, so <a href="live.html">Live scan</a> shows an explicit “not connected” state until you supply a URL. A free Render web service plus <code>Dockerfile.api</code> and <code>render.yaml</code> are documented in the repository; the free instance sleeps after idle time, has 512 MB RAM, and offers no persistent storage. See <a href="https://github.com/eyadstein/leaklens/blob/main/docs/LIVE_SCANNING.md" rel="noopener">LIVE_SCANNING.md</a> for verified limits and the security model.</div>
           <p>Docker users can run <code>docker compose up --build</code> for the API on port 8000 and the UI on 8501.</p>
         </section>
 
@@ -404,6 +414,7 @@ streamlit run leaklens/ui.py</code></pre>
       <div class="footer-col">
         <h3>Product</h3>
         <ul>
+          <li><a href="live.html">Live scan</a></li>
           <li><a href="demo.html">Interactive demo</a></li>
           <li><a href="index.html#detections">Detections</a></li>
           <li><a href="index.html#benchmarks">Benchmarks</a></li>

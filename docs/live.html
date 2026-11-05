@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live scan — LeakLens</title>
+<meta name="description" content="Upload a bounded CSV or JSON extract and run the real LeakLens Python detectors on a live backend. No simulated findings: if no backend is connected, the page says so.">
+<meta name="theme-color" content="#060a10">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+<script>document.documentElement.classList.add("js");</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header" data-header>
+  <div class="shell header-inner">
+    <a class="brand" href="index.html" aria-label="LeakLens home">
+      <img class="brand-mark" src="assets/logo.svg" alt="" width="30" height="30">
+      LeakLens
+    </a>
+    <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+      <span></span>
+    </button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <a href="live.html" aria-current="page">Live scan</a>
+      <a href="demo.html">Demo</a>
+      <a href="index.html#detections">Detections</a>
+      <a href="docs.html">Docs</a>
+      <a class="nav-github" href="https://github.com/eyadstein/leaklens" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.69.41.35.78 1.05.78 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        GitHub
+      </a>
+      <a class="button button-small" href="docs.html#install">Install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="page-hero live-hero">
+    <div class="shell">
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="index.html">Home</a><span aria-hidden="true">/</span><span>Live scan</span>
+      </nav>
+      <h1>Scan your data with the real engine</h1>
+      <p class="lead">Upload a bounded extract, choose the target, and run the LeakLens Python detectors on a configured backend. This page never replays a recorded result and never invents a finding.</p>
+      <p class="provenance">
+        <span class="badge badge-warn" data-connection-badge data-state="offline">live backend required</span>
+        <strong>The public site is static.</strong>
+        GitHub Pages cannot execute Python. The scan runs only after you connect a real LeakLens API; when none is connected, the page says so and links to the prerecorded demo.
+      </p>
+    </div>
+  </section>
+
+  <div class="shell section-tight live-shell">
+    <div class="live-main">
+      <section class="live-panel live-connect" aria-labelledby="connect-title">
+        <div class="live-panel-head">
+          <div>
+            <p class="eyebrow">Connection</p>
+            <h2 id="connect-title">Point the page at a LeakLens API</h2>
+          </div>
+          <span class="live-connection" data-connection data-state="offline">
+            <span class="live-dot" aria-hidden="true"></span>
+            <strong data-connection-label>Not connected</strong>
+          </span>
+        </div>
+        <p class="live-copy">Use a backend you run locally, or the documented free deployment. The URL is stored in this browser only; no account is created.</p>
+        <form class="live-connect-form" data-api-form novalidate>
+          <label class="field-label" for="live-api">Backend URL</label>
+          <div class="live-connect-row">
+            <input id="live-api" data-api-input type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://your-leaklens-api.onrender.com" aria-describedby="live-api-help">
+            <button class="button button-small" type="submit" data-connect>Connect</button>
+          </div>
+          <p class="field-help" id="live-api-help">HTTPS for public backends; HTTP is accepted only for localhost. A free backend can take about a minute to wake.</p>
+          <p class="live-connection-detail" data-connection-detail role="status" aria-live="polite">No live LeakLens backend is configured.</p>
+        </form>
+        <div class="live-offline" data-offline hidden>
+          <strong>No backend connected. Nothing is being scanned.</strong>
+          <p data-offline-detail>This GitHub Pages build is static. Run the API locally or deploy the documented service, then connect its URL above.</p>
+          <p class="live-offline-actions">
+            <a href="demo.html">Open the prerecorded demo</a>
+            <a href="docs.html#api">Read the API docs</a>
+            <a href="https://github.com/eyadstein/leaklens/blob/main/docs/LIVE_SCANNING.md" rel="noopener">Deployment and limits</a>
+          </p>
+          <pre><code>uvicorn leaklens.public_api:app --port 8000</code></pre>
+        </div>
+      </section>
+
+      <section class="live-panel" data-upload-panel data-ready="false" aria-labelledby="upload-title">
+        <div class="live-panel-head">
+          <div>
+            <p class="eyebrow">Dataset</p>
+            <h2 id="upload-title">1. Choose the file to audit</h2>
+          </div>
+          <span class="badge">validated server-side</span>
+        </div>
+        <label class="dropzone" data-dropzone for="live-file">
+          <input class="sr-only" id="live-file" data-file-input type="file" accept=".csv,.json,.xlsx,.parquet,.feather">
+          <span class="dropzone-mark" aria-hidden="true">CSV</span>
+          <span class="dropzone-title">Drop a dataset here or browse</span>
+          <span class="dropzone-hint">CSV or JSON by default. The backend validates the content, not the filename.</span>
+        </label>
+        <div class="live-file" data-file-info hidden>
+          <div>
+            <strong data-file-name>No file selected</strong>
+            <p data-file-meta>Drop a file here or use the file picker.</p>
+            <div class="file-errors" data-file-errors role="alert"></div>
+            <div class="file-warnings" data-file-warnings role="status"></div>
+          </div>
+          <button class="button button-small button-secondary" type="button" data-clear-file hidden>Remove</button>
+        </div>
+
+        <div class="live-subpanel">
+          <h3>Held-out test file <span class="faint">optional</span></h3>
+          <p class="live-copy">Add a separate test split to measure exact, feature-vector and near-duplicate overlap, group overlap and temporal boundaries.</p>
+          <label class="dropzone dropzone-small" data-test-dropzone for="live-test-file">
+            <input class="sr-only" id="live-test-file" data-test-input type="file" accept=".csv,.json,.xlsx,.parquet,.feather">
+            <span class="dropzone-title">Drop the test split or browse</span>
+            <span class="dropzone-hint">Same limits and validation as the training file.</span>
+          </label>
+          <div class="live-file" data-test-info hidden>
+            <div>
+              <strong data-test-name>No held-out file selected</strong>
+              <p data-test-meta>Optional: compare a separate test split.</p>
+              <div class="file-errors" data-test-errors role="alert"></div>
+              <div class="file-warnings" data-test-warnings role="status"></div>
+            </div>
+            <button class="button button-small button-secondary" type="button" data-clear-test hidden>Remove</button>
+          </div>
+        </div>
+
+        <div class="live-preview-wrap">
+          <h3>Column preview</h3>
+          <div class="live-preview" data-preview></div>
+          <p class="live-note" data-preview-note>Connect a backend to inspect columns and choose a target.</p>
+        </div>
+      </section>
+
+      <form class="live-panel" data-config-panel data-ready="false" aria-labelledby="config-title">
+        <div class="live-panel-head">
+          <div>
+            <p class="eyebrow">Options</p>
+            <h2 id="config-title">2. Configure and run</h2>
+          </div>
+        </div>
+        <fieldset class="live-fieldset" data-config-fields>
+          <legend class="sr-only">Scan configuration</legend>
+          <div class="live-config-grid">
+            <label class="field-label" for="live-target">Target column
+              <select id="live-target" data-target></select>
+            </label>
+            <label class="field-label" for="live-group">Group column <span class="faint">optional</span>
+              <select id="live-group" data-group></select>
+            </label>
+            <label class="field-label" for="live-time">Time column <span class="faint">optional</span>
+              <select id="live-time" data-time></select>
+            </label>
+            <label class="field-label" for="live-threshold">Single-feature threshold
+              <span class="live-range">
+                <input id="live-threshold" data-threshold type="range" min="0.5" max="1" step="0.01" value="0.95">
+                <output data-threshold-value for="live-threshold">0.95</output>
+              </span>
+              <span class="field-help">Scores at or above this value count as target leakage.</span>
+            </label>
+          </div>
+          <p class="live-note" data-config-note>Inspect a file first; target and optional columns are populated from its real headers.</p>
+          <div class="live-actions">
+            <button class="button" type="submit" data-scan disabled>Run the real scan</button>
+            <button class="button button-secondary" type="button" data-reset>Reset</button>
+            <span class="live-scan-note">No account. No permanent storage. Findings are returned for this request only.</span>
+          </div>
+        </fieldset>
+      </form>
+
+      <section class="live-panel live-progress" data-progress aria-labelledby="progress-title" hidden>
+        <div class="live-panel-head">
+          <div>
+            <p class="eyebrow">Running</p>
+            <h2 id="progress-title">Real scan in progress</h2>
+          </div>
+          <span class="live-elapsed"><strong data-progress-elapsed>0.0 s</strong></span>
+        </div>
+        <p class="live-copy" data-progress-label>Uploading and validating the file</p>
+        <ol class="live-steps" aria-label="Scan stages">
+          <li data-progress-step data-state="active">Upload and validation</li>
+          <li data-progress-step data-state="pending">Bounded parse</li>
+          <li data-progress-step data-state="pending">LeakLens detectors</li>
+          <li data-progress-step data-state="pending">HTML report</li>
+        </ol>
+        <div class="live-progress-bar" role="progressbar" aria-label="Scan request in progress" aria-valuetext="Waiting for the backend"><span></span></div>
+        <p class="live-note">The backend does not stream exact percentages. The timer is real; the stage labels show the request lifecycle, not invented progress.</p>
+        <button class="button button-small button-secondary" type="button" data-cancel hidden>Cancel request</button>
+      </section>
+
+      <section class="live-error" data-error role="alert" hidden>
+        <h2 data-error-title>Scan failed</h2>
+        <p data-error-message></p>
+        <button class="button button-small" type="button" data-retry hidden>Retry</button>
+      </section>
+
+      <section class="live-results" data-results aria-labelledby="live-results-title" hidden>
+        <div class="live-result-head">
+          <div class="score-ring" data-score-ring style="--score:0" role="img" aria-label="Trust score pending">
+            <span data-score>—</span>
+            <small>TRUST / 100</small>
+          </div>
+          <div class="live-result-title">
+            <p class="eyebrow">Live scan result</p>
+            <h2 id="live-results-title" tabindex="-1">Findings from the Python engine</h2>
+            <p class="live-verdict"><strong data-score-word>Unknown</strong> · every value below came from the connected backend.</p>
+            <div class="live-counts" data-counts aria-label="Finding counts"></div>
+          </div>
+          <div class="live-result-actions">
+            <button class="button button-small" type="button" data-download-report>Download HTML report</button>
+            <button class="button button-small button-secondary" type="button" data-download-json>Download JSON</button>
+            <button class="button button-small button-secondary" type="button" data-new-scan>New scan</button>
+          </div>
+        </div>
+
+        <div class="live-summary" data-summary aria-label="Scan summary"></div>
+
+        <div class="live-detail-grid">
+          <section class="live-detail-card" aria-labelledby="audit-title">
+            <h3 id="audit-title">Dataset audit</h3>
+            <div data-audit></div>
+          </section>
+          <section class="live-detail-card" aria-labelledby="impact-title">
+            <h3 id="impact-title">Split impact</h3>
+            <div data-impact></div>
+          </section>
+        </div>
+
+        <div class="live-findings">
+          <div class="live-findings-head">
+            <h3>Findings</h3>
+            <p data-findings-count>No findings</p>
+          </div>
+          <div class="live-filters">
+            <div class="chip-row" data-filter-severity role="group" aria-label="Filter by severity"></div>
+            <label class="field-label" for="live-kind">Kind
+              <select id="live-kind" data-filter-kind></select>
+            </label>
+            <label class="field-label" for="live-search">Search
+              <input id="live-search" data-filter-query type="search" placeholder="column, evidence or fix">
+            </label>
+          </div>
+          <div class="finding-list" data-findings></div>
+        </div>
+      </section>
+
+      <noscript>
+        <section class="live-panel">
+          <h2>JavaScript is required for a live scan</h2>
+          <p>Every LeakLens command still works without a browser: <code>leaklens data.csv --target is_fraud</code>. The <a href="demo.html">prerecorded demo</a> also shows real recorded output.</p>
+        </section>
+      </noscript>
+
+      <p class="sr-only" role="status" aria-live="polite" data-live-status></p>
+    </div>
+
+    <aside class="live-side" aria-label="Live scan limits and honesty notes">
+      <section class="live-side-card">
+        <h2>Server limits</h2>
+        <p class="live-formats" data-formats>.csv .json</p>
+        <p class="live-limits" data-limits>4.0 MiB per file · 5,000 rows · 30s scan timeout</p>
+        <p class="live-note">Limits are enforced by the backend and can differ from this displayed default after connecting.</p>
+      </section>
+      <section class="live-side-card">
+        <h2>What happens to the file</h2>
+        <ul class="live-list">
+          <li>Parsed in memory for one request; never written to disk by LeakLens.</li>
+          <li>Size, row, column and cell limits are checked before detection.</li>
+          <li>The backend validates content, not the filename or MIME type.</li>
+          <li>No account, no tracking, no permanent dataset storage.</li>
+          <li>Errors are generic; stack traces and internal paths are not returned.</li>
+        </ul>
+      </section>
+      <section class="live-side-card">
+        <h2>What is checked</h2>
+        <ul class="live-list">
+          <li>Single-feature target leakage.</li>
+          <li>Identifier-like columns.</li>
+          <li>Categorical target leakage.</li>
+          <li>Group leakage risk.</li>
+          <li>Optional exact, feature-vector and near-duplicate split overlap.</li>
+          <li>Optional group and temporal boundary overlap.</li>
+        </ul>
+      </section>
+      <section class="live-side-card live-honesty">
+        <h2>Honest boundaries</h2>
+        <p>This page does not claim that a scan ran when it did not. If the backend is missing, sleeping, rate-limited or timed out, you get an explicit error and a retry, never a fabricated score.</p>
+        <p>The GitHub Pages copy is not connected to a hosted backend unless a URL is supplied. The repository includes local and Render deployment instructions.</p>
+        <p><a href="demo.html">Compare with the prerecorded demo →</a></p>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html" aria-label="LeakLens home">
+          <img class="brand-mark" src="assets/logo.svg" alt="" width="30" height="30">
+          LeakLens
+        </a>
+        <p>Catch data leakage before it fools you. Free, open source, and offline by default.</p>
+        <p class="footer-note">PyPI package <code>leaklens-ml</code> · command <code>leaklens</code></p>
+      </div>
+      <div class="footer-col">
+        <h3>Product</h3>
+        <ul>
+          <li><a href="live.html">Live scan</a></li>
+          <li><a href="demo.html">Interactive demo</a></li>
+          <li><a href="index.html#detections">Detections</a></li>
+          <li><a href="report.html">Example report</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="docs.html#install">Install</a></li>
+          <li><a href="docs.html#quickstart">Quickstart</a></li>
+          <li><a href="docs.html#cli">CLI reference</a></li>
+          <li><a href="docs.html#api">API &amp; UI</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/eyadstein/leaklens" rel="noopener">GitHub repository</a></li>
+          <li><a href="https://pypi.org/project/leaklens-ml/" rel="noopener">PyPI package</a></li>
+          <li><a href="https://github.com/eyadstein/leaklens/issues" rel="noopener">Issues</a></li>
+          <li><a href="https://github.com/eyadstein/leaklens/blob/main/LICENSE" rel="noopener">MIT license</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <p>© 2026 LeakLens. Built with Python and hand-written HTML, CSS and JavaScript.</p>
+      <p>No tracking, no cookies, no external fonts or scripts.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/live-config.js"></script>
+<script type="module" src="assets/live.js"></script>
+<script src="assets/site.js" defer></script>
+</body>
+</html>
