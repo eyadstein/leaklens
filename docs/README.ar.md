@@ -1,6 +1,6 @@
 # LeakLens
 
-[English](../README.md)
+[English](../README.md) | [日本語](README.ja.md)
 
 [![CI](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml/badge.svg)](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml)
 [![درجة الثقة في التسرب](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eyadstein/leaklens/main/badge.json)](#شارة-درجة-الثقة)
