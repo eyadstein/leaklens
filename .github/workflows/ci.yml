@@ -18,3 +18,59 @@ jobs:
       - run: pytest --cov=leaklens --cov-report=term-missing -q
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
+      - run: python -m leaklens.bench_data
+      - run: python -m leaklens.bench_ai
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # Build isolation (PEP 517) only upgrades the build env. The runtime
+      # setuptools shipped with setup-python is audited by pip-audit, so
+      # upgrade it explicitly before the audit.
+      - run: pip install --upgrade "setuptools>=84.1.0"
+      - run: pip install -e ".[dev]"
+      - run: bandit -r leaklens
+      - run: pip show setuptools
+      - run: pip-audit --desc
+      - run: pip-licenses --format=csv
+      - run: python -m leaklens --version
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install "ruff>=0.17"
+      - run: ruff check leaklens tests scripts
+      - run: ruff format --check leaklens tests scripts
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev,api]"
+      # Upload hardening, contract and real-HTTP smoke checks for the public
+      # live-scan API. No deployed backend is required.
+      - run: pytest tests/test_public_api.py tests/test_upload_guard.py -q
+      - run: python scripts/smoke_public_api.py
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -e .
+      # Fails when the recorded demo fixtures drift from the real scanners,
+      # a link or asset is missing, or the static pages lose an a11y landmark.
+      - run: python scripts/build_site.py --check
+      - run: node --test tests/site/demo-engine.test.mjs tests/site/live-engine.test.mjs

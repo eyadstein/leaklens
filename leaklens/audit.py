@@ -5,10 +5,12 @@ import pandas as pd
 
 def audit(df: pd.DataFrame, target: str | None = None) -> dict:
     out = {
-        "rows": int(len(df)),
+        "rows": len(df),
         "cols": int(df.shape[1]),
         "duplicate_rows": int(df.duplicated().sum()),
-        "null_rate": {c: round(float(v), 4) for c, v in df.isna().mean().items() if v > 0},
+        "null_rate": {
+            c: round(float(v), 4) for c, v in df.isna().mean().items() if v > 0
+        },
         "cardinality": {c: int(df[c].nunique(dropna=True)) for c in df.columns},
     }
     if target is not None and target in df.columns:

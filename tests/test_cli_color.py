@@ -35,7 +35,9 @@ def test_severity_colors_follow_level(monkeypatch, capsys):
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr(cli.sys.stdout, "isatty", lambda: True)
     for severity, code in (("high", "31"), ("medium", "33"), ("low", "32")):
-        assert cli._severity_label(severity) == f"\033[{code}m[{severity.upper()}]\033[0m"
+        assert (
+            cli._severity_label(severity) == f"\033[{code}m[{severity.upper()}]\033[0m"
+        )
 
 
 def test_no_color_environment_disables_color(monkeypatch, capsys):

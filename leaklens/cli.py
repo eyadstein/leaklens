@@ -10,8 +10,10 @@ from . import __version__, llm
 from .audit import audit
 from .fixes import advice
 from .leakage import (
+    feature_overlap,
     group_overlap,
     group_risk,
+    near_duplicate_overlap,
     scan,
     score,
     split_overlap,
@@ -56,6 +58,8 @@ STARTER_CONFIG = """# LeakLens settings for this project.
 # sarif = "leaklens.sarif"  # --sarif: write SARIF 2.1.0 for GitHub code scanning
 # html = "report.html"      # --html: write a single-file HTML report
 # badge = "badge.json"      # --badge: write a shields.io endpoint JSON
+# ai = false                # --ai: add experimental, evidence-bound AI hypotheses
+# ai_llm = false            # --ai-llm: rephrase the AI plan with the configured LLM
 """
 
 PRE_COMMIT_SNIPPET = """repos:
@@ -147,14 +151,116 @@ def images(argv) -> int:
     return 1 if fs else 0
 
 
+def doctor(argv) -> int:
+    from importlib import metadata as _meta
+
+    EXTRAS = {
+        "arena": "mlflow",
+        "parquet": "pyarrow",
+        "feather": "pyarrow",
+        "excel": "openpyxl",
+        "images": "PIL",
+        "app": "fastapi",
+        "taintwatch": "taintwatch",
+    }
+
+    def _import_ok(mod):
+        import importlib.util
+
+        return importlib.util.find_spec(mod) is not None
+
+    def _pkg_version(pkg):
+        try:
+            return _meta.version(pkg)
+        except _meta.PackageNotFoundError:
+            return None
+
+    report = {
+        "python_version": sys.version.split()[0],
+        "python_ok": sys.version_info >= (3, 10),
+        "leaklens_version": __version__,
+        "leaklens_location": __file__,
+        "cli_available": True,
+        "entry_point": "leaklens:main",
+        "required_ok": all(_import_ok(m) for m in ("pandas", "numpy", "sklearn")),
+        "extras": {extra: _import_ok(m) for extra, m in EXTRAS.items()},
+        "extras_available": [],
+        "toml_config_present": None,
+    }
+    report["extras_available"] = sorted(
+        e for e, ok in report["extras"].items() if ok and e != "taintwatch"
+    )
+    report["config_valid"] = True
+    report["config_error"] = None
+    for name in (".leaklens.toml", "pyproject.toml"):
+        path = Path(name)
+        if path.exists():
+            report["toml_config_present"] = name
+            try:
+                try:
+                    import tomllib
+                except ModuleNotFoundError:  # Python 3.10
+                    import tomli as tomllib
+
+                tomllib.loads(path.read_text(encoding="utf-8"))
+            except (
+                OSError,
+                ValueError,
+                UnicodeDecodeError,
+            ) as exc:  # invalid TOML in repo config
+                report["config_valid"] = False
+                report["config_error"] = str(exc)
+            break
+    else:
+        report["toml_config_present"] = None
+        report["config_valid"] = True
+    if argv and argv[0] in ("--help", "-h"):
+        print(
+            "usage: leaklens doctor [--json]\n\nCheck Python/LeakLens versions, install location, required and optional dependencies, and config validity."
+        )
+        return 0
+    text = [
+        f"Python      : {report['python_version']} (required >=3.10) {'OK' if report['python_ok'] else 'FAIL: python<3.10'}",
+        f"LeakLens    : {report['leaklens_version']} at {report['leaklens_location']}",
+        f"CLI         : {report['entry_point']} OK",
+        f"Core deps   : {'OK' if report['required_ok'] else 'FAIL: pandas/numpy/scikit-learn missing -> pip install --upgrade leaklens-ml'}",
+        f"Extras      : {', '.join(report['extras_available']) or 'none'} (of {', '.join([e for e in EXTRAS if e != 'taintwatch'])})",
+        f"Config      : {report['toml_config_present'] or 'none (ok)'}"
+        + (f" INVALID: {report['config_error']}" if not report["config_valid"] else ""),
+    ]
+    if (
+        not report["python_ok"]
+        or not report["required_ok"]
+        or not report["config_valid"]
+    ):
+        text.append(
+            "Result      : DOCTOR FAILED - see FAIL rows above; install/reinstall leaklens-ml or fix config"
+        )
+        print("\n".join(text))
+        return 1
+    if argv and "--json" in argv:
+        print(json.dumps(report, indent=2))
+        return 0
+    text.append("Result      : DOCTOR OK (no secrets, no network calls)")
+    print("\n".join(text))
+    return 0
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "init":
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "doctor":
+        return doctor(argv[1:])
     p = argparse.ArgumentParser(
-        prog="leaklens", description="Audit datasets and ML code for leakage"
+        prog="leaklens",
+        description="Audit datasets and ML code for leakage",
+        epilog=(
+            "Run 'leaklens doctor' to check your install, and "
+            "'leaklens init' to write a starter .leaklens.toml config."
+        ),
     )
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("train", nargs="?")
@@ -205,6 +311,16 @@ def main(argv=None) -> int:
         default=10,
         help="maximum findings to explain (default: 10)",
     )
+    p.add_argument(
+        "--ai",
+        action="store_true",
+        help="add experimental, evidence-bound AI hypotheses (offline)",
+    )
+    p.add_argument(
+        "--ai-llm",
+        action="store_true",
+        help="rephrase the AI plan with the configured LLM (safe fallback)",
+    )
     p.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     p.add_argument("--html", help="write a shareable single-file HTML report")
     p.add_argument(
@@ -214,6 +330,8 @@ def main(argv=None) -> int:
         "--fail-under", type=float, help="exit with code 1 if trust score is below N"
     )
     a = p.parse_args(argv)
+    if a.ai_llm:
+        a.ai = True
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
     if not a.train and not a.scan:
@@ -223,6 +341,7 @@ def main(argv=None) -> int:
     if a.arena and not a.train:
         p.error("--arena needs a CSV")
     fs, rep, res = [], {}, None
+    tr = te = None
     if a.train:
         try:
             tr = _read_dataset(a.train)
@@ -234,7 +353,13 @@ def main(argv=None) -> int:
                 te = _read_dataset(a.test)
             except ImportError as e:
                 p.error(str(e))
-            fs += split_overlap(tr, te)
+            exact = split_overlap(tr, te)
+            fs += exact
+            if not exact:
+                shared = feature_overlap(tr, te, a.target)
+                fs += shared
+                if not shared:
+                    fs += near_duplicate_overlap(tr, te, a.target)
             if a.time:
                 fs += temporal_overlap(tr, te, a.time)
         if a.group:
@@ -267,6 +392,46 @@ def main(argv=None) -> int:
             )
 
     rep = {"trust_score": score(fs), **rep, "findings": [f.to_dict() for f in fs]}
+    ai_report = None
+    if a.ai:
+        try:
+            from .ai import DatasetInput, analyze, collect_code_sources
+
+            dataset = (
+                DatasetInput(
+                    train=tr,
+                    test=te if a.test else None,
+                    target=a.target,
+                    group=a.group,
+                    time=a.time,
+                )
+                if a.train
+                else None
+            )
+            provider = None
+            if a.ai_llm:
+                try:
+                    provider = llm.create_provider(
+                        a.llm_provider, a.llm_base_url, a.llm_model
+                    )
+                except llm.LLMError as exc:
+                    print(
+                        f"AI LLM unavailable; using the deterministic plan: {exc}",
+                        file=sys.stderr,
+                    )
+            ai_report = analyze(
+                fs,
+                code=collect_code_sources(a.scan) if a.scan else (),
+                dataset=dataset,
+                llm_provider=provider,
+                trust_score=rep["trust_score"],
+            ).to_dict()
+            rep["ai"] = ai_report
+        except Exception as exc:  # noqa: BLE001 - optional AI must not break a scan
+            print(
+                f"AI analysis unavailable; deterministic results are unchanged: {exc}",
+                file=sys.stderr,
+            )
     intelligence_report = None
     if a.intelligence:
         from .intelligence import analyze_dataset_impact, analyze_findings
@@ -329,6 +494,25 @@ def main(argv=None) -> int:
                 print(f"    Root cause: {cause['title']}")
             for recommendation in intelligence_report["recommendations"]:
                 print(f"    Recommendation: {recommendation['title']}")
+        if ai_report is not None:
+            hypotheses = ai_report["hypotheses"]
+            groups = ai_report["plan"]["root_causes"]
+            print(
+                f"AI (experimental): {len(hypotheses)} hypothesis(es), "
+                f"{len(groups)} root-cause group(s); deterministic findings unchanged."
+            )
+            for group in groups[:3]:
+                print(
+                    f"    AI root cause [{group['priority']}]: {group['title']} "
+                    f"({group['source']})"
+                )
+            if ai_report["plan"].get("llm_summary"):
+                print(f"    AI summary: {ai_report['plan']['llm_summary']}")
+            for hypothesis in hypotheses[:3]:
+                print(
+                    f"    AI hypothesis [{hypothesis['confidence']:.2f}]: "
+                    f"{hypothesis['title']} :: {hypothesis['location']}"
+                )
         for index, f in enumerate(fs):
             print(f"{_severity_label(f.severity)} {f.kind} :: {f.column} :: {f.detail}")
             if explanations is not None and explanations[index] is not None:

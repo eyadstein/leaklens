@@ -1,4 +1,4 @@
-﻿from leaklens import __version__
+from leaklens import __version__
 from leaklens.cli import main
 
 

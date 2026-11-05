@@ -41,7 +41,11 @@ tree_ensemble 0.8242 0.3562 0.4103
 
 ```bash
 pip install leaklens-ml
+leaklens --version
+leaklens doctor
 ```
+
+يتحقق `leaklens doctor` من إصدار Python (3.10 أو أحدث)، وموقع تثبيت LeakLens، والاعتماديات الأساسية، والملحقات الاختيارية المتاحة، وصحة ملف الإعدادات. استخدم `leaklens doctor --json` للحصول على تقرير قابل للقراءة آلياً؛ ولا يجري أي اتصال بالشبكة.
 
 ## البدء السريع
 
@@ -73,6 +77,10 @@ streamlit run leaklens/ui.py
 
 نقاط النهاية: `GET /health` و`POST /audit` و`POST /scan` و`POST /predict`.
 
+> يحمّل `POST /predict` ملفات النماذج باستخدام `joblib` من المجلد `./models/` فقط، وتُرفض المسارات المطلقة أو التي تخرج عنه. تستخدم `joblib` آلية pickle التي قد تنفّذ كوداً عشوائياً عند التحميل؛ لا تحمّل إلا النماذج الموثوقة ولا تعرّض API لمستخدمين أو شبكات غير موثوقة. راجع [SECURITY.md](../SECURITY.md).
+
+تفرض API وواجهة Streamlit حداً أقصى قدره **8 MiB** و**50,000 صف** لكل ملف مرفوع. تُفحص حاويات ZIP/gzip (بما فيها `.xlsx`) قبل التحليل: يجب ألا يتجاوز الحجم بعد فك الضغط **256 MiB**، وتُرفض مسارات ZIP المطلقة أو التي تحاول الخروج من المجلد. لا يفرض CLI حد 8 MiB لأن الملفات تُقرأ من القرص، لكنه يطبق فحص الحاوية نفسه.
+
 ## Docker
 
 ```bash
@@ -84,7 +92,7 @@ docker compose up --build
 ## إجراء GitHub
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
 - uses: eyadstein/leaklens@main
   with:
     path: notebooks
@@ -102,17 +110,29 @@ leaklens demo.csv --target is_fraud --arena --html report.html
 
 ```yaml
 permissions:
+  contents: read
   security-events: write
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
   - run: pip install leaklens-ml
   - run: leaklens --scan . --sarif leaklens.sarif || true
-  - uses: github/codeql-action/upload-sarif@v3
+  - uses: github/codeql-action/upload-sarif@v4
     with:
       sarif_file: leaklens.sarif
 ```
 
 ستظهر النتائج بعد ذلك في تبويب Security في المستودع، وكذلك كتعليقات توضيحية على طلبات الدمج.
+
+## SBOM والأتمتة الأمنية
+
+يُنشئ سير عمل الإصدار حزمة wheel وملف sdist، ثم يولّد SBOM بصيغة CycloneDX 1.5 في `sbom/sbom.json` عبر `scripts/generate_sbom.py`، ويرفع الحزم وملف SBOM كعناصر (artifacts) قبل النشر إلى PyPI. يُحفظ SBOM خارج `dist/` حتى لا تحاول أداة النشر رفعه إلى PyPI.
+
+```bash
+python scripts/generate_sbom.py              # dist/sbom.json
+python scripts/generate_sbom.py out/sbom.json
+```
+
+يشغّل CI أدوات `bandit` و`pip-audit` و`pip-licenses`، كما يشغّل CodeQL تحليلاً أمنياً موسّعاً للغة Python.
 
 ## خطاف pre-commit
 

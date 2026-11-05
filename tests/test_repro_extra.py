@@ -8,7 +8,9 @@ def kinds(src):
 
 
 def test_shuffle_false_not_flagged():
-    assert "no_random_state" not in kinds(S + "a = train_test_split(X, y, shuffle=False)\n")
+    assert "no_random_state" not in kinds(
+        S + "a = train_test_split(X, y, shuffle=False)\n"
+    )
 
 
 def test_unseeded_split_still_flagged():
@@ -18,4 +20,6 @@ def test_unseeded_split_still_flagged():
 def test_shufflesplit_flagged_and_seeded_clean():
     imp = "from sklearn.model_selection import ShuffleSplit\n"
     assert "no_random_state" in kinds(imp + "ss = ShuffleSplit(3)\n")
-    assert "no_random_state" not in kinds(imp + "ss = ShuffleSplit(3, random_state=0)\n")
+    assert "no_random_state" not in kinds(
+        imp + "ss = ShuffleSplit(3, random_state=0)\n"
+    )

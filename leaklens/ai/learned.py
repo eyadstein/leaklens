@@ -1,0 +1,852 @@
+"""Optional CPU-only learned detector for leakage-like code patterns.
+
+The detector is a small, calibrated lightweight model (tree ensemble or
+logistic regression, chosen on validation) trained from the authored
+development corpus in :mod:`leaklens.ai.corpus`:
+
+* no GPU, no network, no downloaded weights, no pickle loading;
+* scenario sources never span train, validation and the locked test set;
+* grouped cross-validation so a template family never spans folds;
+* architecture selection on grouped CV + validation, calibration from grouped
+  out-of-fold probabilities, and threshold selection on validation only;
+* the locked test set is imported by the benchmark, never by training;
+* every prediction is reported as a calibrated hypothesis, never a finding.
+
+The deterministic scanner remains authoritative.  This detector only adds a
+separate, clearly marked signal when a caller opts in.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import itertools
+import re
+import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+from sklearn.base import clone
+from sklearn.ensemble import (
+    ExtraTreesClassifier,
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import GroupKFold, StratifiedGroupKFold
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from leaklens.leakage import Finding
+
+from .corpus import (
+    CorpusCase,
+    corpus_stats,
+    development_cases,
+    training_cases,
+    validation_cases,
+)
+from .features import MODEL_FEATURE_NAMES, model_features
+from .schemas import EvidenceSpan, Hypothesis, ModelCard
+from .semantics import CodeSource
+
+_RANDOM_STATE = 0
+MODEL_VERSION = "leaklens-ai-p5-2026.11"
+_MAX_FALSE_POSITIVE_RATE = 0.05
+
+MODEL_LIMITATIONS = (
+    "Trained on an authored synthetic corpus; it is not production-code evidence.",
+    "The locked test is a small authored corpus of 47 cases, not real repositories.",
+    "Probabilities are calibrated on 40 validation cases; treat them as approximate.",
+    "English identifiers and Python control-flow cues may not transfer to other styles.",
+    "External scanner transfer is a separate check, not an improvement claim.",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _PlattCalibrator:
+    """One-dimensional logistic calibration fitted on grouped OOF scores."""
+
+    coefficient: float
+    intercept: float
+
+    @classmethod
+    def fit(cls, scores: np.ndarray, labels: np.ndarray) -> _PlattCalibrator:
+        logits = _logit(scores).reshape(-1, 1)
+        model = LogisticRegression(C=1e6, solver="lbfgs", max_iter=1000)
+        model.fit(logits, labels)
+        return cls(
+            coefficient=float(model.coef_[0][0]),
+            intercept=float(model.intercept_[0]),
+        )
+
+    def predict(self, scores: np.ndarray) -> np.ndarray:
+        logits = _logit(scores)
+        values = 1.0 / (1.0 + np.exp(-(self.coefficient * logits + self.intercept)))
+        return np.clip(values, 0.001, 0.999)
+
+
+def _logit(probabilities: np.ndarray) -> np.ndarray:
+    values = np.clip(np.asarray(probabilities, dtype=float), 1e-6, 1 - 1e-6)
+    return np.log(values / (1.0 - values))
+
+
+@dataclass(frozen=True, slots=True)
+class _CalibratedModel:
+    estimator: Any
+    calibrator: _PlattCalibrator
+
+    def predict_proba(self, matrix: np.ndarray) -> np.ndarray:
+        raw = self.estimator.predict_proba(matrix)[:, 1]
+        return self.calibrator.predict(raw)
+
+    def raw_probabilities(self, matrix: np.ndarray) -> np.ndarray:
+        return self.estimator.predict_proba(matrix)[:, 1]
+
+
+@dataclass(frozen=True, slots=True)
+class LearnedModel:
+    model: _CalibratedModel
+    card: ModelCard
+    feature_importances: tuple[float, ...]
+    threshold: float
+
+    def predict_proba(self, source: str) -> float:
+        vector = model_features(source).reshape(1, -1)
+        return float(self.model.predict_proba(vector)[0])
+
+    def predict_matrix(self, matrix: np.ndarray) -> np.ndarray:
+        return self.model.predict_proba(matrix)
+
+    def top_contributions(
+        self, source: str, limit: int = 6
+    ) -> tuple[tuple[str, float, float], ...]:
+        vector = model_features(source)
+        order = np.argsort(self.feature_importances)[::-1]
+        result = []
+        for index in order:
+            if vector[int(index)] == 0.0:
+                continue
+            result.append(
+                (
+                    MODEL_FEATURE_NAMES[int(index)],
+                    float(vector[int(index)]),
+                    float(self.feature_importances[int(index)]),
+                )
+            )
+            if len(result) >= limit:
+                break
+        return tuple(result)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelEvaluation:
+    metrics: dict[str, float]
+    threshold: float
+    folds: int
+    examples: int
+    groups: int
+    external: dict[str, float]
+    train_examples: int = 0
+    validation_examples: int = 0
+    train_metrics: dict[str, float] | None = None
+    calibration: dict[str, float] | None = None
+    candidates: tuple[dict[str, float], ...] = ()
+    model_name: str = ""
+    protocol: str = ""
+
+
+def _metrics(labels: np.ndarray, predicted: np.ndarray) -> dict[str, float]:
+    labels = np.asarray(labels, dtype=int)
+    predicted = np.asarray(predicted, dtype=int)
+    true_positive = int(np.sum((labels == 1) & (predicted == 1)))
+    false_positive = int(np.sum((labels == 0) & (predicted == 1)))
+    true_negative = int(np.sum((labels == 0) & (predicted == 0)))
+    false_negative = int(np.sum((labels == 1) & (predicted == 0)))
+    precision = (
+        true_positive / (true_positive + false_positive)
+        if true_positive + false_positive
+        else 0.0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative)
+        if true_positive + false_negative
+        else 0.0
+    )
+    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    false_positive_rate = (
+        false_positive / (false_positive + true_negative)
+        if false_positive + true_negative
+        else 0.0
+    )
+    specificity = (
+        true_negative / (true_negative + false_positive)
+        if true_negative + false_positive
+        else 0.0
+    )
+    accuracy = (true_positive + true_negative) / len(labels) if len(labels) else 0.0
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "false_positive_rate": round(false_positive_rate, 4),
+        "specificity": round(specificity, 4),
+        "accuracy": round(accuracy, 4),
+        "true_positives": float(true_positive),
+        "false_positives": float(false_positive),
+        "true_negatives": float(true_negative),
+        "false_negatives": float(false_negative),
+    }
+
+
+def _calibration(labels: np.ndarray, probabilities: np.ndarray) -> dict[str, float]:
+    labels = np.asarray(labels, dtype=float)
+    probabilities = np.asarray(probabilities, dtype=float)
+    brier = float(np.mean((probabilities - labels) ** 2)) if len(labels) else 0.0
+    bins = np.linspace(0.0, 1.0, 11)
+    expected = 0.0
+    for lower, upper in itertools.pairwise(bins):
+        if upper == 1.0:
+            mask = (probabilities >= lower) & (probabilities <= upper)
+        else:
+            mask = (probabilities >= lower) & (probabilities < upper)
+        if not np.any(mask):
+            continue
+        weight = float(np.count_nonzero(mask)) / len(labels)
+        gap = abs(float(np.mean(probabilities[mask])) - float(np.mean(labels[mask])))
+        expected += weight * gap
+    return {
+        "brier": round(brier, 4),
+        "expected_calibration_error": round(expected, 4),
+        "mean_probability": round(float(np.mean(probabilities)), 4)
+        if len(probabilities)
+        else 0.0,
+        "observed_rate": round(float(np.mean(labels)), 4) if len(labels) else 0.0,
+    }
+
+
+def _candidate_specs() -> tuple[tuple[str, Any], ...]:
+    return (
+        (
+            "gradient_boosting_depth2",
+            GradientBoostingClassifier(
+                n_estimators=250,
+                max_depth=2,
+                learning_rate=0.05,
+                random_state=_RANDOM_STATE,
+            ),
+        ),
+        (
+            "gradient_boosting_depth1",
+            GradientBoostingClassifier(
+                n_estimators=200,
+                max_depth=1,
+                learning_rate=0.06,
+                random_state=_RANDOM_STATE,
+            ),
+        ),
+        (
+            "random_forest_depth6",
+            RandomForestClassifier(
+                n_estimators=250,
+                max_depth=6,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
+            ),
+        ),
+        (
+            "random_forest_unbounded",
+            RandomForestClassifier(
+                n_estimators=250,
+                max_depth=None,
+                min_samples_leaf=2,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
+            ),
+        ),
+        (
+            "extra_trees_depth8",
+            ExtraTreesClassifier(
+                n_estimators=250,
+                max_depth=8,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
+            ),
+        ),
+        (
+            "extra_trees_unbounded",
+            ExtraTreesClassifier(
+                n_estimators=250,
+                max_depth=None,
+                min_samples_leaf=2,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
+            ),
+        ),
+        (
+            "hist_gradient_boosting",
+            HistGradientBoostingClassifier(
+                max_iter=250,
+                max_depth=4,
+                learning_rate=0.06,
+                early_stopping=False,
+                random_state=_RANDOM_STATE,
+            ),
+        ),
+        (
+            "logistic_regression",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(C=1.0, max_iter=500, random_state=_RANDOM_STATE),
+            ),
+        ),
+    )
+
+
+def _grouped_folds(groups: np.ndarray, labels: np.ndarray, n_splits: int = 5):
+    unique_groups = len(set(groups.tolist()))
+    splits = min(n_splits, unique_groups)
+    if splits < 2:
+        raise RuntimeError("the learning corpus needs at least two groups")
+    try:
+        splitter = StratifiedGroupKFold(
+            n_splits=splits, shuffle=True, random_state=_RANDOM_STATE
+        )
+        return list(splitter.split(np.zeros(len(labels)), labels, groups)), splits
+    except (TypeError, ValueError):  # pragma: no cover - older sklearn fallback
+        splitter = GroupKFold(n_splits=splits)
+        return list(splitter.split(np.zeros(len(labels)), labels, groups)), splits
+
+
+def _oof_probabilities(
+    estimator: Any,
+    matrix: np.ndarray,
+    labels: np.ndarray,
+    folds: Sequence[tuple[np.ndarray, np.ndarray]],
+) -> np.ndarray:
+    out_of_fold = np.zeros(len(labels), dtype=float)
+    covered = np.zeros(len(labels), dtype=bool)
+    for train_index, test_index in folds:
+        fold_model = clone(estimator)
+        fold_model.fit(matrix[train_index], labels[train_index])
+        out_of_fold[test_index] = fold_model.predict_proba(matrix[test_index])[:, 1]
+        covered[test_index] = True
+    if not covered.all():  # pragma: no cover - defensive
+        raise RuntimeError("grouped cross-validation left examples uncovered")
+    return out_of_fold
+
+
+def _fit_calibrated(
+    estimator: Any,
+    matrix: np.ndarray,
+    labels: np.ndarray,
+    out_of_fold: np.ndarray,
+) -> _CalibratedModel:
+    calibrator = _PlattCalibrator.fit(out_of_fold, labels)
+    fitted = clone(estimator)
+    fitted.fit(matrix, labels)
+    return _CalibratedModel(estimator=fitted, calibrator=calibrator)
+
+
+def _candidate_results(
+    matrix: np.ndarray,
+    labels: np.ndarray,
+    folds: Sequence[tuple[np.ndarray, np.ndarray]],
+    validation_matrix: np.ndarray,
+    validation_labels: np.ndarray,
+) -> tuple[list[dict[str, float]], str, dict[str, np.ndarray]]:
+    rows: list[dict[str, float]] = []
+    out_of_fold: dict[str, np.ndarray] = {}
+    for name, estimator in _candidate_specs():
+        oof = _oof_probabilities(estimator, matrix, labels, folds)
+        out_of_fold[name] = oof
+        cv = _metrics(labels, (oof >= 0.5).astype(int))
+        calibrated = _fit_calibrated(estimator, matrix, labels, oof)
+        validation_probabilities = calibrated.predict_proba(validation_matrix)
+        validation = _metrics(
+            validation_labels, (validation_probabilities >= 0.5).astype(int)
+        )
+        rows.append(
+            {
+                "name": name,
+                "cv_accuracy": cv["accuracy"],
+                "cv_precision": cv["precision"],
+                "cv_recall": cv["recall"],
+                "cv_f1": cv["f1"],
+                "cv_false_positive_rate": cv["false_positive_rate"],
+                "validation_accuracy": validation["accuracy"],
+                "validation_precision": validation["precision"],
+                "validation_recall": validation["recall"],
+                "validation_f1": validation["f1"],
+                "validation_false_positive_rate": validation["false_positive_rate"],
+            }
+        )
+    best = max(
+        rows,
+        key=lambda row: (
+            row["validation_f1"],
+            row["validation_precision"],
+            row["validation_recall"],
+            row["cv_f1"],
+        ),
+    )
+    return rows, str(best["name"]), out_of_fold
+
+
+def _choose_threshold(
+    labels: np.ndarray, probabilities: np.ndarray
+) -> tuple[float, str]:
+    """Choose on validation only; prefer a margin when classes are separable."""
+
+    labels = np.asarray(labels, dtype=int)
+    probabilities = np.asarray(probabilities, dtype=float)
+    positive = probabilities[labels == 1]
+    negative = probabilities[labels == 0]
+    if (
+        len(positive)
+        and len(negative)
+        and float(np.max(negative)) < float(np.min(positive))
+    ):
+        midpoint = (float(np.max(negative)) + float(np.min(positive))) / 2.0
+        return round(midpoint, 2), "validation_midpoint"
+    best: tuple[tuple[float, ...], float] | None = None
+    for threshold in np.arange(0.05, 0.951, 0.01):
+        metrics = _metrics(labels, (probabilities >= threshold).astype(int))
+        feasible = metrics["false_positive_rate"] <= _MAX_FALSE_POSITIVE_RATE
+        key = (
+            1.0 if feasible else 0.0,
+            metrics["f1"],
+            metrics["precision"],
+            metrics["recall"],
+            float(threshold),
+        )
+        if best is None or key > best[0]:
+            best = (key, float(threshold))
+    if best is None:  # pragma: no cover - defensive
+        return 0.5, "default"
+    return round(best[1], 2), "validation_f1"
+
+
+def _external_cases() -> list[tuple[str, str, bool]]:
+    """Existing scanner benchmarks, used only for post-training transfer tests."""
+
+    from leaklens.bench import CASES
+    from leaklens.bench_advanced import ADVANCED_CASES
+    from leaklens.bench_cases import EXTRA_CASES
+
+    cases: list[tuple[str, str, bool]] = list(CASES)
+    cases.extend((case.name, case.code, case.leaky) for case in EXTRA_CASES)
+    cases.extend((case.name, case.code, case.leaky) for case in ADVANCED_CASES)
+    return cases
+
+
+def _feature_importances(estimator: Any) -> tuple[float, ...]:
+    if hasattr(estimator, "feature_importances_"):
+        values = np.asarray(estimator.feature_importances_, dtype=float)
+    elif isinstance(estimator, Pipeline):
+        final = estimator.steps[-1][1]
+        if hasattr(final, "coef_"):
+            values = np.abs(np.asarray(final.coef_, dtype=float)).ravel()
+        elif hasattr(final, "feature_importances_"):
+            values = np.asarray(final.feature_importances_, dtype=float)
+        else:  # pragma: no cover - defensive
+            values = np.ones(len(MODEL_FEATURE_NAMES), dtype=float)
+    elif hasattr(estimator, "coef_"):
+        values = np.abs(np.asarray(estimator.coef_, dtype=float)).ravel()
+    else:  # pragma: no cover - defensive
+        values = np.ones(len(MODEL_FEATURE_NAMES), dtype=float)
+    if values.shape[0] != len(MODEL_FEATURE_NAMES):  # pragma: no cover
+        return tuple(1.0 / len(MODEL_FEATURE_NAMES) for _ in MODEL_FEATURE_NAMES)
+    total = float(values.sum())
+    if total > 0:
+        values = values / total
+    return tuple(float(value) for value in values)
+
+
+def _matrix(cases: Sequence[CorpusCase]) -> np.ndarray:
+    return np.vstack([model_features(case.code) for case in cases])
+
+
+def _labels(cases: Sequence[CorpusCase]) -> np.ndarray:
+    return np.asarray([int(case.leaky) for case in cases], dtype=int)
+
+
+def _groups(cases: Sequence[CorpusCase]) -> np.ndarray:
+    return np.asarray([case.group for case in cases], dtype=object)
+
+
+def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+    train = training_cases()
+    validation = validation_cases()
+    development = development_cases()
+
+    train_matrix = _matrix(train)
+    train_labels = _labels(train)
+    validation_matrix = _matrix(validation)
+    validation_labels = _labels(validation)
+    development_matrix = _matrix(development)
+    development_labels = _labels(development)
+
+    folds, splits = _grouped_folds(_groups(train), train_labels)
+    candidate_rows, selected_name, train_oof = _candidate_results(
+        train_matrix,
+        train_labels,
+        folds,
+        validation_matrix,
+        validation_labels,
+    )
+    selected = dict(_candidate_specs())[selected_name]
+
+    calibrated_train = _fit_calibrated(
+        selected, train_matrix, train_labels, train_oof[selected_name]
+    )
+    validation_probabilities = calibrated_train.predict_proba(validation_matrix)
+    threshold, threshold_rule = _choose_threshold(
+        validation_labels, validation_probabilities
+    )
+    validation_metrics = _metrics(
+        validation_labels, (validation_probabilities >= threshold).astype(int)
+    )
+    train_calibrated = calibrated_train.calibrator.predict(train_oof[selected_name])
+    train_metrics = _metrics(train_labels, (train_calibrated >= threshold).astype(int))
+    calibration = _calibration(validation_labels, validation_probabilities)
+
+    development_folds, _ = _grouped_folds(_groups(development), development_labels)
+    development_oof = _oof_probabilities(
+        selected, development_matrix, development_labels, development_folds
+    )
+    final = _fit_calibrated(
+        selected, development_matrix, development_labels, development_oof
+    )
+    importances = _feature_importances(final.estimator)
+
+    external: dict[str, float] = {}
+    if include_external:
+        external_cases = _external_cases()
+        if external_cases:
+            external_matrix = np.vstack(
+                [model_features(code) for _name, code, _leaky in external_cases]
+            )
+            external_labels = np.asarray(
+                [int(leaky) for _name, _code, leaky in external_cases], dtype=int
+            )
+            probabilities = final.predict_proba(external_matrix)
+            external = _metrics(
+                external_labels, (probabilities >= threshold).astype(int)
+            )
+
+    stats = corpus_stats()
+    protocol = (
+        f"train={stats['train_cases']} cases/{stats['train_sources']} sources; "
+        f"validation={stats['validation_cases']} cases/{stats['validation_sources']} "
+        "sources; locked test imported only by the benchmark; threshold rule="
+        f"{threshold_rule}."
+    )
+    external_rates = {
+        key: value
+        for key, value in external.items()
+        if key in {"precision", "recall", "f1", "false_positive_rate", "accuracy"}
+    }
+    card = ModelCard(
+        name="leaklens-ai-p5",
+        kind="calibrated_ensemble"
+        if "forest" in selected_name or "trees" in selected_name
+        else selected_name,
+        features=len(MODEL_FEATURE_NAMES),
+        training_examples=len(development),
+        groups=int(stats["groups"]),
+        threshold=threshold,
+        precision=validation_metrics["precision"],
+        recall=validation_metrics["recall"],
+        f1=validation_metrics["f1"],
+        false_positive_rate=validation_metrics["false_positive_rate"],
+        evaluation=(
+            f"Grouped {splits}-fold CV on train; validation-only threshold; "
+            "locked test never used for fitting or tuning."
+        ),
+        limitations=MODEL_LIMITATIONS,
+        external=tuple(
+            sorted((f"external_{key}", value) for key, value in external_rates.items())
+        ),
+        version=MODEL_VERSION,
+        validation_examples=len(validation),
+        calibration=tuple(sorted(calibration.items())),
+        candidates=tuple((row["name"], row["validation_f1"]) for row in candidate_rows),
+        protocol=protocol,
+    )
+    evaluation = ModelEvaluation(
+        metrics=validation_metrics,
+        threshold=threshold,
+        folds=splits,
+        examples=len(validation),
+        groups=int(stats["groups"]),
+        external=external,
+        train_examples=len(train),
+        validation_examples=len(validation),
+        train_metrics=train_metrics,
+        calibration=calibration,
+        candidates=tuple(candidate_rows),
+        model_name=selected_name,
+        protocol=protocol,
+    )
+    return evaluation, LearnedModel(
+        model=final,
+        card=card,
+        feature_importances=importances,
+        threshold=threshold,
+    )
+
+
+_lock = threading.Lock()
+_cached: tuple[ModelEvaluation, LearnedModel] | None = None
+
+
+def evaluate_model(*, include_external: bool = True) -> ModelEvaluation:
+    return get_model(include_external=include_external)[0]
+
+
+def get_model(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+    """Train once, cache in memory, and return the evaluation plus the model.
+
+    Nothing is written to disk and no serialized model is loaded, so a tampered
+    file cannot execute code.  The cache is guarded because the public API may
+    serve concurrent requests.
+    """
+
+    global _cached
+    with _lock:
+        if _cached is None or (include_external and not _cached[0].external):
+            _cached = _evaluate(include_external=include_external)
+        return _cached
+
+
+def reset_model_cache() -> None:
+    """Testing helper.  Never needed at runtime."""
+
+    global _cached
+    with _lock:
+        _cached = None
+
+
+def evaluate_locked_test() -> dict[str, object]:
+    """Evaluate the frozen shipped model on the locked independent test set.
+
+    Only the benchmark and its regression test call this.  Training, feature
+    selection, calibration and threshold tuning never import the test cases.
+    """
+
+    from .corpus_test import LOCKED_TEST_CASES
+
+    _evaluation, model = get_model()
+    matrix = _matrix(LOCKED_TEST_CASES)
+    labels = _labels(LOCKED_TEST_CASES)
+    probabilities = model.predict_matrix(matrix)
+    predicted = (probabilities >= model.threshold).astype(int)
+    metrics = _metrics(labels, predicted)
+
+    per_category: dict[str, dict[str, float]] = {}
+    for category in sorted({case.category for case in LOCKED_TEST_CASES}):
+        indexes = [
+            index
+            for index, case in enumerate(LOCKED_TEST_CASES)
+            if case.category == category
+        ]
+        per_category[category] = _metrics(labels[indexes], predicted[indexes])
+    per_source: dict[str, dict[str, float]] = {}
+    for source in sorted({case.source for case in LOCKED_TEST_CASES}):
+        indexes = [
+            index
+            for index, case in enumerate(LOCKED_TEST_CASES)
+            if case.source == source
+        ]
+        per_source[source] = _metrics(labels[indexes], predicted[indexes])
+
+    false_positives = []
+    false_negatives = []
+    for case, probability, guess in zip(LOCKED_TEST_CASES, probabilities, predicted):
+        if bool(guess) == case.leaky:
+            continue
+        contributions = model.top_contributions(case.code, limit=4)
+        item = {
+            "case": case.name,
+            "group": case.group,
+            "category": case.category,
+            "source": case.source,
+            "probability": round(float(probability), 4),
+            "signals": [name for name, _value, _importance in contributions],
+        }
+        if case.leaky:
+            false_negatives.append(item)
+        else:
+            false_positives.append(item)
+
+    return {
+        "cases": len(LOCKED_TEST_CASES),
+        "leaky": int(np.sum(labels)),
+        "legitimate": int(len(labels) - np.sum(labels)),
+        "threshold": model.threshold,
+        "metrics": metrics,
+        "calibration": _calibration(labels, probabilities),
+        "per_category": per_category,
+        "per_source": per_source,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+    }
+
+
+def _evidence(source: str, kind: str, location: str, excerpt: str) -> EvidenceSpan:
+    clean = re.sub(r"\s+", " ", excerpt).strip()[:320]
+    digest = hashlib.sha1(
+        f"{source}|{kind}|{location}|{clean}".encode("utf-8", "replace"),
+        usedforsecurity=False,
+    ).hexdigest()[:12]
+    return EvidenceSpan(
+        evidence_id=f"ev-{digest}",
+        source=source,
+        kind=kind,
+        location=location[:280],
+        excerpt=clean,
+    )
+
+
+def _evidence_line(lines: Sequence[str]) -> int:
+    keywords = (
+        "fit",
+        "split",
+        "target",
+        "label",
+        "test",
+        "holdout",
+        "time",
+        "date",
+        "group",
+        "customer",
+        "shift",
+        "rolling",
+        "fillna",
+        "concat",
+        "resample",
+        "scale",
+        "encode",
+    )
+    for index, line in enumerate(lines, start=1):
+        lowered = line.lower()
+        if any(
+            word in lowered for word in keywords
+        ) and not lowered.lstrip().startswith(("import ", "from ")):
+            return index
+    return 1
+
+
+def learned_hypotheses(
+    code: Sequence[CodeSource],
+    findings: Sequence[Finding] = (),
+    *,
+    threshold: float | None = None,
+) -> tuple[Hypothesis, ...]:
+    """Return at most one learned hypothesis per source unit above threshold."""
+
+    _evaluation, model = get_model()
+    cutoff = model.threshold if threshold is None else float(threshold)
+    known_kinds = {finding.kind for finding in findings}
+    corroborating = next(
+        (
+            kind
+            for kind in (
+                "preprocess_before_split",
+                "resample_before_split",
+                "feature_selection_before_split",
+                "target_encode_before_split",
+                "split_overlap",
+                "feature_overlap",
+                "near_duplicate_overlap",
+                "temporal_leakage",
+                "target_leakage",
+            )
+            if kind in known_kinds
+        ),
+        None,
+    )
+
+    hypotheses: list[Hypothesis] = []
+    for source in code:
+        chunks = source.chunks()
+        texts = [text for _label, text in chunks]
+        for index, (label, text) in enumerate(chunks):
+            # Notebook cells are judged in execution order, so an earlier
+            # preprocessing cell can be seen by a later split cell.
+            context = "\n".join(texts[: index + 1]) if len(texts) > 1 else text
+            probability = model.predict_proba(context)
+            if probability < cutoff:
+                continue
+            contributions = model.top_contributions(context, limit=5)
+            line_number = _evidence_line(text.splitlines())
+            first_line = text.splitlines()[line_number - 1] if text.splitlines() else ""
+            evidence = [
+                _evidence(
+                    "model",
+                    "probability",
+                    f"{label}:{line_number}",
+                    f"calibrated p(leaky pattern)={probability:.3f}; "
+                    f"threshold={cutoff:.2f}; model={MODEL_VERSION}",
+                ),
+                _evidence(
+                    "code",
+                    "pattern",
+                    f"{label}:{line_number}",
+                    first_line or f"code unit {label}",
+                ),
+            ]
+            for name, value, importance in contributions:
+                evidence.append(
+                    _evidence(
+                        "model",
+                        "feature",
+                        f"{label}:{line_number}",
+                        f"{name}={value:.2f} (global importance {importance:.3f})",
+                    )
+                )
+            confidence = min(0.95, 0.45 + 0.40 * probability)
+            signal_text = ", ".join(name for name, _value, _c in contributions[:3])
+            digest = hashlib.sha1(
+                f"{label}|{line_number}|{probability:.6f}".encode("utf-8", "replace"),
+                usedforsecurity=False,
+            ).hexdigest()[:12]
+            hypotheses.append(
+                Hypothesis(
+                    hypothesis_id=f"hyp-learned-{digest}",
+                    concept="learned_leakage_pattern",
+                    title="Learned model sees a leakage-like code pattern",
+                    explanation=(
+                        f"A calibrated local ensemble trained on labeled authored "
+                        f"pipelines gives this unit p={probability:.3f} for a leakage-like "
+                        f"pattern (threshold {cutoff:.2f}). Active signals: "
+                        f"{signal_text or 'none'}. Feature importances are global to the "
+                        "model, not a causal explanation. This is a statistical hint, not "
+                        "a verified finding."
+                    ),
+                    confidence=round(confidence, 4),
+                    evidence=tuple(evidence),
+                    location=f"{label}:{line_number}",
+                    detector="learned",
+                    severity_hint="medium" if probability >= 0.85 else "low",
+                    corroborates=corroborating,
+                    limitations=MODEL_LIMITATIONS[:3],
+                )
+            )
+    return tuple(hypotheses)
+
+
+__all__ = [
+    "MODEL_LIMITATIONS",
+    "MODEL_VERSION",
+    "LearnedModel",
+    "ModelEvaluation",
+    "evaluate_locked_test",
+    "evaluate_model",
+    "get_model",
+    "learned_hypotheses",
+    "reset_model_cache",
+]

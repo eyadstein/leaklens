@@ -20,6 +20,21 @@ FIXES = {
     "group_stat_before_split": "Compute group statistics on the training split only, or wrap the encoding in a Pipeline and evaluate with cross-validation.",
     "get_dummies_before_split": "Split first, then fit a OneHotEncoder(handle_unknown='ignore') on the training data inside a sklearn Pipeline so held-out categories do not shape the encoding.",
     "future_target_feature_before_split": "Do not build features from future target values. Use only information available at prediction time; for time series, construct lag features from past observations and split chronologically.",
+    "tuning_on_test_data": "Tune hyperparameters on training data with cross-validation (GridSearchCV with cv=5 on X_train). Use the test set once, only for final evaluation of the selected model.",
+    "categorical_target_leakage": "Check whether the high-cardinality categorical column is derived from the target or a post-outcome field. Remove it or replace it with a legitimate feature available at prediction time.",
+    "feature_selection_before_split": "Fit feature selectors (SelectKBest, RFE, SelectFromModel...) inside a Pipeline on the training split only; the label must not choose features using held-out rows.",
+    "frequency_encode_before_split": "Compute category frequencies from the training split only and map them onto both splits, or use a Pipeline encoder fitted on X_train.",
+    "tuning_before_split": "Split first, then tune on X_train with cross-validation. Tuning before the split lets held-out rows influence the chosen model or hyperparameters.",
+    "tuning_on_full_data": "Tune on the training partition only (GridSearchCV(cv=...).fit(X_train, y_train)); the held-out rows must not take part in model selection.",
+    "cv_on_test_data": "Cross-validate on X_train only. The test partition is evaluated once with the selected model; running CV over X_test reuses it for training and validation.",
+    "test_set_reuse": "Select models on a validation split (or cross-validation inside X_train) and touch the test set once. Repeated scoring on test data turns it into a tuning signal.",
+    "group_cv_missing_groups": "Pass the entity column to group-aware splitting: GroupKFold(...).split(X, y, groups=entity_ids) or cross_val_score(..., groups=entity_ids).",
+    "temporal_split_shuffle": "Split time-ordered data chronologically (shuffle=False, or a time-based split) so future rows never enter the training set.",
+    "notebook_out_of_order_execution": "Re-run the notebook top to bottom or use 'Restart Kernel and Run All' before trusting the scan; stale runtime state can hide or create leakage.",
+    "feature_overlap": "Deduplicate feature vectors before splitting, or split by entity. Identical features with conflicting labels let the model memorise a held-out row.",
+    "near_duplicate_overlap": "Deduplicate or group near-identical rows before splitting; normalised duplicates inflate held-out scores and hide distribution shift.",
 }
+
+
 def advice(kind: str) -> str:
     return FIXES.get(kind, "")

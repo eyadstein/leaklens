@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Documentation — LeakLens</title>
+<meta name="description" content="Install LeakLens, run your first audit, understand every detector and CLI flag, wire it into CI, and use the Python API, FastAPI service or Streamlit UI.">
+<meta name="theme-color" content="#060a10">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+<script>document.documentElement.classList.add("js");</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="site-header" data-header>
+  <div class="shell header-inner">
+    <a class="brand" href="index.html" aria-label="LeakLens home">
+      <img class="brand-mark" src="assets/logo.svg" alt="" width="30" height="30">
+      LeakLens
+    </a>
+    <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation">
+      <span></span>
+    </button>
+    <nav class="site-nav" id="site-nav" aria-label="Primary">
+      <a href="live.html">Live scan</a>
+      <a href="demo.html">Demo</a>
+      <a href="index.html#detections">Detections</a>
+      <a href="index.html#benchmarks">Benchmarks</a>
+      <a href="docs.html" aria-current="page">Docs</a>
+      <a class="nav-github" href="https://github.com/eyadstein/leaklens" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.69.41.35.78 1.05.78 2.12 0 1.53-.01 2.76-.01 3.14 0 .31.21.67.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        GitHub
+      </a>
+      <a class="button button-small" href="#install">Install</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="page-hero">
+    <div class="shell">
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="index.html">Home</a><span aria-hidden="true">/</span><span>Documentation</span>
+      </nav>
+      <h1>Documentation</h1>
+      <p class="lead">Install LeakLens, run a first audit, understand every detector, and wire the exit code into CI. Everything here applies to the open-source CLI — no hosted service is required.</p>
+    </div>
+  </section>
+  <div class="shell">
+    <div class="docs-layout">
+      <nav class="docs-nav" id="docs-nav" data-docs-nav aria-label="Documentation sections">
+        <h2>Get started</h2>
+        <ul>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#quickstart">Quickstart</a></li>
+          <li><a href="#detections">Detections</a></li>
+        </ul>
+        <h2>Usage</h2>
+        <ul>
+          <li><a href="#cli">CLI reference</a></li>
+          <li><a href="#config">Configuration</a></li>
+          <li><a href="#ai">Experimental AI</a></li>
+          <li><a href="#ci">CI and pre-commit</a></li>
+        </ul>
+        <h2>Outputs</h2>
+        <ul>
+          <li><a href="#reports">Reports and exports</a></li>
+          <li><a href="#api">API and UI</a></li>
+        </ul>
+        <h2>Reference</h2>
+        <ul>
+          <li><a href="#benchmarks">Benchmarks</a></li>
+          <li><a href="#limits">Limitations</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
+        </ul>
+      </nav>
+
+      <div class="docs-content">
+        <button class="button button-secondary button-small toc-top" type="button" data-docs-toggle aria-expanded="false" aria-controls="docs-nav">Contents</button>
+
+        <section id="install" data-doc-section>
+          <h2>Install</h2>
+          <p>The PyPI package is <code>leaklens-ml</code>; the installed command is <code>leaklens</code>. Python 3.10 or newer is required, and the base install needs no account, key, or network access.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="python -m pip install --upgrade leaklens-ml&#10;leaklens --version&#10;leaklens doctor">Copy</button></div>
+            <pre><code>python -m pip install --upgrade leaklens-ml
+leaklens --version
+leaklens doctor</code></pre>
+          </div>
+          <p><code>leaklens doctor</code> checks the interpreter, install location, entry point, core dependencies, optional extras and TOML validity without a network call. A missing optional extra is reported but does not fail the check.</p>
+          <div class="docs-callout"><strong>Windows:</strong> use <code>py -3 -m pip install --upgrade leaklens-ml</code> if <code>python</code> is not on PATH. <strong>Linux/macOS:</strong> if pip reports <code>externally-managed-environment</code>, create a virtual environment first.</div>
+          <h3>Optional extras</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Extra</th><th>Adds</th><th>Install</th></tr></thead>
+              <tbody>
+                <tr><td><code>parquet</code></td><td>Parquet input via pyarrow</td><td><code>pip install "leaklens-ml[parquet]"</code></td></tr>
+                <tr><td><code>feather</code></td><td>Feather input via pyarrow</td><td><code>pip install "leaklens-ml[feather]"</code></td></tr>
+                <tr><td><code>excel</code></td><td>Excel input via openpyxl</td><td><code>pip install "leaklens-ml[excel]"</code></td></tr>
+                <tr><td><code>images</code></td><td>Near-duplicate image check via Pillow</td><td><code>pip install "leaklens-ml[images]"</code></td></tr>
+                <tr><td><code>arena</code></td><td>Three-model arena with MLflow tracking</td><td><code>pip install "leaklens-ml[arena]"</code></td></tr>
+                <tr><td><code>app</code></td><td>FastAPI service and Streamlit UI</td><td><code>pip install "leaklens-ml[app]"</code></td></tr>
+                <tr><td><code>taintwatch</code></td><td>Optional guard for <code>--llm</code></td><td><code>pip install "leaklens-ml[taintwatch]"</code></td></tr>
+                <tr><td><code>dev</code></td><td>pytest, ruff, bandit, pip-audit and release tools</td><td><code>pip install "leaklens-ml[dev]"</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="quickstart" data-doc-section>
+          <h2>Quickstart</h2>
+          <p>Run a dataset audit with a label, compare a held-out split, and scan a codebase. The same audit can write JSON, HTML, SARIF, or a shields.io badge.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens train.csv --target label&#10;leaklens train.csv --test test.csv --target label --time date&#10;leaklens --scan src/ --explain&#10;leaklens train.csv --target label --fail-under 80">Copy</button></div>
+            <pre><code># Single-table audit
+leaklens train.csv --target label
+
+# Compare train and test, including temporal ordering
+leaklens train.csv --test test.csv --target label --time date
+
+# Statically scan Python files and notebooks
+leaklens --scan src/ --explain
+
+# Gate CI on the trust score
+leaklens train.csv --target label --fail-under 80</code></pre>
+          </div>
+          <p>The CLI exits 1 when any high-severity finding is present, or when <code>--fail-under</code> is set and the trust score is lower. That single rule works in GitHub Actions, pre-commit, Makefiles, and any shell.</p>
+          <h3>From Python</h3>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>python</span><button class="copy-button" type="button" data-copy="import pandas as pd&#10;from leaklens.leakage import scan, score&#10;&#10;df = pd.read_csv(&quot;train.csv&quot;)&#10;findings = scan(df, &quot;label&quot;)&#10;print(f&quot;trust score: {score(findings)}/100&quot;)&#10;for finding in findings:&#10;    print(finding.severity, finding.kind, finding.column, finding.detail)">Copy</button></div>
+            <pre><code>import pandas as pd
+from leaklens.leakage import scan, score
+
+df = pd.read_csv("train.csv")
+findings = scan(df, "label")
+print(f"trust score: {score(findings)}/100")
+for finding in findings:
+    print(finding.severity, finding.kind, finding.column, finding.detail)</code></pre>
+          </div>
+          <p>Scanning source uses <code>leaklens.scanner.scan_source(source, name="snippet.py")</code>. It parses the code; it never imports or executes it.</p>
+          <p>New to the problem? The <a href="https://github.com/eyadstein/leaklens/blob/main/examples/leak_walkthrough.ipynb" rel="noopener">walkthrough notebook</a> plants three leaks, shows the inflated score, then fixes them. The <a href="demo.html">interactive demo</a> replays real scanner output for the same kinds of case.</p>
+        </section>
+
+        <section id="detections" data-doc-section>
+          <h2>Detections</h2>
+          <p>Severity is about confidence in the observed pattern. High means the code or data satisfies a confirmed leakage rule; medium means the pattern is suspicious and context-dependent; low means a reproducibility or hygiene issue that rarely changes a score on its own.</p>
+          <h3>Dataset checks</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Kind</th><th>What it observes</th><th>Severity</th></tr></thead>
+              <tbody>
+                <tr><td><code>target_leakage</code></td><td>One feature alone predicts the target above the threshold (cross-validated ROC AUC, R² or balanced accuracy).</td><td>high / medium</td></tr>
+                <tr><td><code>categorical_target_leakage</code></td><td>A high-cardinality category is near-pure with respect to the label (conditional entropy).</td><td>high / medium</td></tr>
+                <tr><td><code>id_like</code></td><td>At least 98% unique values in a column; likely an identifier.</td><td>medium</td></tr>
+                <tr><td><code>split_overlap</code></td><td>Exact row hashes occur in both train and test.</td><td>high</td></tr>
+                <tr><td><code>feature_overlap</code></td><td>Identical feature vectors across the split; conflicting labels raise it to high.</td><td>high / medium</td></tr>
+                <tr><td><code>near_duplicate_overlap</code></td><td>Rows match after case/whitespace normalisation and rounding to four decimals.</td><td>medium</td></tr>
+                <tr><td><code>temporal_leakage</code></td><td>Training timestamps extend beyond the start of the test period.</td><td>high</td></tr>
+                <tr><td><code>group_overlap</code></td><td>The same entity appears in both splits when a <code>--group</code> column is supplied.</td><td>high / medium</td></tr>
+                <tr><td><code>group_leakage_risk</code></td><td>Group sizes are small or uneven enough to make entity leakage risky.</td><td>medium</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Code checks: pipeline order</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Kind</th><th>What it observes</th><th>Severity</th></tr></thead>
+              <tbody>
+                <tr><td><code>preprocess_before_split</code></td><td>A scaler, imputer or transformer is fitted before the split.</td><td>high</td></tr>
+                <tr><td><code>transformer_before_split</code></td><td>An unrecognised transformer is fitted before the split.</td><td>medium</td></tr>
+                <tr><td><code>encoder_before_split</code></td><td>A benign encoder is fitted before the split.</td><td>low</td></tr>
+                <tr><td><code>fillna_before_split</code></td><td>Imputation statistics are learned from the full frame.</td><td>medium</td></tr>
+                <tr><td><code>get_dummies_before_split</code></td><td>Category levels are fixed from the full frame.</td><td>low</td></tr>
+                <tr><td><code>manual_scale_before_split</code></td><td>Manual mean/std or min/max scaling is computed before the split.</td><td>high</td></tr>
+                <tr><td><code>resample_before_split</code></td><td>SMOTE or another sampler runs before <code>train_test_split</code>.</td><td>high</td></tr>
+                <tr><td><code>target_encode_before_split</code></td><td>Target means or aggregates become a feature before the split.</td><td>high</td></tr>
+                <tr><td><code>feature_selection_before_split</code></td><td><code>SelectKBest</code>, <code>RFE</code>, <code>SelectFromModel</code> or similar is fitted before the split.</td><td>high</td></tr>
+                <tr><td><code>frequency_encode_before_split</code></td><td><code>value_counts</code> is mapped into a column before the split; no label involved.</td><td>low</td></tr>
+                <tr><td><code>future_target_feature_before_split</code></td><td>A future-window target statistic is used as a feature.</td><td>high</td></tr>
+                <tr><td><code>group_stat_before_split</code></td><td>A per-entity statistic is computed across the full frame before the split.</td><td>medium</td></tr>
+                <tr><td><code>preprocess_outside_cv</code></td><td>Preprocessing happens before <code>cross_val_score</code> or <code>GridSearchCV</code>.</td><td>high / low</td></tr>
+                <tr><td><code>resample_outside_cv</code></td><td>Resampling happens before cross-validation.</td><td>high</td></tr>
+                <tr><td><code>fit_on_full_data</code></td><td>A transformer is fitted on the full frame after the split exists.</td><td>medium</td></tr>
+                <tr><td><code>fit_on_eval_data</code></td><td>A transform is fitted on the test or validation partition.</td><td>high / medium</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Code checks: tuning, time and reproducibility</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Kind</th><th>What it observes</th><th>Severity</th></tr></thead>
+              <tbody>
+                <tr><td><code>tuning_on_test_data</code></td><td>A search or manual loop fits on the test partition.</td><td>high</td></tr>
+                <tr><td><code>tuning_before_split</code></td><td>A search or CV runs on the full dataset before the split.</td><td>medium</td></tr>
+                <tr><td><code>tuning_on_full_data</code></td><td>A search is fitted on the original frame after the split exists.</td><td>medium</td></tr>
+                <tr><td><code>cv_on_test_data</code></td><td>Cross-validation runs over the held-out partition.</td><td>medium</td></tr>
+                <tr><td><code>test_set_reuse</code></td><td>The test partition is scored three or more times, i.e. used for selection.</td><td>low</td></tr>
+                <tr><td><code>group_cv_missing_groups</code></td><td>A group splitter is used without <code>groups=</code>.</td><td>medium</td></tr>
+                <tr><td><code>temporal_split_shuffle</code></td><td>A time-sorted frame is shuffled by <code>train_test_split</code>.</td><td>high / medium</td></tr>
+                <tr><td><code>no_random_state</code></td><td>A split or sampler omits <code>random_state</code>.</td><td>low</td></tr>
+                <tr><td><code>notebook_out_of_order_execution</code></td><td>Notebook execution counts are non-monotonic.</td><td>low</td></tr>
+                <tr><td><code>parse_error</code></td><td>A file could not be parsed; it is reported instead of silently skipped.</td><td>low</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Every kind has a remediation string in <code>leaklens/fixes.py</code>, printed by <code>--explain</code> and shown in the demo. The scanner never executes the code it reads.</p>
+        </section>
+
+        <section id="cli" data-doc-section>
+          <h2>CLI reference</h2>
+          <h3>Dataset audit</h3>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens train.csv --target label --test test.csv --group patient_id --time date --fail-under 80 --html report.html">Copy</button></div>
+            <pre><code>leaklens train.csv --target label \
+  --test test.csv --group patient_id --time date \
+  --fail-under 80 --html report.html</code></pre>
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>train</code></td><td>Path to the training dataset (positional). CSV and JSON work in the base install.</td></tr>
+                <tr><td><code>--target</code></td><td>Label column in the training data.</td></tr>
+                <tr><td><code>--test</code></td><td>Held-out split to compare against; enables the duplicate, temporal and group checks.</td></tr>
+                <tr><td><code>--time</code></td><td>Timestamp column for temporal leakage.</td></tr>
+                <tr><td><code>--group</code></td><td>Entity column (patient, customer, device) for group leakage.</td></tr>
+                <tr><td><code>--threshold</code></td><td>Single-feature score that counts as leakage (default <code>0.95</code>).</td></tr>
+                <tr><td><code>--fail-under</code></td><td>Exit 1 when the trust score is below N.</td></tr>
+                <tr><td><code>--json</code></td><td>Emit the report as JSON.</td></tr>
+                <tr><td><code>--explain</code></td><td>Print the suggested fix under each finding.</td></tr>
+                <tr><td><code>--intelligence</code></td><td>Deterministic confidence, root causes and remediation ranking.</td></tr>
+                <tr><td><code>--html</code></td><td>Write a single-file HTML report.</td></tr>
+                <tr><td><code>--sarif</code></td><td>Write SARIF 2.1.0 for GitHub code scanning.</td></tr>
+                <tr><td><code>--badge</code></td><td>Write a shields.io endpoint JSON with the score.</td></tr>
+                <tr><td><code>--arena</code></td><td>Compare three model families with MLflow tracking (needs <code>arena</code>).</td></tr>
+                <tr><td><code>--llm</code></td><td>Optional LLM explanations; off by default, local Ollama by default.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Code scan</h3>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens --scan src/ tests/ --explain&#10;leaklens --scan . --sarif leaklens.sarif">Copy</button></div>
+            <pre><code>leaklens --scan src/ tests/ --explain
+leaklens --scan . --sarif leaklens.sarif</code></pre>
+          </div>
+          <p><code>--scan</code> accepts any number of <code>.py</code>, <code>.ipynb</code> files or directories, ignores common environment folders, and reports parse failures instead of guessing. It works on Windows, Linux and macOS.</p>
+          <h3>Other commands</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Command</th><th>Purpose</th></tr></thead>
+              <tbody>
+                <tr><td><code>leaklens doctor [--json]</code></td><td>Check the install and optional dependencies offline.</td></tr>
+                <tr><td><code>leaklens init [dir]</code></td><td>Write a commented starter <code>.leaklens.toml</code> and print the pre-commit snippet.</td></tr>
+                <tr><td><code>leaklens images TRAIN TEST</code></td><td>Near-duplicate images across split folders (needs <code>images</code>).</td></tr>
+                <tr><td><code>leaklens --version</code></td><td>Print the installed version and exit.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="config" data-doc-section>
+          <h2>Configuration</h2>
+          <p><code>leaklens init</code> writes a documented <code>.leaklens.toml</code>. The file is a reference today: the CLI does not read it yet, and explicit flags always win. Treat the generated file as documentation for the options you may want to pass.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>.leaklens.toml</span><button class="copy-button" type="button" data-copy="leaklens init">Copy command</button></div>
+            <pre><code>[leaklens]
+# threshold = 0.95          # --threshold
+# explain = false           # --explain
+# fail_under = 80           # --fail-under
+# sarif = "leaklens.sarif"  # --sarif
+# html = "report.html"      # --html
+# badge = "badge.json"      # --badge
+# scan = ["notebooks"]      # --scan</code></pre>
+          </div>
+          <p class="caveat">This is an honest limitation, not a hidden feature. If you need configuration in CI today, put the flags in the workflow or a shell script.</p>
+        </section>
+
+        <section id="ci" data-doc-section>
+          <h2>CI and pre-commit</h2>
+          <p>LeakLens is designed to fail a build on a confirmed leak. Add the scan to any workflow; SARIF uploads to GitHub code scanning when you also pass <code>--sarif</code>.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>GitHub Actions</span><button class="copy-button" type="button" data-copy="- uses: actions/checkout@v7&#10;- uses: actions/setup-python@v6&#10;  with:&#10;    python-version: &quot;3.12&quot;&#10;- run: pip install leaklens-ml&#10;- run: leaklens --scan src/ --explain&#10;- run: leaklens train.csv --target label --fail-under 80">Copy</button></div>
+            <pre><code>- uses: actions/checkout@v7
+- uses: actions/setup-python@v6
+  with:
+    python-version: "3.12"
+- run: pip install leaklens-ml
+- run: leaklens --scan src/ --explain
+- run: leaklens train.csv --target label --fail-under 80</code></pre>
+          </div>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>.pre-commit-config.yaml</span><button class="copy-button" type="button" data-copy="repos:&#10;  - repo: https://github.com/eyadstein/leaklens&#10;    rev: v0.13.0&#10;    hooks:&#10;      - id: leaklens">Copy</button></div>
+            <pre><code>repos:
+  - repo: https://github.com/eyadstein/leaklens
+    rev: v0.13.0
+    hooks:
+      - id: leaklens</code></pre>
+          </div>
+          <p>The hook scans staged Python and Jupyter files. It is fast because it only parses source; no dataset is read and no model is trained.</p>
+        </section>
+
+        <section id="reports" data-doc-section>
+          <h2>Reports and exports</h2>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Output</th><th>Flag</th><th>Notes</th></tr></thead>
+              <tbody>
+                <tr><td>Terminal</td><td>default</td><td>Trust score, findings, counts; <code>--explain</code> adds a fix under each.</td></tr>
+                <tr><td>JSON</td><td><code>--json</code></td><td>Stable shape: <code>trust_score</code>, <code>findings</code>, audit stats, optional intelligence.</td></tr>
+                <tr><td>HTML</td><td><code>--html FILE</code></td><td>Single self-contained file, no external assets. <a href="report.html">Example report</a>.</td></tr>
+                <tr><td>SARIF</td><td><code>--sarif FILE</code></td><td>SARIF 2.1.0 for GitHub code scanning.</td></tr>
+                <tr><td>Badge</td><td><code>--badge FILE</code></td><td>shields.io endpoint JSON with the trust score.</td></tr>
+                <tr><td>Intelligence</td><td><code>--intelligence</code></td><td>Deterministic confidence, root causes, impact analysis and prioritised fixes.</td></tr>
+                <tr><td>LLM notes</td><td><code>--llm</code></td><td>Opt-in. Sends findings, never dataset rows or full source. Local Ollama by default.</td></tr>
+                <tr><td>AI hypotheses</td><td><code>--ai</code></td><td>Opt-in, offline and experimental. Adds an <code>ai</code> object and a separate report section; never changes findings or the score.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>The trust score is <code>max(0, 100 − 35·high − 15·medium − 5·low)</code>. It is computed centrally by <code>leaklens.leakage.score</code> so the CLI, API, badge, and HTML report cannot disagree.</p>
+        </section>
+
+        <section id="ai" data-doc-section>
+          <h2>Experimental AI intelligence</h2>
+          <p>An optional, offline layer adds evidence-bound hypotheses and a root-cause remediation plan on top of the deterministic detectors. It is off by default, needs no GPU, network, paid service or credentials, and is available in the base install.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens --scan notebooks/ --ai&#10;leaklens train.csv --target label --ai&#10;leaklens --scan src --ai-llm">Copy</button></div>
+            <pre><code>leaklens --scan notebooks/ --ai
+leaklens train.csv --target label --ai
+leaklens --scan src --ai-llm</code></pre>
+          </div>
+          <p>It combines deterministic semantic rules (pipeline order, future information, target-proxy names, identifier names, shared keys) with a small in-memory CPU model trained on grouped, labelled code patterns. Every hypothesis carries inspectable evidence and an explicit limitation. Code is never executed.</p>
+          <div class="docs-callout"><strong>Deterministic findings remain authoritative.</strong> AI proposals are marked experimental, capped at medium severity, and never change a finding, its severity, the trust score or the exit code. Dataset analysis receives column metadata only, never rows or values. Instruction-like text in code or column names is reported as an <code>info</code> notice and never followed.</div>
+          <p><code>POST /audit</code> and <code>POST /scan</code> accept <code>include_ai=true</code>; the response adds an <code>ai</code> object and leaves the deterministic score and findings unchanged. The <a href="live.html">live page</a> has an explicit opt-in checkbox and renders AI output in a separate panel.</p>
+          <p>Measured precision, recall, F1, false-positive rate, false positives, misses and limitations are in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/AI_BENCHMARK.md" rel="noopener">AI_BENCHMARK.md</a>, with the design and safety model in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/AI_INTELLIGENCE.md" rel="noopener">AI_INTELLIGENCE.md</a>. It is not claimed as an improvement over the deterministic scanner.</p>
+        </section>
+
+        <section id="api" data-doc-section>
+          <h2>API and UI</h2>
+          <p>Install the <code>app</code> extra, then run the FastAPI service or the Streamlit UI. Both are optional; the CLI has no server dependency.</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="pip install &quot;leaklens-ml[app]&quot;&#10;uvicorn leaklens.api:app --port 8000&#10;streamlit run leaklens/ui.py">Copy</button></div>
+            <pre><code>pip install "leaklens-ml[app]"
+uvicorn leaklens.api:app --port 8000
+streamlit run leaklens/ui.py</code></pre>
+          </div>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Endpoint</th><th>Input</th><th>Returns</th></tr></thead>
+              <tbody>
+                <tr><td><code>GET /health</code></td><td>—</td><td><code>{"status": "ok", "version": "..."}</code></td></tr>
+                <tr><td><code>POST /audit</code></td><td>Multipart CSV/JSON file + <code>target</code> + optional <code>threshold</code></td><td>Trust score, audit stats and findings.</td></tr>
+                <tr><td><code>POST /scan</code></td><td>JSON <code>{"source": "...", "name": "snippet.py"}</code></td><td>Findings and the aggregate trust score from the static scanner.</td></tr>
+                <tr><td><code>POST /predict</code></td><td>JSON <code>{"rows": [...], "model_path": "models/best.joblib"}</code></td><td>Predictions from a locally trained arena model.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="docs-callout"><strong>Uploads are capped</strong> at 8 MiB and 50,000 rows, with archive decompression limits and ZIP path-traversal rejection. <code>/predict</code> only loads models under <code>./models/</code>; joblib artifacts are still pickle files, so only place models you trust there.</div>
+          <h3>Public live-scan API</h3>
+          <p>The static website can connect to a separate, hardened API for real scans in the browser. It intentionally exposes no <code>/predict</code> endpoint and no model deserialization:</p>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="pip install &quot;leaklens-ml[api]&quot;&#10;uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000">Copy</button></div>
+            <pre><code>pip install "leaklens-ml[api]"
+uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000</code></pre>
+          </div>
+          <p><code>GET /health</code> and <code>GET /capabilities</code> describe the deployment. <code>POST /inspect</code> lists columns, <code>POST /audit</code> runs the dataset detectors (optionally with a held-out file plus group and time columns), and <code>POST /scan</code> runs the static Python scanner. Uploads default to 4 MiB, 5,000 rows and 200 columns, are parsed in memory, and are never retained.</p>
+          <div class="docs-callout"><strong>Deployment status:</strong> the GitHub Pages site is static and ships without a connected backend, so <a href="live.html">Live scan</a> shows an explicit “not connected” state until you supply a URL. A free Render web service plus <code>Dockerfile.api</code> and <code>render.yaml</code> are documented in the repository; the free instance sleeps after idle time, has 512 MB RAM, and offers no persistent storage. See <a href="https://github.com/eyadstein/leaklens/blob/main/docs/LIVE_SCANNING.md" rel="noopener">LIVE_SCANNING.md</a> for verified limits and the security model.</div>
+          <p>Docker users can run <code>docker compose up --build</code> for the API on port 8000 and the UI on 8501.</p>
+        </section>
+
+        <section id="benchmarks" data-doc-section>
+          <h2>Benchmarks</h2>
+          <p>The scanner benchmark is a regression guard built from labeled fixtures. It is not a claim of accuracy on your codebase.</p>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Suite</th><th>Cases</th><th>Result</th><th>Command</th></tr></thead>
+              <tbody>
+                <tr><td>Scanner (combined)</td><td>109</td><td>58 leaky / 51 clean · precision 1.00 · recall 1.00</td><td><code>python -m leaklens.bench</code></td></tr>
+                <tr><td>Advanced tuning and encoding</td><td>32</td><td>All expected classifications</td><td><code>python -m leaklens.bench_advanced</code></td></tr>
+                <tr><td>Dataset detectors</td><td>12</td><td>9 leaky / 3 clean · precision 1.00 · recall 1.00</td><td><code>python -m leaklens.bench_data</code></td></tr>
+                <tr><td>Experimental AI layer</td><td>72</td><td>Grouped CV + external transfer; reported honestly, not an improvement claim</td><td><code>python -m leaklens.bench_ai</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Generated results are committed to <a href="https://github.com/eyadstein/leaklens/blob/main/docs/BENCHMARK.md" rel="noopener">docs/BENCHMARK.md</a> and <a href="https://github.com/eyadstein/leaklens/blob/main/docs/DATA_BENCHMARK.md" rel="noopener">docs/DATA_BENCHMARK.md</a>; CI runs all three suites.</p>
+        </section>
+
+        <section id="limits" data-doc-section>
+          <h2>Limitations</h2>
+          <ul>
+            <li><strong>Static code analysis.</strong> Source is parsed, never executed. Runtime data flow, dynamic dispatch and information from external state can be missed.</li>
+            <li><strong>Thresholds.</strong> Target leakage is a statistical test. A strong legitimate feature can be flagged; a weak leak can fall below the threshold.</li>
+            <li><strong>Bounded duplicate checks.</strong> Feature overlap samples up to 50,000 rows and near-duplicates up to 20,000. Matching is exact after normalisation, not fuzzy.</li>
+            <li><strong>No auto-fix.</strong> Every finding has a remediation hint, but changes must be reviewed and re-validated.</li>
+            <li><strong>Not a privacy scanner.</strong> LeakLens does not detect or redact personal data.</li>
+            <li><strong>LLM explanations are opt-in.</strong> Only finding text is sent; dataset rows and full source are not. The default provider is a local Ollama endpoint.</li>
+            <li><strong>AI hypotheses are experimental.</strong> They are evidence-bound and offline, never change deterministic findings or the trust score, and can be wrong. A clean AI pass does not prove the pipeline is risk-free.</li>
+            <li><strong>The website demo is prerecorded.</strong> GitHub Pages is static, so the demo replays committed fixture output and never simulates a backend.</li>
+          </ul>
+        </section>
+
+        <section id="troubleshooting" data-doc-section>
+          <h2>Troubleshooting</h2>
+          <h3>A format raises ImportError</h3>
+          <p>The message names the extra that provides the reader. Install it, for example <code>pip install "leaklens-ml[parquet]"</code> or <code>pip install "leaklens-ml[excel]"</code>.</p>
+          <h3>A file with no extension is read as CSV</h3>
+          <p>Unknown suffixes fall back to CSV by design. Pass a filename with the correct suffix or convert the file first.</p>
+          <h3>The command exits 1 but no high finding is printed</h3>
+          <p>Check whether <code>--fail-under</code> is set: the gate also fails when the trust score is below the floor. Remove the flag or raise the score.</p>
+          <h3>My <code>.leaklens.toml</code> is ignored</h3>
+          <p>This is expected in 0.13.0. The file is documentation-only; pass flags explicitly. The limitation is recorded in the <a href="https://github.com/eyadstein/leaklens/blob/main/CHANGELOG.md" rel="noopener">changelog</a>.</p>
+          <h3>Doctor reports a missing optional extra</h3>
+          <p>Optional extras are listed but do not fail the check. Only a missing core dependency, Python below 3.10, or invalid TOML returns exit 1.</p>
+          <h3>I need help or found a bug</h3>
+          <p>Open an <a href="https://github.com/eyadstein/leaklens/issues" rel="noopener">issue on GitHub</a>. Include the LeakLens version, Python version, the command, and the finding output with any sensitive data removed.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html" aria-label="LeakLens home">
+          <img class="brand-mark" src="assets/logo.svg" alt="" width="30" height="30">
+          LeakLens
+        </a>
+        <p>Catch data leakage before it fools you. Free, open source, and offline by default.</p>
+        <p class="footer-note">PyPI package <code>leaklens-ml</code> · command <code>leaklens</code></p>
+      </div>
+      <div class="footer-col">
+        <h3>Product</h3>
+        <ul>
+          <li><a href="live.html">Live scan</a></li>
+          <li><a href="demo.html">Interactive demo</a></li>
+          <li><a href="index.html#detections">Detections</a></li>
+          <li><a href="index.html#benchmarks">Benchmarks</a></li>
+          <li><a href="report.html">Example report</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h3>Docs</h3>
+        <ul>
+          <li><a href="docs.html#install">Install</a></li>
+          <li><a href="docs.html#quickstart">Quickstart</a></li>
+          <li><a href="docs.html#cli">CLI reference</a></li>
+          <li><a href="docs.html#api">API &amp; UI</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h3>Project</h3>
+        <ul>
+          <li><a href="https://github.com/eyadstein/leaklens" rel="noopener">GitHub repository</a></li>
+          <li><a href="https://pypi.org/project/leaklens-ml/" rel="noopener">PyPI package</a></li>
+          <li><a href="https://github.com/eyadstein/leaklens/issues" rel="noopener">Issues</a></li>
+          <li><a href="https://github.com/eyadstein/leaklens/blob/main/LICENSE" rel="noopener">MIT license</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-base">
+      <p>© 2026 LeakLens. Built with Python and hand-written HTML, CSS and JavaScript.</p>
+      <p>No tracking, no cookies, no external fonts or scripts.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

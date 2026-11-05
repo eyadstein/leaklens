@@ -6,28 +6,28 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 | Metric | Value |
 |---|---:|
-| Cases | 105 |
-| Leaky / clean | 55 / 50 |
+| Cases | 109 |
+| Leaky / clean | 58 / 51 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 55 |
+| True positives | 58 |
 | False positives | 0 |
-| True negatives | 50 |
+| True negatives | 51 |
 | False negatives | 0 |
 
 ## Original regression baseline
 
 | Metric | Value |
 |---|---:|
-| Cases | 69 |
-| Leaky / clean | 37 / 32 |
+| Cases | 73 |
+| Leaky / clean | 40 / 33 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 37 |
+| True positives | 40 |
 | False positives | 0 |
-| True negatives | 32 |
+| True negatives | 33 |
 | False negatives | 0 |
 
 ## Additional categorized cases
@@ -44,6 +44,20 @@ The benchmark contains the original regression baseline and an expanded set of c
 | True negatives | 18 |
 | False negatives | 0 |
 
+## Advanced detection cases (0.14.0)
+
+| Metric | Value |
+|---|---:|
+| Cases | 32 |
+| Leaky / clean | 16 / 16 |
+| Precision | 1.00 |
+| Recall | 1.00 |
+| F1 | 1.00 |
+| True positives | 16 |
+| False positives | 0 |
+| True negatives | 16 |
+| False negatives | 0 |
+
 ## Category breakdown
 
 | Category | Cases | Leaky | Clean | Precision | Recall | F1 |
@@ -53,13 +67,23 @@ The benchmark contains the original regression baseline and an expanded set of c
 | imputation | 15 | 7 | 8 | 1.00 | 1.00 | 1.00 |
 | scaling | 16 | 8 | 8 | 1.00 | 1.00 | 1.00 |
 
+## Advanced category breakdown
+
+| Category | Cases | Leaky | Clean | Precision | Recall | F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| encoding | 9 | 4 | 5 | 1.00 | 1.00 | 1.00 |
+| feature_selection | 5 | 3 | 2 | 1.00 | 1.00 | 1.00 |
+| group_cv | 2 | 1 | 1 | 1.00 | 1.00 | 1.00 |
+| temporal | 4 | 2 | 2 | 1.00 | 1.00 | 1.00 |
+| tuning | 12 | 6 | 6 | 1.00 | 1.00 | 1.00 |
+
 ## Reproducibility checks
 
-Low-severity reproducibility cases (issue #13): 13/14 correct; 1 misclassified.
+Low-severity reproducibility cases (issue #13): 14/14 correct; 0 misclassified.
 
 ## Misclassified cases
 
-- missed (low): get_dummies before split
+- none
 
 ## Caveats
 

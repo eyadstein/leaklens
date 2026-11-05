@@ -1,0 +1,60 @@
+# Render Blueprint for the optional free LeakLens live-scan API.
+#
+# This file is deployment configuration only: the GitHub Pages site ships
+# without a connected backend and does not claim that this service is running.
+# Create a Blueprint from this repository in the Render dashboard, or run the
+# image locally with `docker run --rm -p 8000:8000 leaklens-api`.
+#
+# Verified free-tier limits (render.com/docs/free, checked 2026-11):
+#   * 512 MB RAM, 0.1 CPU
+#   * spins down after 15 minutes without traffic
+#   * ~1 minute cold start
+#   * ephemeral filesystem, no persistent disk
+#   * 750 free instance hours per month
+services:
+  - type: web
+    name: leaklens-live-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /health
+    # Only redeploy after the commit's GitHub Actions checks pass, and only
+    # when the backend or its build inputs actually change.
+    autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - leaklens/**
+        - pyproject.toml
+        - Dockerfile.api
+        - render.yaml
+    envVars:
+      - key: LEAKLENS_PUBLIC_MAX_BYTES
+        value: "4194304"
+      - key: LEAKLENS_PUBLIC_MAX_JSON_BYTES
+        value: "524288"
+      - key: LEAKLENS_PUBLIC_MAX_ROWS
+        value: "5000"
+      - key: LEAKLENS_PUBLIC_MAX_COLUMNS
+        value: "200"
+      - key: LEAKLENS_PUBLIC_MAX_CELLS
+        value: "750000"
+      - key: LEAKLENS_PUBLIC_MAX_UNCOMPRESSED_BYTES
+        value: "25165824"
+      - key: LEAKLENS_PUBLIC_TIMEOUT_SECONDS
+        value: "30"
+      - key: LEAKLENS_PUBLIC_RATE_LIMIT
+        value: "20"
+      - key: LEAKLENS_PUBLIC_RATE_WINDOW
+        value: "60"
+      - key: LEAKLENS_PUBLIC_FORMATS
+        value: "csv,json"
+      - key: LEAKLENS_ALLOWED_ORIGINS
+        value: "https://eyadstein.github.io"
+      - key: LEAKLENS_ALLOW_LOCAL_ORIGINS
+        value: "0"
+      - key: LEAKLENS_TRUST_PROXY
+        value: "1"
+      - key: LEAKLENS_ENABLE_DOCS
+        value: "0"

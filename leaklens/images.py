@@ -13,7 +13,9 @@ def _pil():
     try:
         from PIL import Image
     except ImportError:
-        raise ImportError('image checks need Pillow: pip install "leaklens-ml[images]"') from None
+        raise ImportError(
+            'image checks need Pillow: pip install "leaklens-ml[images]"'
+        ) from None
     return Image
 
 
@@ -21,7 +23,10 @@ def dhash(path, size=8) -> int:
     """Difference hash: size*size bits, set where a pixel is brighter than its right neighbour."""
     Image = _pil()
     with Image.open(path) as im:
-        g = np.asarray(im.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS), dtype=np.int16)
+        g = np.asarray(
+            im.convert("L").resize((size + 1, size), Image.Resampling.LANCZOS),
+            dtype=np.int16,
+        )
     bits = (g[:, 1:] > g[:, :-1]).ravel()
     return int("".join("1" if b else "0" for b in bits), 2)
 
@@ -43,7 +48,9 @@ def hash_dir(folder):
 
 def _popcount(x):
     x = x - ((x >> np.uint64(1)) & np.uint64(0x5555555555555555))
-    x = (x & np.uint64(0x3333333333333333)) + ((x >> np.uint64(2)) & np.uint64(0x3333333333333333))
+    x = (x & np.uint64(0x3333333333333333)) + (
+        (x >> np.uint64(2)) & np.uint64(0x3333333333333333)
+    )
     x = (x + (x >> np.uint64(4))) & np.uint64(0x0F0F0F0F0F0F0F0F)
     return (x * np.uint64(0x0101010101010101)) >> np.uint64(56)
 
@@ -61,7 +68,9 @@ def nearest(train: dict, test: dict, chunk=64):
         d = _popcount(te[i : i + chunk, None] ^ tr[None, :])
         j = d.argmin(axis=1)
         for k, (jj, dist) in enumerate(zip(j, d[np.arange(len(j)), j])):
-            out.append({"test": te_names[i + k], "train": names[jj], "distance": int(dist)})
+            out.append(
+                {"test": te_names[i + k], "train": names[jj], "distance": int(dist)}
+            )
     return out
 
 
@@ -72,10 +81,25 @@ def image_overlap(train_dir, test_dir, max_distance=6):
     """
     tr, s1 = hash_dir(train_dir)
     te, s2 = hash_dir(test_dir)
-    pairs = sorted((m for m in nearest(tr, te) if m["distance"] <= max_distance), key=lambda m: (m["distance"], m["test"]))
-    stats = {"train_images": len(tr), "test_images": len(te), "unreadable": s1 + s2, "near_duplicates": len(pairs)}
+    pairs = sorted(
+        (m for m in nearest(tr, te) if m["distance"] <= max_distance),
+        key=lambda m: (m["distance"], m["test"]),
+    )
+    stats = {
+        "train_images": len(tr),
+        "test_images": len(te),
+        "unreadable": s1 + s2,
+        "near_duplicates": len(pairs),
+    }
     fs = []
     if pairs:
         n = len(pairs)
-        fs.append(Finding("high", "image_overlap", "*", f"{n} test images ({n / len(te):.1%}) near-duplicate a train image (dHash distance <= {max_distance})"))
+        fs.append(
+            Finding(
+                "high",
+                "image_overlap",
+                "*",
+                f"{n} test images ({n / len(te):.1%}) near-duplicate a train image (dHash distance <= {max_distance})",
+            )
+        )
     return fs, pairs, stats

@@ -1,0 +1,404 @@
+{
+  "nb_0000": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0001": {
+    "verdict": "legitimate",
+    "reason": "train_test_split only, no unseeded concern beyond reproducibility (low finding only)",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0002": {
+    "verdict": "potential_leakage",
+    "reason": "TfidfVectorizer fit_transform appears after split on X_train, but label_encoder fitted pre-split feeds split; preprocess_outside_cv low may be a finding on code path - flagged as potential pending review",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0003": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0004": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0005": {
+    "verdict": "uncertain",
+    "reason": "group_stat_before_split medium findings are target-encoding adjacent but do not directly encode the target; held out of the confirmed set to avoid a false-positive gold label",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0006": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0007": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0008": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "encoder_before_split",
+      "preprocess_outside_cv"
+    ]
+  },
+  "nb_0009": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0010": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0011": {
+    "verdict": "confirmed_leakage",
+    "reason": "scaler.fit_transform(x_test) after split: learns from evaluation data; also scaler fitted pre-split output feeds split",
+    "expected_kinds": []
+  },
+  "nb_0012": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0013": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0014": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "encoder_before_split",
+      "group_stat_before_split"
+    ]
+  },
+  "nb_0015": {
+    "verdict": "confirmed_leakage",
+    "reason": "SimpleImputer/MinMaxScaler fit_transform before train_test_split (values scaled on full data pre-split)",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0016": {
+    "verdict": "legitimate",
+    "reason": "train_test_split only (low finding only)",
+    "expected_kinds": []
+  },
+  "nb_0017": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0018": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0019": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0020": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0021": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": []
+  },
+  "nb_0022": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0023": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0024": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0025": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0026": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0027": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0028": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0029": {
+    "verdict": "uncertain",
+    "reason": "cell skipped parse_error; cannot assess statically",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0030": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0031": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": []
+  },
+  "nb_0032": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": []
+  },
+  "nb_0033": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": []
+  },
+  "nb_0034": {
+    "verdict": "confirmed_leakage",
+    "reason": "StandardScaler fitted before split then used in cross_val_score; scaler.fit_transform(test_df) learns from evaluation data; group stats/fillna from full df",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0035": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0036": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0037": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0038": {
+    "verdict": "uncertain",
+    "reason": "cell skipped parse_error; cannot assess statically",
+    "expected_kinds": []
+  },
+  "nb_0039": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0040": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0041": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0042": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0043": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0044": {
+    "verdict": "confirmed_leakage",
+    "reason": "TfidfVectorizer fitted on full df title before train_test_split",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0045": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0046": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0047": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0048": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0049": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0050": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0051": {
+    "verdict": "uncertain",
+    "reason": "cell skipped parse_error; cannot assess statically",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0052": {
+    "verdict": "potential_leakage",
+    "reason": "GroupKFold/GridSearchCV over TF-IDF/Count transformed train data: fitted after split but in-sample transformed vocab feeds CV; potential outside-CV leakage",
+    "expected_kinds": []
+  },
+  "nb_0053": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0054": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": []
+  },
+  "nb_0055": {
+    "verdict": "confirmed_leakage",
+    "reason": "scaler fitted on full train_features before split; test_data.fillna(test_data.mean()) uses test-set statistics",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0056": {
+    "verdict": "legitimate",
+    "reason": "OneHotEncoder and scaler fitted on the target/full arrays are benign encodings (low severity only); split follows immediately with random_state. Not counted as leakage.",
+    "expected_kinds": []
+  },
+  "nb_0057": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0058": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  },
+  "nb_0059": {
+    "verdict": "uncertain",
+    "reason": "auto-seeded from scanner high-severity findings; review by hand",
+    "expected_kinds": [
+      "parse_error"
+    ]
+  }
+}
