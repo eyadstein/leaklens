@@ -3322,6 +3322,108 @@ table.data td code {
   margin-bottom: 8px;
 }
 
+.live-ai-optin {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  padding: 12px 14px;
+  margin: 14px 0 4px;
+}
+
+.live-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.live-checkbox input {
+  margin-top: 3px;
+  accent-color: var(--warn);
+}
+
+.live-checkbox .badge {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.live-ai-result {
+  border-color: var(--warn);
+  overflow-x: visible;
+}
+
+.live-ai-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.live-ai-head .live-note {
+  margin: 4px 0 0;
+}
+
+.live-ai-body {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.live-ai-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+
+.live-ai-card h4 {
+  margin: 0 0 4px;
+  font-size: 0.94rem;
+}
+
+.live-ai-card p {
+  margin: 6px 0;
+}
+
+.live-ai-list {
+  margin-top: 8px;
+}
+
+.live-ai-list strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.86rem;
+}
+
+.live-ai-note {
+  border-left: 2px solid var(--warn);
+  padding-left: 10px;
+  margin-top: 10px;
+}
+
+.live-ai-llm {
+  border-left: 2px solid var(--warn);
+  padding-left: 10px;
+}
+
+.live-ai-model {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-3);
+  padding: 10px 14px;
+}
+
+.live-ai-model summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.live-ai-model p {
+  margin: 8px 0 0;
+}
+
 .live-impact-table th {
   color: var(--faint);
   font-weight: 560;

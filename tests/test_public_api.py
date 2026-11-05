@@ -885,3 +885,76 @@ def test_settings_reject_an_empty_format_and_origin_list(monkeypatch):
     config = PublicSettings.from_env()
     assert config.formats == ("csv", "json")
     assert config.allowed_origins == (PAGES_ORIGIN,)
+
+
+# --- optional AI layer ----------------------------------------------------
+
+
+def test_ai_is_opt_in_for_dataset_audits(client):
+    plain = client.post(
+        "/audit",
+        files=multipart(),
+        data={"target": "y"},
+    )
+    assert plain.status_code == 200
+    assert "ai" not in plain.json()
+    assert "AI intelligence (experimental)" not in plain.json()["report_html"]
+
+    response = client.post(
+        "/audit",
+        files=multipart(),
+        data={"target": "y", "include_ai": "true"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    ai = payload["ai"]
+
+    assert payload["ai_unavailable"] is False
+    assert ai["schema_version"] == "1.0"
+    assert ai["engine"] == "leaklens.ai.experimental"
+    assert ai["scope"] == "dataset"
+    assert ai["target"] == "y"
+    assert ai["deterministic_trust_score"] == payload["trust_score"]
+    assert ai["deterministic_findings"] == len(payload["findings"])
+    assert ai["changes_deterministic_findings"] is False
+    assert ai["models"]
+    assert ai["limitations"]
+    assert "AI intelligence (experimental)" in payload["report_html"]
+    assert "Deterministic trust score (unchanged)" in payload["report_html"]
+
+
+def test_ai_is_opt_in_for_code_scans_and_cannot_change_the_score(client):
+    source = (
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.preprocessing import StandardScaler\n"
+        "X = StandardScaler().fit_transform(X)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+    )
+
+    plain = client.post("/scan", json={"source": source})
+    assert plain.status_code == 200
+    assert "ai" not in plain.json()
+
+    response = client.post("/scan", json={"source": source, "include_ai": True})
+    assert response.status_code == 200
+    payload = response.json()
+    ai = payload["ai"]
+
+    assert ai["scope"] == "code"
+    assert ai["deterministic_trust_score"] == payload["trust_score"]
+    assert ai["deterministic_findings"] == len(payload["findings"])
+    assert ai["changes_deterministic_findings"] is False
+    assert payload["trust_score"] == plain.json()["trust_score"]
+    assert payload["findings"] == plain.json()["findings"]
+
+
+def test_capabilities_advertise_ai_as_opt_in_and_offline(client):
+    payload = client.get("/capabilities").json()
+    ai = payload["ai"]
+
+    assert ai["enabled"] is True
+    assert ai["opt_in"] is True
+    assert ai["network"] == "none"
+    assert ai["llm"] is False
+    assert ai["changes_deterministic_findings"] is False
+    assert set(ai["scope"]) == {"dataset", "code"}

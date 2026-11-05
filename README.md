@@ -95,7 +95,7 @@ leaklens doctor
 leaklens --version
 ```
 
-CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
+CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
 
 ### `leaklens doctor`
 
@@ -171,6 +171,7 @@ leaklens train.csv --target label --fail-under 80   # exit 1 if trust score < 80
 leaklens train.csv --target label --arena    # needs [arena]
 leaklens train.csv --target label --html report.html
 leaklens train.csv --target label --intelligence   # deterministic confidence + root cause
+leaklens train.csv --target label --ai             # experimental, offline AI hypotheses
 ```
 
 | Flag | Meaning |
@@ -188,6 +189,8 @@ leaklens train.csv --target label --intelligence   # deterministic confidence + 
 | `--explain` | Print a suggested fix under each finding |
 | `--intelligence` | Deterministic confidence, root-cause, and remediation analysis |
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
+| `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
+| `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
@@ -207,6 +210,7 @@ leaklens --scan notebooks/ --explain
 leaklens --scan leaklens
 leaklens --scan . --sarif leaklens.sarif || true
 leaklens --scan src tests --llm
+leaklens --scan notebooks/ --ai          # experimental AI hypotheses (offline)
 ```
 
 A deliberately leaky demo covering tuning, target encoding, feature selection, group CV, and time ordering is in [`examples/advanced_leaks.py`](examples/advanced_leaks.py); run `leaklens --scan examples/advanced_leaks.py --explain` to see each finding and its fix.
@@ -259,6 +263,24 @@ leaklens --scan notebooks/ --llm --llm-provider openai-compatible
 
 You can also pass `--llm-base-url` and `--llm-model` on the command line. The API key is read only from `LEAKLENS_LLM_API_KEY`.
 
+## Experimental AI intelligence
+
+LeakLens has an **optional, offline, experimental AI layer** that adds evidence-bound hypotheses and a root-cause remediation plan on top of the deterministic detectors. It is off by default and available in the base install: no GPU, network, paid service or credentials are required for the core layer.
+
+```sh
+leaklens --scan notebooks/ --ai          # hypotheses for code
+leaklens train.csv --target label --ai   # hypotheses for dataset metadata
+leaklens --scan src --ai-llm             # optional LLM rephrasing, with fallback
+```
+
+It combines deterministic semantic rules (pipeline order, future information, target-proxy names, identifier names, shared keys) with a small in-memory CPU model trained on grouped, labelled code patterns. Every hypothesis carries inspectable evidence and a limitation; nothing is executed.
+
+**Deterministic findings remain authoritative.** AI proposals are marked experimental, capped at medium severity, and never change a finding, its severity, the trust score or the exit code. Dataset analysis receives column metadata only — never rows or values. Code and column names are treated as untrusted: instruction-like text is reported as an `info` notice, not followed.
+
+`--ai` adds an `ai` object to `--json`, an *AI intelligence (experimental)* section to `--html`, and is also exposed by the Python API (`leaklens.ai`) and the public live-scan API (`include_ai=true`). The website's live page has an explicit opt-in checkbox and renders AI output separately.
+
+Measured precision, recall, F1, false-positive rate, false positives, misses and limitations are in [docs/AI_BENCHMARK.md](docs/AI_BENCHMARK.md) and explained in [docs/AI_INTELLIGENCE.md](docs/AI_INTELLIGENCE.md). It is not claimed as an improvement over the deterministic scanner. `--ai-llm` sends only sanitized group metadata to the configured LLM provider, never raw code or dataset rows, and falls back to the deterministic plan if the provider fails or the reply is unsafe.
+
 ## Model arena
 
 Auto-drops leaking and ID columns, then trains linear, gradient-boosted tree and neural-net models inside leak-safe pipelines (imputation, scaling and encoding are fitted on training data only). Runs are tracked in local MLflow (SQLite) and the winner is saved to `models/best.joblib`. Add `--time COL` for a temporal split.
@@ -294,7 +316,7 @@ uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000
 python scripts/smoke_public_api.py          # real HTTP smoke test
 ```
 
-`GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` and `POST /scan` are the complete surface. Defaults are 4 MiB per file, 5,000 rows, 200 columns, 750k cells, one concurrent scan, a 30-second scan budget, 20 POSTs per client per minute, and CSV/JSON only; every limit is configurable by environment variable. Requests are content-sniffed (not trusted by filename or MIME type), parsed in memory, bounded before detection and never written to disk.
+`GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` and `POST /scan` are the complete surface. Defaults are 4 MiB per file, 5,000 rows, 200 columns, 750k cells, one concurrent scan, a 30-second scan budget, 20 POSTs per client per minute, and CSV/JSON only; every limit is configurable by environment variable. Requests are content-sniffed (not trusted by filename or MIME type), parsed in memory, bounded before detection and never written to disk. `POST /audit` and `POST /scan` accept `include_ai=true` for the optional experimental AI layer; the response adds an `ai` object and leaves the deterministic score and findings unchanged.
 
 This repository **does not deploy a public backend**. The GitHub Pages live page therefore starts disconnected. A free Render web service is documented in [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) together with verified limits (512 MB, 0.1 CPU, spins down after 15 minutes, ~1 minute cold start, ephemeral disk) and `render.yaml` + `Dockerfile.api`. Hugging Face Docker Spaces, Fly.io and Koyeb were checked and are not free for this use case.
 

@@ -174,3 +174,67 @@ def test_openai_provider_refuses_redirects_without_following_them(monkeypatch):
         provider.explain(finding)
 
     assert redirects == [None]
+
+
+class _FakeHttpResponse:
+    def __init__(self, payload: dict):
+        self._payload = payload
+
+    def read(self) -> bytes:
+        return json.dumps(self._payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+def test_ollama_complete_returns_a_structured_completion(monkeypatch):
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen["url"] = request.full_url
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeHttpResponse({"message": {"content": "  validated text  "}})
+
+    monkeypatch.setattr(llm, "_open_without_redirects", fake_open)
+    provider = llm.OllamaProvider("http://localhost:11434", "local-model")
+
+    assert provider.complete("prompt text") == "validated text"
+    assert seen["url"].endswith("/api/chat")
+    assert seen["body"]["stream"] is False
+    assert seen["body"]["messages"] == [{"role": "user", "content": "prompt text"}]
+
+
+def test_openai_compatible_complete_returns_a_structured_completion(monkeypatch):
+    seen = {}
+
+    def fake_open(request, timeout):
+        seen["url"] = request.full_url
+        seen["auth"] = request.get_header("Authorization")
+        seen["body"] = json.loads(request.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {"choices": [{"message": {"content": "  remote text  "}}]}
+        )
+
+    monkeypatch.setattr(llm, "_open_without_redirects", fake_open)
+    provider = llm.OpenAICompatibleProvider(
+        "https://api.example.com/v1", "remote-model", "secret-key"
+    )
+
+    assert provider.complete("prompt text") == "remote text"
+    assert seen["url"].endswith("/chat/completions")
+    assert seen["auth"] == "Bearer secret-key"
+    assert seen["body"]["messages"] == [{"role": "user", "content": "prompt text"}]
+
+
+def test_complete_rejects_an_invalid_provider_response(monkeypatch):
+    def fake_open(request, timeout):
+        return _FakeHttpResponse({"unexpected": True})
+
+    monkeypatch.setattr(llm, "_open_without_redirects", fake_open)
+    provider = llm.OllamaProvider("http://localhost:11434", "local-model")
+
+    with pytest.raises(llm.LLMError, match="invalid chat response"):
+        provider.complete("prompt text")

@@ -58,6 +58,8 @@ STARTER_CONFIG = """# LeakLens settings for this project.
 # sarif = "leaklens.sarif"  # --sarif: write SARIF 2.1.0 for GitHub code scanning
 # html = "report.html"      # --html: write a single-file HTML report
 # badge = "badge.json"      # --badge: write a shields.io endpoint JSON
+# ai = false                # --ai: add experimental, evidence-bound AI hypotheses
+# ai_llm = false            # --ai-llm: rephrase the AI plan with the configured LLM
 """
 
 PRE_COMMIT_SNIPPET = """repos:
@@ -309,6 +311,16 @@ def main(argv=None) -> int:
         default=10,
         help="maximum findings to explain (default: 10)",
     )
+    p.add_argument(
+        "--ai",
+        action="store_true",
+        help="add experimental, evidence-bound AI hypotheses (offline)",
+    )
+    p.add_argument(
+        "--ai-llm",
+        action="store_true",
+        help="rephrase the AI plan with the configured LLM (safe fallback)",
+    )
     p.add_argument("--sarif", help="write SARIF 2.1.0 for GitHub code scanning")
     p.add_argument("--html", help="write a shareable single-file HTML report")
     p.add_argument(
@@ -318,6 +330,8 @@ def main(argv=None) -> int:
         "--fail-under", type=float, help="exit with code 1 if trust score is below N"
     )
     a = p.parse_args(argv)
+    if a.ai_llm:
+        a.ai = True
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
     if not a.train and not a.scan:
@@ -327,6 +341,7 @@ def main(argv=None) -> int:
     if a.arena and not a.train:
         p.error("--arena needs a CSV")
     fs, rep, res = [], {}, None
+    tr = te = None
     if a.train:
         try:
             tr = _read_dataset(a.train)
@@ -377,6 +392,46 @@ def main(argv=None) -> int:
             )
 
     rep = {"trust_score": score(fs), **rep, "findings": [f.to_dict() for f in fs]}
+    ai_report = None
+    if a.ai:
+        try:
+            from .ai import DatasetInput, analyze, collect_code_sources
+
+            dataset = (
+                DatasetInput(
+                    train=tr,
+                    test=te if a.test else None,
+                    target=a.target,
+                    group=a.group,
+                    time=a.time,
+                )
+                if a.train
+                else None
+            )
+            provider = None
+            if a.ai_llm:
+                try:
+                    provider = llm.create_provider(
+                        a.llm_provider, a.llm_base_url, a.llm_model
+                    )
+                except llm.LLMError as exc:
+                    print(
+                        f"AI LLM unavailable; using the deterministic plan: {exc}",
+                        file=sys.stderr,
+                    )
+            ai_report = analyze(
+                fs,
+                code=collect_code_sources(a.scan) if a.scan else (),
+                dataset=dataset,
+                llm_provider=provider,
+                trust_score=rep["trust_score"],
+            ).to_dict()
+            rep["ai"] = ai_report
+        except Exception as exc:  # noqa: BLE001 - optional AI must not break a scan
+            print(
+                f"AI analysis unavailable; deterministic results are unchanged: {exc}",
+                file=sys.stderr,
+            )
     intelligence_report = None
     if a.intelligence:
         from .intelligence import analyze_dataset_impact, analyze_findings
@@ -439,6 +494,25 @@ def main(argv=None) -> int:
                 print(f"    Root cause: {cause['title']}")
             for recommendation in intelligence_report["recommendations"]:
                 print(f"    Recommendation: {recommendation['title']}")
+        if ai_report is not None:
+            hypotheses = ai_report["hypotheses"]
+            groups = ai_report["plan"]["root_causes"]
+            print(
+                f"AI (experimental): {len(hypotheses)} hypothesis(es), "
+                f"{len(groups)} root-cause group(s); deterministic findings unchanged."
+            )
+            for group in groups[:3]:
+                print(
+                    f"    AI root cause [{group['priority']}]: {group['title']} "
+                    f"({group['source']})"
+                )
+            if ai_report["plan"].get("llm_summary"):
+                print(f"    AI summary: {ai_report['plan']['llm_summary']}")
+            for hypothesis in hypotheses[:3]:
+                print(
+                    f"    AI hypothesis [{hypothesis['confidence']:.2f}]: "
+                    f"{hypothesis['title']} :: {hypothesis['location']}"
+                )
         for index, f in enumerate(fs):
             print(f"{_severity_label(f.severity)} {f.kind} :: {f.column} :: {f.detail}")
             if explanations is not None and explanations[index] is not None:

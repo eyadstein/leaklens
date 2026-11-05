@@ -511,6 +511,7 @@ def run_audit_job(
     test_upload: Any | None = None,
     time_col: str | None = None,
     group_col: str | None = None,
+    include_ai: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     df = read_guarded_dataset(upload, limits, target, require_target=True)
@@ -585,22 +586,41 @@ def run_audit_job(
         "limits": limits.to_public_dict(),
         "report_filename": "leaklens-report.html",
     }
+    ai_payload = None
+    if include_ai:
+        try:
+            from .ai import analyze_dataset
+
+            ai_payload = analyze_dataset(
+                df,
+                test_df,
+                target=target,
+                group=group_col,
+                time=time_col,
+                findings=findings,
+                trust_score=payload["trust_score"],
+            ).to_dict()
+        except Exception:  # noqa: BLE001 - optional AI must not break the scan
+            ai_payload = None
+        payload["ai"] = ai_payload
+        payload["ai_unavailable"] = ai_payload is None
     payload["report_html"] = render(
         {
             "trust_score": payload["trust_score"],
             "findings": payload["findings"],
             "audit": audit_data,
             "impact": impact,
+            "ai": ai_payload,
         },
         title=f"LeakLens report - {upload.filename}",
     )
     return payload
 
 
-def run_code_job(source: str, name: str) -> dict[str, Any]:
+def run_code_job(source: str, name: str, include_ai: bool = False) -> dict[str, Any]:
     started = time.perf_counter()
     findings = scan_source(source, name)
-    return {
+    payload = {
         "live": True,
         "engine": "leaklens.scanner.scan_source",
         "version": __version__,
@@ -614,6 +634,18 @@ def run_code_job(source: str, name: str) -> dict[str, Any]:
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         },
     }
+    if include_ai:
+        try:
+            from .ai import CodeSource, analyze_code
+
+            payload["ai"] = analyze_code(
+                (CodeSource(label=name, source=source),),
+                findings,
+            ).to_dict()
+        except Exception:  # noqa: BLE001 - optional AI must not break the scan
+            payload["ai"] = None
+            payload["ai_unavailable"] = True
+    return payload
 
 
 class CodeScanRequest(BaseModel):
@@ -621,6 +653,7 @@ class CodeScanRequest(BaseModel):
 
     source: str = Field(min_length=1)
     name: str = Field(default=_CODE_NAME, max_length=120)
+    include_ai: bool = Field(default=False)
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:
@@ -833,6 +866,15 @@ def create_app(
                 "categorical target leakage",
                 "group leakage risk",
             ],
+            "ai": {
+                "enabled": True,
+                "opt_in": True,
+                "scope": ["dataset", "code"],
+                "engine": "leaklens.ai.experimental",
+                "llm": False,
+                "network": "none",
+                "changes_deterministic_findings": False,
+            },
             "privacy": (
                 "Uploads are parsed in memory for one request, never written to "
                 "disk, and never retained. Responses contain only your findings."
@@ -862,6 +904,7 @@ def create_app(
         test: UploadFile | None = File(default=None),  # noqa: B008
         time_col: str | None = Form(default=None, alias="time"),
         group_col: str | None = Form(default=None, alias="group"),
+        include_ai: bool = Form(default=False),
     ) -> JSONResponse:
         clean_target = target.strip()
         if not clean_target:
@@ -881,6 +924,7 @@ def create_app(
                 test_upload,
                 _clean_option(time_col, "time"),
                 _clean_option(group_col, "group"),
+                include_ai,
             )
         )
         return JSONResponse(result)
@@ -896,7 +940,13 @@ def create_app(
             )
         name = body.name if body.name.lower().endswith(".py") else _CODE_NAME
         result = await run_in_threadpool(
-            partial(request.app.state.runner.run, run_code_job, body.source, name)
+            partial(
+                request.app.state.runner.run,
+                run_code_job,
+                body.source,
+                name,
+                body.include_ai,
+            )
         )
         return JSONResponse(result)
 

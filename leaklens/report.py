@@ -169,6 +169,190 @@ def _impact_section(data: dict) -> str:
     )
 
 
+def _ai_section(data: dict) -> str:
+    """Render the optional experimental AI layer with every value escaped."""
+    if not data:
+        return ""
+    hypotheses = data.get("hypotheses", [])
+    plan = data.get("plan", {}) or {}
+    groups = plan.get("root_causes", [])
+    models = data.get("models", [])
+    limitations = data.get("limitations", [])
+    deterministic_score = data.get("deterministic_trust_score")
+
+    sections = [
+        "<h2>AI intelligence (experimental)</h2>",
+        '<div class="card"><p><b>This section is AI-generated and is not part of the '
+        "deterministic scan.</b> It never changes findings, severity or the trust "
+        "score.</p>",
+    ]
+    if deterministic_score is not None:
+        sections.append(
+            f"<p>Deterministic trust score (unchanged): "
+            f"{html.escape(str(deterministic_score))}/100</p>"
+        )
+    sections.append(
+        f"<p><b>Hypotheses:</b> {len(hypotheses)} · "
+        f"<b>Root-cause groups:</b> {len(groups)} · "
+        f"<b>Deterministic findings:</b> "
+        f"{html.escape(str(data.get('deterministic_findings', 0)))}"
+        "</p></div>"
+    )
+
+    if plan.get("summary"):
+        sections.append(
+            f'<div class="card"><h3>Reasoning summary</h3>'
+            f"<p>{html.escape(str(plan['summary']))}</p>"
+            + (
+                f"<p><b>LLM rephrasing:</b> {html.escape(str(plan['llm_summary']))}</p>"
+                if plan.get("llm_summary")
+                else ""
+            )
+            + (
+                f'<p class="sub">Fallback: '
+                f"{html.escape(str(plan.get('fallback_reason')))}</p>"
+                if plan.get("fallback_reason")
+                else ""
+            )
+            + "</div>"
+        )
+
+    if groups:
+        sections.append("<h2>AI root-cause groups</h2>")
+        for group in groups:
+            title = html.escape(str(group.get("title", "")))
+            priority = html.escape(str(group.get("priority", "")))
+            source = html.escape(str(group.get("source", "")))
+            confidence = html.escape(str(group.get("confidence", "")))
+            explanation = html.escape(str(group.get("explanation", "")))
+            remediation = group.get("remediation", {}) or {}
+            actions = "".join(
+                f"<li>{html.escape(str(action))}</li>"
+                for action in remediation.get("actions", [])
+            )
+            verification = "".join(
+                f"<li>{html.escape(str(step))}</li>"
+                for step in remediation.get("verification", [])
+            )
+            code_hint = remediation.get("code_hint")
+            code_block = (
+                f"<pre><code>{html.escape(str(code_hint))}</code></pre>"
+                if code_hint
+                else ""
+            )
+            note = next(
+                (
+                    item
+                    for item in plan.get("llm_notes", [])
+                    if item.get("group_id") == group.get("group_id")
+                ),
+                None,
+            )
+            note_block = ""
+            if note:
+                note_actions = "".join(
+                    f"<li>{html.escape(str(action))}</li>"
+                    for action in note.get("actions", [])
+                )
+                note_verification = "".join(
+                    f"<li>{html.escape(str(step))}</li>"
+                    for step in note.get("verification", [])
+                )
+                note_block = (
+                    '<p class="sub">LLM rephrasing (validated, no new evidence):</p>'
+                    f"<p>{html.escape(str(note.get('explanation', '')))}</p>"
+                    + (
+                        f"<b>Suggested actions</b><ul>{note_actions}</ul>"
+                        if note_actions
+                        else ""
+                    )
+                    + (
+                        f"<b>Suggested verification</b><ul>{note_verification}</ul>"
+                        if note_verification
+                        else ""
+                    )
+                )
+            sections.append(
+                f'<div class="card"><h3>{title}</h3>'
+                f"<p><b>Priority:</b> {priority} · <b>Confidence:</b> {confidence} · "
+                f"<b>Source:</b> {source}</p>"
+                f"<p>{explanation}</p>"
+                f"<b>Remediation</b><ul>{actions}</ul>"
+                f"<b>Verification</b><ul>{verification}</ul>"
+                f"{code_block}{note_block}</div>"
+            )
+
+    if hypotheses:
+        sections.append("<h2>AI hypotheses</h2>")
+        for item in hypotheses:
+            title = html.escape(str(item.get("title", "")))
+            concept = html.escape(str(item.get("concept", "")))
+            confidence = html.escape(str(item.get("confidence", "")))
+            severity = html.escape(str(item.get("severity_hint", "")))
+            location = html.escape(str(item.get("location", "")))
+            corroborates = item.get("corroborates")
+            explanation = html.escape(str(item.get("explanation", "")))
+            evidence = "".join(
+                f"<li><code>{html.escape(str(span.get('kind', '')))}</code> "
+                f"at {html.escape(str(span.get('location', '')))}: "
+                f"{html.escape(str(span.get('excerpt', '')))}</li>"
+                for span in item.get("evidence", [])
+            )
+            limitations_html = "".join(
+                f"<li>{html.escape(str(value))}</li>"
+                for value in item.get("limitations", [])
+            )
+            sections.append(
+                f'<div class="card"><h3>{title}</h3>'
+                f"<p><b>Concept:</b> {concept} · <b>Confidence:</b> {confidence} · "
+                f"<b>Severity hint:</b> {severity} · <b>Location:</b> {location}</p>"
+                + (
+                    f"<p><b>Corroborates deterministic finding:</b> "
+                    f"{html.escape(str(corroborates))}</p>"
+                    if corroborates
+                    else ""
+                )
+                + f"<p>{explanation}</p>"
+                f"<b>Evidence</b><ul>{evidence}</ul>"
+                f"<b>Limitations</b><ul>{limitations_html}</ul></div>"
+            )
+
+    if models:
+        sections.append("<h2>AI model card</h2>")
+        for model in models:
+            external = " · ".join(
+                f"{html.escape(str(name))}: {html.escape(str(value))}"
+                for name, value in model.get("external", [])
+            )
+            model_limitations = "".join(
+                f"<li>{html.escape(str(value))}</li>"
+                for value in model.get("limitations", [])
+            )
+            sections.append(
+                f'<div class="card"><h3>{html.escape(str(model.get("name", "")))}</h3>'
+                f"<p><b>Kind:</b> {html.escape(str(model.get('kind', '')))} · "
+                f"<b>Features:</b> {html.escape(str(model.get('features', '')))} · "
+                f"<b>Examples:</b> {html.escape(str(model.get('training_examples', '')))} · "
+                f"<b>Groups:</b> {html.escape(str(model.get('groups', '')))}</p>"
+                f"<p><b>Threshold:</b> {html.escape(str(model.get('threshold', '')))} · "
+                f"<b>Precision:</b> {html.escape(str(model.get('precision', '')))} · "
+                f"<b>Recall:</b> {html.escape(str(model.get('recall', '')))} · "
+                f"<b>F1:</b> {html.escape(str(model.get('f1', '')))} · "
+                f"<b>FPR:</b> {html.escape(str(model.get('false_positive_rate', '')))}</p>"
+                f"<p>{html.escape(str(model.get('evaluation', '')))}</p>"
+                + (f"<p><b>External transfer:</b> {external}</p>" if external else "")
+                + f"<b>Limitations</b><ul>{model_limitations}</ul></div>"
+            )
+
+    if limitations:
+        sections.append(
+            '<div class="card"><h3>AI limitations</h3><ul>'
+            + "".join(f"<li>{html.escape(str(value))}</li>" for value in limitations)
+            + "</ul></div>"
+        )
+    return "".join(sections)
+
+
 def render(rep: dict, title: str = "LeakLens report") -> str:
     s = int(rep["trust_score"])
     color = "#2ea043" if s >= 85 else "#d29922" if s >= 60 else "#f85149"
@@ -189,6 +373,7 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         _intelligence_section(rep["intelligence"]) if rep.get("intelligence") else ""
     )
     impact = _impact_section(rep.get("impact"))
+    ai = _ai_section(rep.get("ai")) if rep.get("ai") else ""
     return (
         PAGE.replace("@@TITLE@@", html.escape(title))
         .replace("@@COLOR@@", color)
@@ -196,5 +381,5 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         .replace("@@AUDIT@@", audit)
         .replace("@@FINDINGS@@", fnd)
         .replace("@@ARENA@@", arena)
-        .replace("</body>", impact + intelligence + "</body>")
+        .replace("</body>", impact + intelligence + ai + "</body>")
     )

@@ -164,6 +164,20 @@
               <span class="field-help">Scores at or above this value count as target leakage.</span>
             </label>
           </div>
+          <div class="live-ai-optin">
+            <label class="live-checkbox" for="live-ai">
+              <input id="live-ai" data-ai-toggle type="checkbox">
+              <span>
+                <strong>Add experimental AI hypotheses</strong>
+                <span class="badge badge-warn">optional</span>
+              </span>
+            </label>
+            <p class="field-help">
+              Runs the optional offline semantic rules and learned model on the backend.
+              AI output is separate and evidence-bound: it never changes deterministic
+              findings, severity or the trust score. Off by default.
+            </p>
+          </div>
           <p class="live-note" data-config-note>Inspect a file first; target and optional columns are populated from its real headers.</p>
           <div class="live-actions">
             <button class="button" type="submit" data-scan disabled>Run the real scan</button>
@@ -230,6 +244,14 @@
             <div data-impact></div>
           </section>
         </div>
+
+        <section class="live-detail-card live-ai-result" data-ai-result aria-labelledby="ai-title" hidden>
+          <div class="live-ai-head">
+            <h3 id="ai-title">AI intelligence <span class="badge badge-warn">experimental</span></h3>
+            <p class="live-note">AI-generated and unverified. Deterministic findings and the trust score are authoritative and unchanged.</p>
+          </div>
+          <div class="live-ai-body" data-ai></div>
+        </section>
 
         <div class="live-findings">
           <div class="live-findings-head">

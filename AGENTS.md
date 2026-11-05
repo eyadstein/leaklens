@@ -17,6 +17,8 @@ Python `>=3.10`; CI tests 3.10–3.12. Optional-format extras are separate (`are
 pytest --cov=leaklens --cov-report=term-missing -q   # or: pytest -q
 leaklens --scan leaklens                            # self-scan must report no leaks
 python -m leaklens.bench                            # labeled scanner regression benchmark
+python -m leaklens.bench_data                       # dataset-detector benchmark
+python -m leaklens.bench_ai                         # optional AI layer benchmark
 ```
 
 Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (see `CONTRIBUTING.md`). Release = create a GitHub release (`.github/workflows/release.yml` publishes to PyPI); version lives in `pyproject.toml` + `leaklens/__init__.py` and must stay in sync.
@@ -33,6 +35,7 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Deterministic intelligence layer | `leaklens/intelligence/` (`orchestrator.py`, `schemas.py`) |
 | Reports / exports | `leaklens/report.py` (HTML), `leaklens/sarif.py` (SARIF), `leaklens/fixes.py` (`--explain`) |
 | Dataset audit + CV check + LLM | `leaklens/audit.py` (class balance etc.), `leaklens/cvcheck.py` (CV misuse, used by scanner), `leaklens/llm.py` (`--llm` explanations, off by default) |
+| Experimental AI layer | `leaklens/ai/` (`semantics.py`, `features.py`, `corpus.py`, `learned.py`, `reasoning.py`, `schemas.py`, `analysis.py`); benchmark `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md`; design `docs/AI_INTELLIGENCE.md` |
 
 New detectors: data → `leakage.py`, code → `scanner.py`. Add a test in `tests/`. `Finding.severity` is one of `high|medium|low`; trust score (100 − 35/15/5 per finding) is computed centrally in `leakage.score()` — don't duplicate it.
 
@@ -42,5 +45,6 @@ New detectors: data → `leakage.py`, code → `scanner.py`. Add a test in `test
 - **Readers**: unknown/extensionless suffix silently falls back to CSV (`readers.py`); optional formats raise `ImportError` naming the missing extra.
 - **`.leaklens.toml`** (`leaklens init` output) is **not read yet** — it's documentation-only; flags on the CLI win.
 - **LLM explanations** are off by default; only opt-in via `--llm`. Never send dataset rows or full source — findings only (provider: local Ollama by default; `LEAKLENS_LLM_API_KEY` for remote).
-- **Benchmark**: `python -m leaklens.bench` output goes to `docs/BENCHMARK.md`; treat as regression guard, not accuracy claim.
+- **AI layer** is off by default (`--ai`, `--ai-llm`, `include_ai`). It must stay additive: never touch `Finding` severity, `leakage.score()`, the exit code or raw rows; hypotheses are capped at `medium`, confidence at `0.95`, and evidence is mandatory.
+- **Benchmark**: `python -m leaklens.bench` output goes to `docs/BENCHMARK.md`; treat as regression guard, not accuracy claim. The AI benchmark is `python -m leaklens.bench_ai` → `docs/AI_BENCHMARK.md`; report its measured numbers, never an improvement claim.
 - Live demo: `python examples/make_demo.py && leaklens demo.csv --target is_fraud --arena`. API: `uvicorn leaklens.api:app --port 8000`; UI: `streamlit run leaklens/ui.py`; Docker: `docker compose up --build` (API :8000, UI :8501).

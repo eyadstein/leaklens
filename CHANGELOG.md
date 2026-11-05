@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Experimental AI intelligence (0.14.0 phase 4)
+
+- Added the optional, offline `leaklens.ai` package. It is opt-in (`--ai`, `--ai-llm`, `include_ai=true`, Python `leaklens.ai`) and never changes deterministic findings, severity, the trust score or the exit code.
+- Added deterministic semantic rules (`leaklens/ai/semantics.py`) over code, notebooks and dataset metadata: concat-before-split, target-derived features, future fills, centered windows, negative shifts, runtime clocks, target-proxy and future-information names, identifiers and shared train/test keys. Code is parsed, never executed.
+- Added a small in-memory CPU gradient-boosted detector (`leaklens/ai/learned.py`) over 61 interpretable indicators, trained on a 72-case/26-group labeled corpus (`leaklens/ai/corpus.py`). Groups never cross folds; the model is never serialized or loaded. The shipped threshold is fixed at 0.65 so behavior is stable across scikit-learn releases.
+- Added strict evidence-bound schemas (`leaklens/ai/schemas.py`): confidence ≤ 0.95, severity hints capped at medium, unique evidence ids, validated group/hypothesis/evidence cross-references, control-character rejection, and an explicit `changes_deterministic_findings: false`.
+- Added root-cause grouping, remediation actions, code hints and verification steps (`leaklens/ai/reasoning.py`). Optional `--ai-llm` rephrasing receives sanitized group metadata only and falls back deterministically on provider failure, malformed JSON, invented group ids or unsupported safety claims.
+- Prompt-injection defense: instruction-like comments and column names are reported as an `info` `untrusted_instruction` hypothesis and never followed. Dataset analysis receives metadata only, never rows or values.
+- Integrated with the CLI (`--ai`, `--ai-llm`, JSON `ai` object, text summary, safe fallback warning), the HTML report (escaped, separate experimental section), the public live-scan API (`include_ai` on `/audit` and `/scan`, AI capability declaration) and the website live page (opt-in checkbox, separate `textContent` rendering).
+- Added `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md` with grouped cross-validation precision/recall/F1/FPR, external transfer to the existing scanner cases, a threshold sweep, semantic regression results, top signals, explicit false positives/misses and limitations. CI runs it. It is explicitly **not** an improvement claim.
+- Added `docs/AI_INTELLIGENCE.md`, README and docs-site sections, and tests for schemas, semantics, learning discipline, reasoning/fallback, orchestration, CLI/report integration, the public API, the site and the benchmark.
+
 ### Deployment readiness (0.14.0 phase 3.1)
 
 - Validated `render.yaml` against Render's published Blueprint JSON schema and replaced the deprecated `autoDeploy: true` with `autoDeployTrigger: checksPass`, so a push to `main` redeploys the backend only after GitHub Actions passes. Added a `buildFilter` so docs-only or site-only commits do not rebuild the API.

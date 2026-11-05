@@ -242,3 +242,19 @@ def test_fixture_generator_is_deterministic():
     assert first == second
     assert first == (DOCS / "assets" / "fixtures.mjs").read_text(encoding="utf-8")
     assert sys.version_info >= (3, 10)
+
+
+def test_live_page_has_an_explicit_opt_in_ai_panel():
+    text = (DOCS / "live.html").read_text(encoding="utf-8")
+    script = (DOCS / "assets" / "live.js").read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    assert "data-ai-toggle" in text
+    assert "data-ai-result" in text
+    assert "experimental ai hypotheses" in normalized.lower()
+    assert "never changes deterministic findings" in normalized
+    assert "include_ai" in script
+    assert "renderAI" in script
+    assert "AI intelligence" in text
+    assert "innerHTML" not in script
+    assert "insertAdjacentHTML" not in script

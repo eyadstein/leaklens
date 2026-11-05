@@ -187,6 +187,30 @@ class OllamaProvider:
         except (KeyError, TypeError, AttributeError) as exc:
             raise LLMError("Ollama returned an invalid chat response") from exc
 
+    def complete(self, prompt: str) -> str:
+        """Return one plain completion for structured reasoning prompts."""
+        _check_with_taintwatch(_taintwatch_guard(), "http_post", prompt)
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        request = Request(
+            f"{self.base_url}/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with _open_without_redirects(request, timeout=self.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            raise LLMError(f"Ollama request failed: {exc}") from exc
+        try:
+            return result["message"]["content"].strip()
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise LLMError("Ollama returned an invalid chat response") from exc
+
 
 class OpenAICompatibleProvider:
     def __init__(self, base_url: str, model: str, api_key: str, timeout: float = 30):
@@ -202,6 +226,32 @@ class OpenAICompatibleProvider:
         payload = {
             "model": self.model,
             "messages": [{"role": "user", "content": content}],
+        }
+        request = Request(
+            f"{self.base_url}/chat/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            method="POST",
+        )
+        try:
+            with _open_without_redirects(request, timeout=self.timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, TimeoutError, OSError, ValueError) as exc:
+            raise LLMError(f"LLM API request failed: {exc}") from exc
+        try:
+            return result["choices"][0]["message"]["content"].strip()
+        except (KeyError, IndexError, TypeError, AttributeError) as exc:
+            raise LLMError("LLM API returned an invalid chat response") from exc
+
+    def complete(self, prompt: str) -> str:
+        """Return one plain completion for structured reasoning prompts."""
+        _check_with_taintwatch(_taintwatch_guard(), "http_post", prompt)
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
         }
         request = Request(
             f"{self.base_url}/chat/completions",

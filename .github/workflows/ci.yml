@@ -19,6 +19,7 @@ jobs:
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
       - run: python -m leaklens.bench_data
+      - run: python -m leaklens.bench_ai
   security:
     runs-on: ubuntu-latest
     steps:

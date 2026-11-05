@@ -85,6 +85,9 @@ const ui = {
   thresholdValue: $("[data-threshold-value]"),
   group: $("[data-group]"),
   time: $("[data-time]"),
+  aiToggle: $("[data-ai-toggle]"),
+  aiResult: $("[data-ai-result]"),
+  aiBody: $("[data-ai]"),
   scan: $("[data-scan]"),
   reset: $("[data-reset]"),
   progress: $("[data-progress]"),
@@ -159,6 +162,7 @@ const setConnection = (kind, label, detail) => {
 const setBusy = (busy) => {
   state.busy = busy;
   if (ui.configFields) ui.configFields.disabled = busy;
+  if (ui.aiToggle) ui.aiToggle.disabled = busy;
   if (ui.fileInput) ui.fileInput.disabled = busy;
   if (ui.testInput) ui.testInput.disabled = busy;
   if (ui.scan) ui.scan.disabled = busy || !state.connected || !state.file;
@@ -203,6 +207,8 @@ const clearResult = () => {
   state.result = null;
   state.filter = { severity: "all", kind: "all", query: "" };
   if (ui.results) ui.results.hidden = true;
+  if (ui.aiResult) ui.aiResult.hidden = true;
+  if (ui.aiBody) clear(ui.aiBody);
   hideError();
   hideProgress();
   if (ui.findings) clear(ui.findings);
@@ -849,6 +855,182 @@ const renderFilters = () => {
   if (ui.filterQuery) ui.filterQuery.value = state.filter.query;
 };
 
+const aiList = (title, items) => {
+  if (!Array.isArray(items) || !items.length) return null;
+  return el("div", { className: "live-ai-list" }, [
+    el("strong", { textContent: title }),
+    listBlock(items.map((item) => String(item)), "live-list"),
+  ]);
+};
+
+const aiText = (value) =>
+  value === null || value === undefined || value === "" ? null : String(value);
+
+const renderAI = (data) => {
+  if (!ui.aiResult || !ui.aiBody) return;
+  clear(ui.aiBody);
+  const ai = data?.ai;
+  if (!ai || typeof ai !== "object") {
+    if (data?.ai_unavailable) {
+      ui.aiResult.hidden = false;
+      ui.aiBody.append(
+        el("p", {
+          className: "live-note",
+          textContent:
+            "AI analysis was requested but the backend could not produce it. Deterministic results are unchanged.",
+        })
+      );
+    } else {
+      ui.aiResult.hidden = true;
+    }
+    return;
+  }
+  ui.aiResult.hidden = false;
+
+  const plan = ai.plan && typeof ai.plan === "object" ? ai.plan : {};
+  const groups = Array.isArray(plan.root_causes) ? plan.root_causes : [];
+  const hypotheses = Array.isArray(ai.hypotheses) ? ai.hypotheses : [];
+  const models = Array.isArray(ai.models) ? ai.models : [];
+  const notes = Array.isArray(plan.llm_notes) ? plan.llm_notes : [];
+  const score = ai.deterministic_trust_score ?? data.trust_score;
+
+  ui.aiBody.append(
+    el("p", {
+      className: "live-note",
+      textContent: `Scope: ${String(ai.scope || "unknown")} · ${hypotheses.length} hypothesis(es) · ${groups.length} root-cause group(s) · deterministic trust score ${String(score)} (unchanged)`,
+    })
+  );
+  if (aiText(plan.summary)) {
+    ui.aiBody.append(el("p", { textContent: aiText(plan.summary) }));
+  }
+  if (aiText(plan.llm_summary)) {
+    ui.aiBody.append(
+      el("p", { className: "live-ai-llm", textContent: `LLM rephrasing: ${aiText(plan.llm_summary)}` })
+    );
+  }
+  if (plan.enrichment === "deterministic_fallback" && aiText(plan.fallback_reason)) {
+    ui.aiBody.append(
+      el("p", {
+        className: "live-note",
+        textContent: `LLM enrichment was not used: ${aiText(plan.fallback_reason)}`,
+      })
+    );
+  }
+
+  if (!groups.length && !hypotheses.length) {
+    ui.aiBody.append(
+      el("p", {
+        className: "live-note",
+        textContent:
+          "No AI hypotheses were produced. A clean AI pass does not prove the pipeline is risk-free.",
+      })
+    );
+  }
+
+  for (const group of groups) {
+    const card = el("section", { className: "live-ai-card" });
+    card.append(el("h4", { textContent: aiText(group.title) || "Root-cause group" }));
+    card.append(
+      el("p", {
+        className: "live-note",
+        textContent: `Priority: ${String(group.priority || "unknown")} · Confidence: ${String(group.confidence ?? "—")} · Source: ${String(group.source || "unknown")}`,
+      })
+    );
+    if (aiText(group.explanation)) card.append(el("p", { textContent: aiText(group.explanation) }));
+    const remediation = group.remediation && typeof group.remediation === "object" ? group.remediation : {};
+    const actions = aiList("Remediation", remediation.actions);
+    const verification = aiList("Verification", remediation.verification);
+    if (actions) card.append(actions);
+    if (verification) card.append(verification);
+    if (aiText(remediation.code_hint)) {
+      card.append(el("pre", {}, [el("code", { textContent: aiText(remediation.code_hint) })]));
+    }
+    const note = notes.find((item) => item?.group_id === group.group_id);
+    if (note) {
+      const noteBlock = el("div", { className: "live-ai-note" }, [
+        el("strong", { textContent: "LLM rephrasing (validated, no new evidence)" }),
+      ]);
+      if (aiText(note.explanation)) noteBlock.append(el("p", { textContent: aiText(note.explanation) }));
+      const noteActions = aiList("Suggested actions", note.actions);
+      const noteVerification = aiList("Suggested verification", note.verification);
+      if (noteActions) noteBlock.append(noteActions);
+      if (noteVerification) noteBlock.append(noteVerification);
+      card.append(noteBlock);
+    }
+    ui.aiBody.append(card);
+  }
+
+  for (const hypothesis of hypotheses) {
+    const card = el("section", { className: "live-ai-card" });
+    card.append(el("h4", { textContent: aiText(hypothesis.title) || "AI hypothesis" }));
+    card.append(
+      el("p", {
+        className: "live-note",
+        textContent: `Concept: ${String(hypothesis.concept || "unknown")} · Confidence: ${String(hypothesis.confidence ?? "—")} · Severity hint: ${String(hypothesis.severity_hint || "info")} · Location: ${String(hypothesis.location || "—")}`,
+      })
+    );
+    if (aiText(hypothesis.explanation)) {
+      card.append(el("p", { textContent: aiText(hypothesis.explanation) }));
+    }
+    if (hypothesis.corroborates) {
+      card.append(
+        el("p", {
+          className: "live-note",
+          textContent: `Corroborates deterministic finding: ${String(hypothesis.corroborates)}`,
+        })
+      );
+    }
+    const evidence = Array.isArray(hypothesis.evidence) ? hypothesis.evidence : [];
+    if (evidence.length) {
+      card.append(
+        aiList(
+          "Evidence",
+          evidence.map(
+            (span) =>
+              `${String(span.kind || "evidence")} at ${String(span.location || "—")}: ${String(span.excerpt || "")}`
+          )
+        )
+      );
+    }
+    const limitations = aiList("Limitations", hypothesis.limitations);
+    if (limitations) card.append(limitations);
+    ui.aiBody.append(card);
+  }
+
+  if (models.length) {
+    const details = el("details", { className: "live-ai-model" }, [
+      el("summary", { textContent: "Model card and measured performance" }),
+    ]);
+    for (const model of models) {
+      const external = Array.isArray(model.external)
+        ? model.external
+            .map((item) => (Array.isArray(item) ? `${String(item[0])}: ${String(item[1])}` : ""))
+            .filter(Boolean)
+            .join(" · ")
+        : "";
+      details.append(
+        el("p", {
+          textContent: `${String(model.name || "model")} · ${String(model.kind || "")} · threshold ${String(model.threshold ?? "—")} · precision ${String(model.precision ?? "—")} · recall ${String(model.recall ?? "—")} · F1 ${String(model.f1 ?? "—")} · FPR ${String(model.false_positive_rate ?? "—")}`,
+        })
+      );
+      if (aiText(model.evaluation)) {
+        details.append(el("p", { className: "live-note", textContent: aiText(model.evaluation) }));
+      }
+      if (external) {
+        details.append(
+          el("p", { className: "live-note", textContent: `External transfer: ${external}` })
+        );
+      }
+      const modelLimitations = aiList("Model limitations", model.limitations);
+      if (modelLimitations) details.append(modelLimitations);
+    }
+    ui.aiBody.append(details);
+  }
+
+  const globalLimitations = aiList("AI limitations", ai.limitations);
+  if (globalLimitations) ui.aiBody.append(globalLimitations);
+};
+
 const renderResult = (data) => {
   state.result = data;
   state.filter = { severity: "all", kind: "all", query: "" };
@@ -869,6 +1051,7 @@ const renderResult = (data) => {
   renderSummary(data);
   renderAudit(data);
   renderImpact(data);
+  renderAI(data);
   renderFilters();
   renderFindings();
   const heading = $("#live-results-title");
@@ -910,6 +1093,7 @@ const runScan = async (event) => {
   form.append("threshold", String(Number(ui.threshold?.value || 0.95)));
   if (ui.group?.value) form.append("group", ui.group.value);
   if (ui.time?.value) form.append("time", ui.time.value);
+  if (ui.aiToggle?.checked) form.append("include_ai", "true");
   if (state.testFile) form.append("test", state.testFile, state.testFile.name);
   state.cancelled = false;
   state.controller = new AbortController();
