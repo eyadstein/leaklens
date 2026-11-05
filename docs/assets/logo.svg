@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="LeakLens">
+  <defs>
+    <linearGradient id="lens" x1="8" y1="4" x2="40" y2="44" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7df0dd"/>
+      <stop offset="1" stop-color="#5eead4"/>
+    </linearGradient>
+  </defs>
+  <path d="M24 5c9.4 0 17 6.9 17 15.4 0 9.8-8.4 17.3-15.6 22.1a2.6 2.6 0 0 1-2.8 0C15.4 37.7 7 30.2 7 20.4 7 11.9 14.6 5 24 5Z" fill="none" stroke="url(#lens)" stroke-width="2.6" stroke-linejoin="round"/>
+  <circle cx="24" cy="20" r="8.4" fill="none" stroke="url(#lens)" stroke-width="2.4"/>
+  <circle cx="24" cy="20" r="3" fill="#5eead4"/>
+  <path d="M30.2 26.2 37 33" stroke="#5eead4" stroke-width="2.6" stroke-linecap="round"/>
+  <path d="M8.8 11.5c1.8-2.2 4.2-3.6 6.9-4.3" stroke="#7df0dd" stroke-width="2.2" stroke-linecap="round" opacity=".7"/>
+</svg>

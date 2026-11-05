@@ -46,3 +46,18 @@ jobs:
       - run: pip install "ruff>=0.17"
       - run: ruff check leaklens tests scripts
       - run: ruff format --check leaklens tests scripts
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pip install -e .
+      # Fails when the recorded demo fixtures drift from the real scanners,
+      # a link or asset is missing, or the static pages lose an a11y landmark.
+      - run: python scripts/build_site.py --check
+      - run: node --test tests/site/demo-engine.test.mjs

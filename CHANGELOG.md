@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Website and demo (0.14.0 phase 2)
+
+- Rebuilt the GitHub Pages site in `docs/` as a real product site: landing page, interactive demo, documentation, example report and a 404, all hand-written HTML/CSS/ES modules with no bundler, external font or third-party script.
+- Added `docs/demo.html`, which replays verified scanner output for seven fixtures (leaky and safe code, leaky and clean transaction tables, exact and normalised split overlap). Every result is labelled **prerecorded**; the page states that GitHub Pages cannot execute Python and shows the live CLI command for each fixture.
+- Added `scripts/build_site_fixtures.py` (deterministic fixtures from `scan_source`, `leakage.scan/score`, the overlap checks and `fixes.advice`) and `scripts/build_site.py` (regenerate + validate links, fragments, assets, landmarks, version and score arithmetic). CI fails when the recorded output drifts.
+- Added a dependency-free canvas 3-D field on the landing page built from real rows in the split fixture, with drag/keyboard rotation, duplicate highlighting and reduced-motion/offscreen pausing.
+- Added `examples/safe_pipeline.py`, the corrected pipeline used as the clean code fixture.
+- Added frontend tests: `tests/test_site.py` (fixtures, links, accessibility landmarks, JS syntax) and `tests/site/demo-engine.test.mjs` (Node's built-in runner). A new `site` CI job runs `build_site.py --check` and the Node tests; `scripts/check_site_layout.mjs` performs local desktop/tablet/mobile checks in headless Chrome or Edge.
+- README now points at the new site, demo and documentation, and explains how to regenerate the fixtures.
+
 ### Detection engine (0.14.0 phase 1)
 
 - New `leaklens/partition.py`: infers train/test/validation roles from `train_test_split` unpacking, name hints (`test`, `holdout`, `te`) and cheap aliases. Tuning on an arbitrarily named second return value is now caught; a validation split is deliberately treated as legitimate.

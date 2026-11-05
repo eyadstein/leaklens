@@ -9,7 +9,7 @@
 
 **Catch data leakage before it fools you.** Most "99% accuracy" models are leaking. LeakLens audits both your **data** and your **code**, then proves what survives by training three model families on a leak-free pipeline.
 
-**[Live demo report](https://eyadstein.github.io/leaklens/)**
+**[Website and interactive demo](https://eyadstein.github.io/leaklens/)** · **[Documentation](https://eyadstein.github.io/leaklens/docs.html)**
 
 ## What it catches
 
@@ -39,6 +39,14 @@ tree_ensemble 0.8242 0.3562 0.4103
 ```
 
 A leaked column makes accuracy look perfect. LeakLens drops it and shows the honest numbers.
+
+The [website](https://eyadstein.github.io/leaklens/) is a static GitHub Pages build served from `docs/`, with no bundler and no external dependencies. Its [demo](https://eyadstein.github.io/leaklens/demo.html) replays real scanner output for the checked-in examples, and is explicitly labelled **prerecorded**: GitHub Pages cannot run Python. Regenerate the fixtures and validate every link, asset and accessibility landmark with:
+
+```sh
+python scripts/build_site.py
+node --test tests/site/demo-engine.test.mjs
+node scripts/check_site_layout.mjs   # local headless Chrome/Edge check
+```
 
 ## Python version
 
