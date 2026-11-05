@@ -1,0 +1,47 @@
+#!/bin/sh
+# Reject commits created with an identity other than the repository owner's.
+#
+# Git author/committer metadata is what GitHub uses for attribution.  This hook
+# reads the *resolved* identity (including any GIT_AUTHOR_* / GIT_COMMITTER_*
+# environment overrides) before the commit object is written.
+#
+# Intentional overrides can bypass the hook with `git commit --no-verify`.
+
+set -u
+
+expected_name="eyadstein"
+expected_email="149825602+eyadstein@users.noreply.github.com"
+
+status=0
+
+for role in AUTHOR COMMITTER; do
+    variable="GIT_${role}_IDENT"
+    if ! identity=$(git var "$variable" 2>/dev/null); then
+        echo "error: could not resolve $variable" >&2
+        status=1
+        continue
+    fi
+
+    case "$identity" in
+        "$expected_name <$expected_email> "*)
+            ;;
+        *)
+            echo "error: Git $role identity is not the expected LeakLens identity." >&2
+            echo "  expected: $expected_name <$expected_email>" >&2
+            echo "  actual:   $identity" >&2
+            status=1
+            ;;
+    esac
+done
+
+if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "Fix the repository identity with:" >&2
+    echo "  git config --local user.name \"$expected_name\"" >&2
+    echo "  git config --local user.email \"$expected_email\"" >&2
+    echo "" >&2
+    echo "Then retry the commit. Use --no-verify only for a deliberate override." >&2
+    exit 1
+fi
+
+exit 0

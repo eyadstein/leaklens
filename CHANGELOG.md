@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Experimental AI intelligence (0.14.0 phase 5)
+
+- Rebuilt the learned detector's feature extractor (`leaklens/ai/features.py`) from 61 to 98 interpretable indicators (94 used by the model), adding split/fit *ordering*, frame identity (train vs test vs all rows), target-derived columns, duplicate handling, grouping, temporal order and EDA-only summaries. `log_lines`, `log_bytes`, `has_random_state` and `target_column_passed` are deliberately excluded from the model so results cannot depend on corpus size or incidental flags.
+- Split the authored corpus by scenario source and template family into disjoint sets: 145 training cases from 9 sources (`leaklens/ai/corpus.py`), 40 validation cases from 4 further sources (`corpus_validation.py`) and a 47-case locked test from 4 more sources (`corpus_test.py`) that training never imports. Development totals are 185 cases across 137 template groups. Near-duplicate and feature-identical examples were co-grouped so no grouped fold can see one copy on each side.
+- Reworked training (`leaklens/ai/learned.py`): eight lightweight candidates are compared with grouped cross-validation, the winner is confirmed on validation, probabilities are calibrated with a Platt sigmoid fitted on grouped out-of-fold scores, and the decision threshold is chosen on validation only. The locked test is evaluated once at the frozen threshold.
+- Added an independent locked-test protocol to `leaklens/bench_ai.py` and `docs/AI_BENCHMARK.md`: split-integrity checks (shared sources/groups/duplicates), candidate table, train/validation/locked-test metrics and confusion matrices, per-category and per-source results, calibration, named mistakes, external transfer, overfitting checks and limitations. Phase 4 baseline numbers are reproduced in the same report.
+- Measured locked independent test (47 unseen cases): accuracy 0.979, precision 1.000, recall 0.960, F1 0.980, false-positive rate 0.000 (TP/FP/FN/TN = 24/0/1/22). Validation: 21/0/0/19. Grouped out-of-fold training: accuracy 0.897, F1 0.901. External transfer to the existing scanner cases: F1 0.881. The single locked-test miss is a random split over repeated applicants whose only cue is an unseen identifier name; it was not tuned against.
+- Fixed feature-importance reporting to read the *fitted* pipeline instead of the unfitted spec, so the reported global signals are meaningful rather than uniform.
+- Extended `ModelCard` with version, validation example count, calibration, candidate and protocol fields, and rendered them in the HTML report. The AI layer remains opt-in and never changes deterministic findings, severity, the trust score or the exit code.
+
 ### Experimental AI intelligence (0.14.0 phase 4)
 
 - Added the optional, offline `leaklens.ai` package. It is opt-in (`--ai`, `--ai-llm`, `include_ai=true`, Python `leaklens.ai`) and never changes deterministic findings, severity, the trust score or the exit code.

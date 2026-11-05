@@ -345,6 +345,11 @@ class ModelCard:
     evaluation: str
     limitations: tuple[str, ...]
     external: tuple[tuple[str, float], ...] = ()
+    version: str = ""
+    validation_examples: int = 0
+    calibration: tuple[tuple[str, float], ...] = ()
+    candidates: tuple[tuple[str, float], ...] = ()
+    protocol: str = ""
 
     def __post_init__(self) -> None:
         _text(self.name, "name", 120)
@@ -363,6 +368,21 @@ class ModelCard:
         for key, value in self.external:
             _text(key, "external metric", 80)
             _unit(value, "external metric value")
+        if not isinstance(self.version, str):
+            raise TypeError("model version must be a string")
+        if self.version:
+            _text(self.version, "version", 80)
+        _count(self.validation_examples, "validation_examples")
+        for key, value in self.calibration:
+            _text(key, "calibration metric", 80)
+            _unit(value, "calibration metric value")
+        for key, value in self.candidates:
+            _text(key, "candidate", 80)
+            _unit(value, "candidate score")
+        if not isinstance(self.protocol, str):
+            raise TypeError("protocol must be a string")
+        if self.protocol:
+            _text(self.protocol, "protocol", 600)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

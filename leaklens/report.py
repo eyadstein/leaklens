@@ -324,22 +324,36 @@ def _ai_section(data: dict) -> str:
                 f"{html.escape(str(name))}: {html.escape(str(value))}"
                 for name, value in model.get("external", [])
             )
+            calibration = " · ".join(
+                f"{html.escape(str(name))}: {html.escape(str(value))}"
+                for name, value in model.get("calibration", [])
+            )
+            version = str(model.get("version", "") or "").strip()
+            protocol = str(model.get("protocol", "") or "").strip()
             model_limitations = "".join(
                 f"<li>{html.escape(str(value))}</li>"
                 for value in model.get("limitations", [])
             )
             sections.append(
                 f'<div class="card"><h3>{html.escape(str(model.get("name", "")))}</h3>'
-                f"<p><b>Kind:</b> {html.escape(str(model.get('kind', '')))} · "
+                + (f"<p><b>Version:</b> {html.escape(version)}</p>" if version else "")
+                + f"<p><b>Kind:</b> {html.escape(str(model.get('kind', '')))} · "
                 f"<b>Features:</b> {html.escape(str(model.get('features', '')))} · "
                 f"<b>Examples:</b> {html.escape(str(model.get('training_examples', '')))} · "
+                f"<b>Validation:</b> {html.escape(str(model.get('validation_examples', 0)))} · "
                 f"<b>Groups:</b> {html.escape(str(model.get('groups', '')))}</p>"
                 f"<p><b>Threshold:</b> {html.escape(str(model.get('threshold', '')))} · "
                 f"<b>Precision:</b> {html.escape(str(model.get('precision', '')))} · "
                 f"<b>Recall:</b> {html.escape(str(model.get('recall', '')))} · "
                 f"<b>F1:</b> {html.escape(str(model.get('f1', '')))} · "
                 f"<b>FPR:</b> {html.escape(str(model.get('false_positive_rate', '')))}</p>"
-                f"<p>{html.escape(str(model.get('evaluation', '')))}</p>"
+                + (f"<p><b>Calibration:</b> {calibration}</p>" if calibration else "")
+                + f"<p>{html.escape(str(model.get('evaluation', '')))}</p>"
+                + (
+                    f"<p><b>Protocol:</b> {html.escape(protocol)}</p>"
+                    if protocol
+                    else ""
+                )
                 + (f"<p><b>External transfer:</b> {external}</p>" if external else "")
                 + f"<b>Limitations</b><ul>{model_limitations}</ul></div>"
             )

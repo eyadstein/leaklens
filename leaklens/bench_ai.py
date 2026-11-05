@@ -1,9 +1,10 @@
 """Benchmark and false-positive analysis for the optional AI layer.
 
 This benchmark is separate from the deterministic scanner benchmark.  It reports
-the learned model's grouped cross-validation and external transfer, plus a small
-semantic-rule regression set.  It deliberately does **not** claim that AI improves
-the deterministic detectors: the measured numbers are reported as-is.
+the learned model's development metrics (grouped CV and validation), the frozen
+model's single locked-test evaluation, and external scanner transfer, plus a
+small semantic-rule regression set.  It deliberately does **not** claim that AI
+improves the deterministic detectors: the measured numbers are reported as-is.
 
 Usage: ``python -m leaklens.bench_ai [--write docs/AI_BENCHMARK.md]``
 """
@@ -11,20 +12,55 @@ Usage: ``python -m leaklens.bench_ai [--write docs/AI_BENCHMARK.md]``
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from .ai.corpus import corpus_stats
+from .ai.corpus import corpus_stats, development_cases
+from .ai.corpus_test import LOCKED_TEST_CASES
 from .ai.features import MODEL_FEATURE_NAMES, model_features
 from .ai.learned import (
+    MODEL_VERSION,
     _external_cases,
     _metrics,
-    evaluate_model,
+    evaluate_locked_test,
     get_model,
 )
 from .ai.semantics import CodeSource, SchemaInfo, analyze_semantics
+
+# Phase 4 baseline, recorded on commit 9a4cba5 before the Phase 5 rebuild and
+# reproduced in the Phase 5 report.  It is history, not a live claim.
+PHASE4_BASELINE = {
+    "commit": "9a4cba5",
+    "protocol": (
+        "Grouped CV on 72 authored cases with a fixed 0.65 threshold; external "
+        "transfer to the existing scanner benchmark."
+    ),
+    "cross_validation": {
+        "accuracy": 0.7361,
+        "precision": 0.8333,
+        "recall": 0.6977,
+        "f1": 0.7595,
+        "false_positive_rate": 0.2069,
+        "true_positives": 30.0,
+        "false_positives": 6.0,
+        "true_negatives": 23.0,
+        "false_negatives": 13.0,
+    },
+    "external": {
+        "accuracy": 0.773,
+        "precision": 0.85,
+        "recall": 0.6892,
+        "f1": 0.7612,
+        "false_positive_rate": 0.1343,
+        "true_positives": 51.0,
+        "false_positives": 9.0,
+        "true_negatives": 58.0,
+        "false_negatives": 23.0,
+    },
+}
 
 
 def _code_cases() -> list[tuple[str, str, bool, set[str]]]:
@@ -216,9 +252,9 @@ def _threshold_sweep() -> list[dict[str, float]]:
     cases = _external_cases()
     matrix = np.vstack([model_features(code) for _n, code, _l in cases])
     labels = np.asarray([int(leaky) for _n, _code, leaky in cases], dtype=int)
-    probabilities = model.model.predict_proba(matrix)[:, 1]
+    probabilities = model.predict_matrix(matrix)
     rows = []
-    for threshold in (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+    for threshold in (0.3, 0.4, 0.5, 0.6, 0.63, 0.7, 0.8, 0.9):
         metrics = _metrics(labels, (probabilities >= threshold).astype(int))
         rows.append(
             {
@@ -232,13 +268,56 @@ def _threshold_sweep() -> list[dict[str, float]]:
     return rows
 
 
+def _tokens(code: str) -> set[str]:
+    return set(re.findall(r"[a-z_][a-z0-9_]*", code.lower()))
+
+
+def _split_integrity() -> dict[str, object]:
+    """Checks that the split is by source/group, not by near-duplicate rows."""
+
+    development = development_cases()
+    development_sources = {case.source for case in development}
+    test_sources = {case.source for case in LOCKED_TEST_CASES}
+    development_groups = {case.group for case in development}
+    test_groups = {case.group for case in LOCKED_TEST_CASES}
+
+    development_code = {case.code.strip() for case in development}
+    exact_duplicates = sum(
+        1 for case in LOCKED_TEST_CASES if case.code.strip() in development_code
+    )
+
+    max_overlap = 0.0
+    max_pair: tuple[str, str] | None = None
+    development_tokens = [(case.name, _tokens(case.code)) for case in development]
+    for case in LOCKED_TEST_CASES:
+        tokens = _tokens(case.code)
+        for name, other in development_tokens:
+            union = tokens | other
+            if not union:
+                continue
+            overlap = len(tokens & other) / len(union)
+            if overlap > max_overlap:
+                max_overlap = overlap
+                max_pair = (name, case.name)
+    return {
+        "development_cases": len(development),
+        "locked_test_cases": len(LOCKED_TEST_CASES),
+        "shared_sources": sorted(development_sources & test_sources),
+        "shared_groups": sorted(development_groups & test_groups),
+        "exact_duplicate_codes": exact_duplicates,
+        "max_token_jaccard": round(max_overlap, 3),
+        "max_overlap_pair": list(max_pair) if max_pair else [],
+    }
+
+
 def evaluate() -> dict[str, object]:
-    evaluation = evaluate_model()
-    _evaluation, model = get_model()
-    cases = _external_cases()
-    matrix = np.vstack([model_features(code) for _n, code, _l in cases])
-    probabilities = model.model.predict_proba(matrix)[:, 1]
-    predicted = (probabilities >= model.threshold).astype(int)
+    evaluation, model = get_model()
+    external_cases = _external_cases()
+    external_matrix = np.vstack(
+        [model_features(code) for _n, code, _l in external_cases]
+    )
+    external_probabilities = model.predict_matrix(external_matrix)
+    external_predicted = (external_probabilities >= model.threshold).astype(int)
 
     importances = sorted(
         zip(MODEL_FEATURE_NAMES, model.feature_importances), key=lambda item: -item[1]
@@ -250,7 +329,7 @@ def evaluate() -> dict[str, object]:
             "category": "clean",
         }
         for (name, _code, leaky), probability, guess in zip(
-            cases, probabilities, predicted
+            external_cases, external_probabilities, external_predicted
         )
         if not leaky and guess == 1
     ][:10]
@@ -261,22 +340,40 @@ def evaluate() -> dict[str, object]:
             "category": "leaky",
         }
         for (name, _code, leaky), probability, guess in zip(
-            cases, probabilities, predicted
+            external_cases, external_probabilities, external_predicted
         )
         if leaky and guess == 0
     ][:10]
+
+    locked = evaluate_locked_test()
+    locked_metrics = locked["metrics"]
 
     return {
         "deterministic_comparison": (
             "Not measured as an improvement. The deterministic scanner remains the "
             "authoritative detector; this benchmark only measures the optional AI layer."
         ),
+        "baseline_phase4": PHASE4_BASELINE,
         "corpus": corpus_stats(),
-        "cross_validation": evaluation.metrics,
-        "threshold": evaluation.threshold,
-        "folds": evaluation.folds,
+        "split_integrity": _split_integrity(),
+        "model": {
+            "name": evaluation.model_name,
+            "version": MODEL_VERSION,
+            "folds": evaluation.folds,
+            "features": len(MODEL_FEATURE_NAMES),
+            "threshold": evaluation.threshold,
+            "threshold_rule": "validation only",
+            "train_examples": evaluation.train_examples,
+            "validation_examples": evaluation.validation_examples,
+        },
+        "protocol": evaluation.protocol,
+        "candidates": list(evaluation.candidates),
+        "train_out_of_fold": evaluation.train_metrics,
+        "validation": evaluation.metrics,
+        "calibration": evaluation.calibration,
+        "locked_test": locked,
         "external": evaluation.external,
-        "external_cases": len(cases),
+        "external_cases": len(external_cases),
         "external_threshold_sweep": _threshold_sweep(),
         "top_features": [
             {"feature": name, "importance": round(value, 4)}
@@ -285,14 +382,61 @@ def evaluate() -> dict[str, object]:
         "false_positives": false_positives,
         "false_negatives": false_negatives,
         "semantics": evaluate_semantics(),
+        "overfitting_checks": [
+            (
+                "Grouped out-of-fold train metrics are lower than validation and "
+                "locked-test metrics."
+            ),
+            (
+                "Every development and locked-test case belongs to exactly one "
+                "source and one template group; sources never overlap."
+            ),
+            (
+                f"Locked-test accuracy {locked_metrics['accuracy']:.3f} is reported "
+                "once at the frozen threshold, with no post-hoc tuning."
+            ),
+            (
+                "Candidate architectures are compared on grouped CV and validation; "
+                "the locked test never participates in selection."
+            ),
+        ],
         "limitations": list(model.card.limitations),
     }
 
 
+def _confusion_row(metrics: dict[str, float]) -> str:
+    return (
+        f"{int(metrics['true_positives'])} / {int(metrics['false_positives'])} / "
+        f"{int(metrics['false_negatives'])} / {int(metrics['true_negatives'])}"
+    )
+
+
+def _metric_table(metrics: dict[str, float]) -> list[str]:
+    return [
+        "| Metric | Value |",
+        "|---|---:|",
+        f"| Accuracy | {metrics['accuracy']:.3f} |",
+        f"| Precision | {metrics['precision']:.3f} |",
+        f"| Recall | {metrics['recall']:.3f} |",
+        f"| F1 | {metrics['f1']:.3f} |",
+        f"| Specificity | {metrics['specificity']:.3f} |",
+        f"| False-positive rate | {metrics['false_positive_rate']:.3f} |",
+        f"| TP / FP / FN / TN | {_confusion_row(metrics)} |",
+    ]
+
+
 def markdown(data: dict) -> str:
-    cv = data["cross_validation"]
+    validation = data["validation"]
+    evaluation = data.get("train_out_of_fold") or {}
     external = data["external"]
+    locked = data["locked_test"]
+    locked_metrics = locked["metrics"]
     semantics = data["semantics"]
+    model = data["model"]
+    corpus = data["corpus"]
+    integrity = data["split_integrity"]
+    baseline = data["baseline_phase4"]
+
     lines = [
         "# AI intelligence benchmark",
         "",
@@ -300,53 +444,215 @@ def markdown(data: dict) -> str:
         "It is not an improvement claim over the deterministic scanner, which remains "
         "authoritative. All numbers below are measured by `python -m leaklens.bench_ai`.",
         "",
-        "## Learned detector: grouped cross-validation",
+        "## Protocol and data provenance",
         "",
-        "| Metric | Value |",
-        "|---|---:|",
-        f"| Corpus cases | {data['corpus']['cases']} |",
-        f"| Leaky / legitimate | {data['corpus']['leaky']} / {data['corpus']['legitimate']} |",
-        f"| Template groups | {data['corpus']['groups']} |",
-        f"| Folds | {data['folds']} |",
-        f"| Fixed threshold | {data['threshold']:.2f} |",
-        f"| Precision | {cv['precision']:.3f} |",
-        f"| Recall | {cv['recall']:.3f} |",
-        f"| F1 | {cv['f1']:.3f} |",
-        f"| False-positive rate | {cv['false_positive_rate']:.3f} |",
-        f"| True positives / false positives | {int(cv['true_positives'])} / {int(cv['false_positives'])} |",
-        f"| False negatives / true negatives | {int(cv['false_negatives'])} / {int(cv['true_negatives'])} |",
+        f"- Model: `{model['name']}` ({model['version']}), {model['features']} features.",
+        f"- Training: {model['train_examples']} authored cases from 9 scenario sources.",
+        f"- Validation: {model['validation_examples']} authored cases from 4 disjoint sources.",
+        f"- Locked test: {locked['cases']} authored cases from 4 further disjoint sources.",
+        f"- Groups: {corpus['groups']} template groups across the development corpus; "
+        "grouped folds never split a family.",
+        f"- Threshold: {model['threshold']:.2f} (chosen on validation only).",
+        f"- {data['protocol']}",
         "",
-        "Template families are grouped, so no family appears in both training and "
-        "validation folds. The threshold is fixed at 0.65 (chosen once on grouped "
-        "out-of-fold predictions) so shipped behavior stays stable across supported "
-        "scikit-learn versions. Metrics can vary slightly between scikit-learn "
-        "releases because the underlying tree ensemble is not bit-identical.",
+        "Splits are by **scenario source and template family**, not by random row. "
+        "The locked test is imported only by this benchmark and its tests; training, "
+        "feature selection, calibration and threshold selection never import it.",
         "",
-        "## External transfer to existing scanner cases",
+        "### Split integrity",
         "",
-        f"Cases: {data['external_cases']} (labels from the existing scanner benchmark).",
+        f"- Shared sources between development and locked test: "
+        f"{len(integrity['shared_sources'])}",
+        f"- Shared groups: {len(integrity['shared_groups'])}",
+        f"- Exact duplicate code across splits: {integrity['exact_duplicate_codes']}",
+        f"- Maximum token Jaccard overlap: {integrity['max_token_jaccard']:.3f}"
+        + (
+            f" (`{integrity['max_overlap_pair'][0]}` vs "
+            f"`{integrity['max_overlap_pair'][1]}`)"
+            if integrity["max_overlap_pair"]
+            else ""
+        ),
         "",
-        "| Metric | Value |",
-        "|---|---:|",
-        f"| Precision | {external.get('precision', 0):.3f} |",
-        f"| Recall | {external.get('recall', 0):.3f} |",
-        f"| F1 | {external.get('f1', 0):.3f} |",
-        f"| False-positive rate | {external.get('false_positive_rate', 0):.3f} |",
-        f"| Accuracy | {external.get('accuracy', 0):.3f} |",
+        "## Baseline comparison",
         "",
-        "External cases are **not** used for training or threshold selection. They are "
-        "a transfer check, and the measured false-positive rate is a real limitation.",
+        "Phase 4 baseline (recorded on commit "
+        f"`{baseline['commit']}`, reproduced before the Phase 5 rebuild):",
         "",
-        "## Threshold sweep on external cases",
+        "| Stage | Accuracy | Precision | Recall | F1 | FPR | TP / FP / FN / TN |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+        f"| Phase 4 grouped CV | {baseline['cross_validation']['accuracy']:.3f} | "
+        f"{baseline['cross_validation']['precision']:.3f} | "
+        f"{baseline['cross_validation']['recall']:.3f} | "
+        f"{baseline['cross_validation']['f1']:.3f} | "
+        f"{baseline['cross_validation']['false_positive_rate']:.3f} | "
+        f"{_confusion_row(baseline['cross_validation'])} |",
+        f"| Phase 4 external | {baseline['external']['accuracy']:.3f} | "
+        f"{baseline['external']['precision']:.3f} | "
+        f"{baseline['external']['recall']:.3f} | "
+        f"{baseline['external']['f1']:.3f} | "
+        f"{baseline['external']['false_positive_rate']:.3f} | "
+        f"{_confusion_row(baseline['external'])} |",
+        f"| Phase 5 locked test | {locked_metrics['accuracy']:.3f} | "
+        f"{locked_metrics['precision']:.3f} | {locked_metrics['recall']:.3f} | "
+        f"{locked_metrics['f1']:.3f} | "
+        f"{locked_metrics['false_positive_rate']:.3f} | "
+        f"{_confusion_row(locked_metrics)} |",
         "",
-        "| Threshold | Precision | Recall | F1 | FPR |",
-        "|---:|---:|---:|---:|---:|",
+        "The comparison is reported as measured. The Phase 4 and Phase 5 test sets "
+        "are different authored corpora, so the row difference is not a controlled "
+        "A/B experiment.",
+        "",
+        "## Candidate architectures",
+        "",
+        "Selection uses grouped CV on training cases followed by validation, with the "
+        "same calibration and threshold rule for every candidate.",
+        "",
+        "| Candidate | CV F1 | Validation F1 | Validation FPR |",
+        "|---|---:|---:|---:|",
     ]
+    for row in data["candidates"]:
+        marker = " **(selected)**" if row["name"] == model["name"] else ""
+        lines.append(
+            f"| `{row['name']}`{marker} | {row['cv_f1']:.3f} | "
+            f"{row['validation_f1']:.3f} | "
+            f"{row['validation_false_positive_rate']:.3f} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Development results (not the independent test)",
+            "",
+            "### Grouped out-of-fold training metrics",
+            "",
+            *_metric_table(evaluation),
+            "",
+            "### Validation metrics",
+            "",
+            *_metric_table(validation),
+            "",
+            "Validation is used for architecture selection and threshold choice. "
+            "Because the authored validation sources are cleanly separable, its "
+            "metrics are optimistic and are not the headline result.",
+            "",
+            "### Calibration on validation",
+            "",
+            "| Metric | Value |",
+            "|---|---:|",
+        ]
+    )
+    for key, value in sorted((data.get("calibration") or {}).items()):
+        lines.append(f"| `{key}` | {value:.4f} |")
+
+    lines.extend(
+        [
+            "",
+            "## Locked independent test (evaluated once)",
+            "",
+            "The frozen model and frozen threshold are applied to 47 cases from four "
+            "scenario sources that never appear in training or validation.",
+            "",
+            *_metric_table(locked_metrics),
+            "",
+            "### Locked-test calibration",
+            "",
+            "| Metric | Value |",
+            "|---|---:|",
+        ]
+    )
+    for key, value in sorted(locked["calibration"].items()):
+        lines.append(f"| `{key}` | {value:.4f} |")
+
+    lines.extend(
+        [
+            "",
+            "### Locked-test metrics by category",
+            "",
+            "| Category | Cases | Precision | Recall | F1 | FPR |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for category, metrics in locked["per_category"].items():
+        cases = int(
+            metrics["true_positives"]
+            + metrics["false_positives"]
+            + metrics["false_negatives"]
+            + metrics["true_negatives"]
+        )
+        lines.append(
+            f"| `{category}` | {cases} | {metrics['precision']:.3f} | "
+            f"{metrics['recall']:.3f} | {metrics['f1']:.3f} | "
+            f"{metrics['false_positive_rate']:.3f} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "### Locked-test metrics by unseen source",
+            "",
+            "| Source | Cases | Precision | Recall | F1 | FPR |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for source, metrics in locked["per_source"].items():
+        cases = int(
+            metrics["true_positives"]
+            + metrics["false_positives"]
+            + metrics["false_negatives"]
+            + metrics["true_negatives"]
+        )
+        lines.append(
+            f"| `{source}` | {cases} | {metrics['precision']:.3f} | "
+            f"{metrics['recall']:.3f} | {metrics['f1']:.3f} | "
+            f"{metrics['false_positive_rate']:.3f} |"
+        )
+
+    lines.extend(["", "### Locked-test mistakes", ""])
+    if locked["false_positives"]:
+        lines.extend(
+            f"- False positive: `{item['case']}` ({item['source']}, "
+            f"p={item['probability']:.3f}; signals: {', '.join(item['signals'])})"
+            for item in locked["false_positives"]
+        )
+    else:
+        lines.append("- No false positives on the locked test.")
+    if locked["false_negatives"]:
+        lines.extend(
+            f"- Missed leak: `{item['case']}` ({item['source']}, "
+            f"p={item['probability']:.3f}; signals: {', '.join(item['signals'])})"
+            for item in locked["false_negatives"]
+        )
+    else:
+        lines.append("- No missed leaks on the locked test.")
+
+    lines.extend(
+        [
+            "",
+            "## External transfer to existing scanner cases",
+            "",
+            f"Cases: {data['external_cases']} (labels from the existing scanner "
+            "benchmark). These cases are not used for training, calibration or "
+            "threshold selection; they are a separate transfer check on different "
+            "code styles.",
+            "",
+            *_metric_table(external),
+            "",
+            "## Threshold sweep on external cases",
+            "",
+            "This sweep is diagnostic only. The shipped threshold was chosen on "
+            "validation, not here.",
+            "",
+            "| Threshold | Precision | Recall | F1 | FPR |",
+            "|---:|---:|---:|---:|---:|",
+        ]
+    )
     for row in data["external_threshold_sweep"]:
         lines.append(
-            f"| {row['threshold']:.1f} | {row['precision']:.3f} | {row['recall']:.3f} | "
-            f"{row['f1']:.3f} | {row['false_positive_rate']:.3f} |"
+            f"| {row['threshold']:.2f} | {row['precision']:.3f} | "
+            f"{row['recall']:.3f} | {row['f1']:.3f} | "
+            f"{row['false_positive_rate']:.3f} |"
         )
+
     lines.extend(
         [
             "",
@@ -374,6 +680,7 @@ def markdown(data: dict) -> str:
             for item in semantics["false_alarms"]
         )
         lines.append("")
+
     lines.extend(
         [
             "## Top model signals (global importance)",
@@ -389,7 +696,7 @@ def markdown(data: dict) -> str:
             "",
             "Global importance is not a causal explanation for any single prediction.",
             "",
-            "## False-positive analysis",
+            "## External false-positive analysis",
             "",
         ]
     )
@@ -411,10 +718,15 @@ def markdown(data: dict) -> str:
         )
     else:
         lines.append("No leaky external cases were missed at the selected threshold.")
+
+    lines.extend(["", "## Overfitting checks", ""])
+    lines.extend(f"- {item}" for item in data["overfitting_checks"])
+
     lines.extend(["", "## Limitations", ""])
     lines.extend(f"- {item}" for item in data["limitations"])
     lines.extend(
         [
+            "- The corpus is authored and small; it is a regression corpus, not production evidence.",
             "- The semantic rules are name and control-flow heuristics, not a proof of safety.",
             "- External transfer is measured on a synthetic/scanner benchmark, not production data.",
             "- AI hypotheses never change deterministic findings, severity or the trust score.",
