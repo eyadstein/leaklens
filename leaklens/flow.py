@@ -4,7 +4,17 @@ import ast
 import warnings
 
 from .leakage import Finding
-from .scanner import BENIGN, FUNCS, HINTS, RESAMPLE, _all_names, _name, _sev
+from .scanner import (
+    BENIGN,
+    FEATURE_SELECTION,
+    FUNCS,
+    HINTS,
+    RESAMPLE,
+    TARGET_ENCODERS,
+    _all_names,
+    _name,
+    _sev,
+)
 
 REPLACEABLE = {
     "fit_on_full_data",
@@ -156,6 +166,10 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 kd = "resample_before_split"
             elif any(b in cls for b in BENIGN):
                 kd = "encoder_before_split"
+            elif any(t in cls for t in TARGET_ENCODERS):
+                kd = "target_encode_before_split"
+            elif any(h in cls for h in FEATURE_SELECTION):
+                kd = "feature_selection_before_split"
             elif "ColumnTransformer" in cls:
                 kd = "transformer_before_split"
             else:

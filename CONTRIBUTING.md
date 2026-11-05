@@ -3,7 +3,8 @@
 1. Fork and clone, then `python -m venv .venv` and activate it.
 2. `pip install -e ".[dev,app]"`
 3. Make your change and add a test in `tests/`.
-4. `pytest -q`, `ruff check leaklens tests scripts`, `ruff format --check leaklens tests scripts`, and `leaklens --scan leaklens` must pass.
+4. `pytest -q`, `ruff check leaklens tests scripts`, `ruff format --check leaklens tests scripts`,
+   `leaklens --scan leaklens`, `python -m leaklens.bench`, and `python -m leaklens.bench_data` must pass.
 5. Open a PR with a short description of the leak it detects or the bug it fixes.
 
 ### Running tests with coverage

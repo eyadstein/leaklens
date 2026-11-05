@@ -232,3 +232,131 @@ def group_overlap(train, test, group_col):
             f"{len(shared)} {group_col} values in both splits ({n / len(test):.1%} of test rows)",
         )
     ]
+
+
+def _bounded_pair(train, test, max_rows):
+    """Deterministic, bounded copies so duplicate checks stay cheap on large files."""
+    if max_rows <= 0:
+        return None, None
+    a = train if len(train) <= max_rows else train.sample(max_rows, random_state=0)
+    b = test if len(test) <= max_rows else test.sample(max_rows, random_state=0)
+    return a.reset_index(drop=True), b.reset_index(drop=True)
+
+
+def feature_overlap(train, test, target=None, max_rows=50_000):
+    """Test rows whose feature vector also appears in train.
+
+    ``split_overlap`` hashes every shared column, including the label.  Rows that
+    share features but carry a different label are invisible there, yet they are
+    exactly the duplicates that inflate held-out scores (the model has seen the
+    features and memorised one of the conflicting labels).
+    """
+    a, b = _bounded_pair(train, test, max_rows)
+    if a is None or b is None or a.empty or b.empty:
+        return []
+    cols = [c for c in a.columns if c in b.columns and c != target]
+    if not cols:
+        return []
+    try:
+        left = pd.util.hash_pandas_object(a[cols], index=False)
+        right = pd.util.hash_pandas_object(b[cols], index=False)
+    except (TypeError, ValueError):
+        return []
+    overlap = right.isin(set(left))
+    n = int(overlap.sum())
+    if n == 0:
+        return []
+    conflicts = 0
+    if target is not None and target in a.columns and target in b.columns:
+        train_labels = (
+            pd.DataFrame(
+                {
+                    "hash": left.to_numpy(),
+                    "label": a[target].astype(str).to_numpy(),
+                }
+            )
+            .groupby("hash")["label"]
+            .agg(set)
+            .to_dict()
+        )
+        test_labels = (
+            pd.DataFrame(
+                {
+                    "hash": right[overlap].to_numpy(),
+                    "label": b.loc[overlap, target].astype(str).to_numpy(),
+                }
+            )
+            .drop_duplicates()
+            .itertuples(index=False)
+        )
+        conflicts = sum(
+            1 for h, label in test_labels if label not in train_labels.get(h, set())
+        )
+    rows = "row" if n == 1 else "rows"
+    if conflicts:
+        cro = "row" if conflicts == 1 else "rows"
+        return [
+            Finding(
+                "high",
+                "feature_overlap",
+                "*",
+                f"{conflicts} test {cro} share a feature vector with train rows but "
+                f"carry a different label; duplicate samples with conflicting labels "
+                f"leak across the split",
+            )
+        ]
+    return [
+        Finding(
+            "medium",
+            "feature_overlap",
+            "*",
+            f"{n} test {rows} ({n / len(b):.1%}) share an identical feature vector with "
+            f"train rows (the label column is ignored); deduplicate before splitting",
+        )
+    ]
+
+
+def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_columns=64):
+    """Rows that match after case/whitespace normalisation and numeric rounding.
+
+    This is deliberately conservative: it does not claim fuzzy matching, only
+    that two rows are identical once text is lower-cased/stripped and numbers
+    are rounded to four decimals.  The label column is ignored when ``target``
+    is given, because near-duplicates with different labels are the most
+    damaging case.  A cheap deterministic sample keeps runtime bounded.
+    """
+    a, b = _bounded_pair(train, test, max_rows)
+    if a is None or b is None or a.empty or b.empty:
+        return []
+    cols = [c for c in a.columns if c in b.columns and c != target]
+    if not cols or len(cols) > max_columns:
+        return []
+    try:
+        norm_a = a[cols].copy()
+        norm_b = b[cols].copy()
+        for c in cols:
+            if pd.api.types.is_numeric_dtype(
+                norm_a[c]
+            ) and pd.api.types.is_numeric_dtype(norm_b[c]):
+                norm_a[c] = norm_a[c].round(4)
+                norm_b[c] = norm_b[c].round(4)
+            else:
+                norm_a[c] = norm_a[c].astype(str).str.strip().str.lower()
+                norm_b[c] = norm_b[c].astype(str).str.strip().str.lower()
+        left = pd.util.hash_pandas_object(norm_a, index=False)
+        right = pd.util.hash_pandas_object(norm_b, index=False)
+    except (TypeError, ValueError):
+        return []
+    n = int(right.isin(set(left)).sum())
+    if n == 0:
+        return []
+    return [
+        Finding(
+            "medium",
+            "near_duplicate_overlap",
+            "*",
+            f"{n} test rows ({n / len(b):.1%}) match a train row after "
+            f"case/whitespace normalisation and rounding numbers to 4 decimals; "
+            f"check for near-duplicate samples before splitting",
+        )
+    ]

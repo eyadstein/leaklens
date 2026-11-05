@@ -15,8 +15,11 @@
 
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
-| Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`), hyperparameter tuning on the test set (`tuning_on_test_data`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
+| Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, target/frequency encoding built from all rows, feature selection (SelectKBest, RFE, SelectFromModel) before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`), hyperparameter tuning on the test set (`tuning_on_test_data`), tuning before the split or on the full frame (`tuning_before_split`, `tuning_on_full_data`), cross-validation on test rows (`cv_on_test_data`), repeated test-set scoring, group CV without `groups=`, shuffled splits of time-sorted data, and notebooks run out of order |
+
+Confidence is explicit in each finding's wording: a confirmed rule (for example a search fitted on `X_test`) is reported as a high-severity leak, while a suspicious but legitimate-possible pattern (for example frequency encoding before the split) is low/medium and says what was observed. Every finding has a fix hint under `--explain`.
+
 
 Every audit returns a 0-100 trust score. The CLI exits with code 1 on a high-severity leak, so it gates CI.
 
@@ -182,9 +185,11 @@ leaklens train.csv --target label --intelligence   # deterministic confidence + 
 
 Unknown or extensionless input falls back to CSV. Optional formats (Parquet/Feather/Excel) raise an `ImportError` naming the extra that provides them.
 
+With `--test`, LeakLens runs three bounded duplicate checks in order and reports at most one: exact row overlap (all shared columns, including the label), identical feature vectors with a different label (label excluded), then normalised near-duplicates (text lower-cased/stripped, numbers rounded to 4 decimals). The checks sample at most 50,000 rows for feature overlap and 20,000 for near-duplicates, so large files stay fast. They are heuristics: they report the observed counts and whether labels conflict, and in low-cardinality tabular data an identical feature vector can occur naturally, so treat a medium finding as a prompt to inspect rather than proof of leakage.
+
 ### `leaklens --scan PATH...`
 
-Statically scan `.py` / `.ipynb` files or folders for pipeline leaks (fit before split, fit on test data, tuning on test data, etc.). Scanned code is **never executed**.
+Statically scan `.py` / `.ipynb` files or folders for pipeline leaks (fit before split, fit on test data, tuning on test data, target/frequency encoding before the split, feature selection, group CV without `groups=`, shuffled time-series splits, and out-of-order notebook execution). Scanned code is **never executed**.
 
 ```sh
 leaklens --scan notebooks/ --explain
@@ -192,6 +197,8 @@ leaklens --scan leaklens
 leaklens --scan . --sarif leaklens.sarif || true
 leaklens --scan src tests --llm
 ```
+
+A deliberately leaky demo covering tuning, target encoding, feature selection, group CV, and time ordering is in [`examples/advanced_leaks.py`](examples/advanced_leaks.py); run `leaklens --scan examples/advanced_leaks.py --explain` to see each finding and its fix.
 
 Exit code is 1 when a high-severity finding is present, so it gates CI.
 
@@ -416,7 +423,7 @@ The corpus under `realworld/` holds 60 public notebooks (see [realworld/README.m
 
 ## Accuracy and security
 
-The code scanner is checked against a labeled synthetic regression benchmark on every CI run (`python -m leaklens.bench`, results in [docs/BENCHMARK.md](docs/BENCHMARK.md)). It is hand-written and shaped around supported scanner rules — treat it as a regression guard, not a real-world accuracy claim. The real-world corpus is kept separate from that synthetic benchmark (different directory, different scoring). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+The code scanner is checked against a labeled synthetic regression benchmark on every CI run (`python -m leaklens.bench`, results in [docs/BENCHMARK.md](docs/BENCHMARK.md)). Dataset detectors have a separate synthetic benchmark with per-case runtime (`python -m leaklens.bench_data`, results in [docs/DATA_BENCHMARK.md](docs/DATA_BENCHMARK.md)). Both are hand-written and shaped around supported rules — treat them as regression guards, not real-world accuracy claims. The real-world corpus is kept separate from those synthetic benchmarks (different directory, different scoring). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

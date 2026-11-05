@@ -10,8 +10,10 @@ from . import __version__, llm
 from .audit import audit
 from .fixes import advice
 from .leakage import (
+    feature_overlap,
     group_overlap,
     group_risk,
+    near_duplicate_overlap,
     scan,
     score,
     split_overlap,
@@ -336,7 +338,13 @@ def main(argv=None) -> int:
                 te = _read_dataset(a.test)
             except ImportError as e:
                 p.error(str(e))
-            fs += split_overlap(tr, te)
+            exact = split_overlap(tr, te)
+            fs += exact
+            if not exact:
+                shared = feature_overlap(tr, te, a.target)
+                fs += shared
+                if not shared:
+                    fs += near_duplicate_overlap(tr, te, a.target)
             if a.time:
                 fs += temporal_overlap(tr, te, a.time)
         if a.group:

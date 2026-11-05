@@ -356,6 +356,14 @@ LOW_CASES += [
 ]
 
 
+LOW_SIGNAL_KINDS = {
+    "get_dummies_before_split",
+    "frequency_encode_before_split",
+    "test_set_reuse",
+    "notebook_out_of_order_execution",
+}
+
+
 def _score_cases(cases):
     tp = fp = tn = fn = 0
     errors = []
@@ -363,7 +371,7 @@ def _score_cases(cases):
     for name, code, leaky in cases:
         findings = scan_source(code, name)
         flagged = any(
-            f.severity in ("high", "medium") or f.kind == "get_dummies_before_split"
+            f.severity in ("high", "medium") or f.kind in LOW_SIGNAL_KINDS
             for f in findings
         )
 
@@ -400,12 +408,16 @@ def _score_cases(cases):
 def evaluate() -> dict:
     from collections import defaultdict
 
+    from .bench_advanced import ADVANCED_CASES
     from .bench_cases import EXTRA_CASES
 
     legacy = _score_cases(CASES)
     additional_cases = [(case.name, case.code, case.leaky) for case in EXTRA_CASES]
     additional = _score_cases(additional_cases)
     combined = _score_cases(CASES + additional_cases)
+
+    advanced_cases = [(case.name, case.code, case.leaky) for case in ADVANCED_CASES]
+    advanced = _score_cases(advanced_cases)
 
     categories = defaultdict(list)
     for case in EXTRA_CASES:
@@ -416,9 +428,19 @@ def evaluate() -> dict:
         for category, category_cases in sorted(categories.items())
     }
 
+    advanced_categories = defaultdict(list)
+    for case in ADVANCED_CASES:
+        advanced_categories[case.category].append((case.name, case.code, case.leaky))
+
+    advanced_category_metrics = {
+        category: _score_cases(category_cases)
+        for category, category_cases in sorted(advanced_categories.items())
+    }
+
     errors = [
         *(f"legacy {error}" for error in legacy["errors"]),
         *(f"additional {error}" for error in additional["errors"]),
+        *(f"advanced {error}" for error in advanced["errors"]),
     ]
 
     low_tp = low_fp = low_tn = low_fn = 0
@@ -445,7 +467,9 @@ def evaluate() -> dict:
         **combined,
         "legacy": legacy,
         "additional": additional,
+        "advanced": advanced,
         "categories": category_metrics,
+        "advanced_categories": advanced_category_metrics,
         "low_n": len(LOW_CASES),
         "low_tp": low_tp,
         "low_fp": low_fp,
@@ -639,6 +663,17 @@ def markdown(m: dict) -> str:
             f"{metrics['recall']:.2f} | {metrics['f1']:.2f} |"
         )
 
+    advanced_rows = [
+        "| Category | Cases | Leaky | Clean | Precision | Recall | F1 |",
+        "|---|---:|---:|---:|---:|---:|---:|",
+    ]
+    for category, metrics in m["advanced_categories"].items():
+        advanced_rows.append(
+            f"| {category} | {metrics['n']} | {metrics['leaky']} | "
+            f"{metrics['clean']} | {metrics['precision']:.2f} | "
+            f"{metrics['recall']:.2f} | {metrics['f1']:.2f} |"
+        )
+
     return (
         "# Scanner benchmark\n\n"
         "The benchmark contains the original regression baseline and an expanded "
@@ -649,8 +684,12 @@ def markdown(m: dict) -> str:
         + metrics_table(m["legacy"])
         + "\n## Additional categorized cases\n\n"
         + metrics_table(m["additional"])
+        + "\n## Advanced detection cases (0.14.0)\n\n"
+        + metrics_table(m["advanced"])
         + "\n## Category breakdown\n\n"
         + "\n".join(category_rows)
+        + "\n\n## Advanced category breakdown\n\n"
+        + "\n".join(advanced_rows)
         + "\n\n## Reproducibility checks\n\n"
         + f"Low-severity reproducibility cases (issue #13): "
         f"{m['low_tp'] + m['low_tn']}/{m['low_n']} correct; "
@@ -675,7 +714,7 @@ def main(argv=None) -> int:
     if len(argv) >= 2 and argv[0] == "--write":
         out = Path(argv[1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text, encoding="utf-8")
+        out.write_text(text, encoding="utf-8", newline="\n")
     return 1 if m["errors"] else 0
 
 

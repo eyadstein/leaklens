@@ -4,6 +4,7 @@ import ast
 import warnings
 
 from .leakage import Finding
+from .partition import any_test, infer_roles, name_role
 from .scanner import BENIGN, FUNCS, HINTS, RESAMPLE, _all_names, _name, _sev, _tnames
 
 CV_FUNCS = {
@@ -21,6 +22,14 @@ SEARCH = (
     "HalvingRandomSearchCV",
     "BayesSearchCV",
 )
+PARAM_GRID_FUNCS = {
+    "ParameterGrid",
+    "ParameterSampler",
+    "product",
+    "arange",
+    "logspace",
+    "linspace",
+}
 
 
 def _fit_cls(c, ctor, funcs):
@@ -44,8 +53,51 @@ def _on_partition(names) -> bool:
     return any("train" in n.lower() or n.lower().startswith("x_tr") for n in names)
 
 
+def _is_group_splitter(expr, group_vars) -> bool:
+    if isinstance(expr, ast.Name):
+        return expr.id in group_vars
+    if isinstance(expr, ast.Call):
+        name = _name(expr)
+        return ("Group" in name or "group" in name) and (
+            "Fold" in name or "Split" in name
+        )
+    return False
+
+
+def _full_data_names(assigns, tts, first_split):
+    """Names that hold the full dataset feeding the first train_test_split."""
+    full: set = set()
+    if not tts:
+        return full
+    for arg in tts[0].args:
+        full |= _all_names(arg)
+    defs: dict = {}
+    for a in assigns:
+        if a.lineno < first_split and not (
+            isinstance(a.value, ast.Call) and _name(a.value) == "train_test_split"
+        ):
+            for t in a.targets:
+                for nm in _tnames(t):
+                    defs.setdefault(nm, []).append(a.value)
+    work = list(full)
+    while work:
+        nm = work.pop()
+        for value in defs.get(nm, []):
+            for name in _all_names(value):
+                if name in defs and name not in full:
+                    full.add(name)
+                    work.append(name)
+    for a in assigns:
+        if isinstance(a.value, ast.Call) and _name(a.value) == "train_test_split":
+            continue
+        if _all_names(a.value) & full:
+            for t in a.targets:
+                full |= _tnames(t)
+    return full
+
+
 def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
-    """Preprocessing or resampling done on all rows before cross-validation / hyperparameter search."""
+    """Tuning, cross-validation, and preprocessing misused around validation folds."""
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -69,6 +121,33 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
     assigns.sort(key=lambda a: a.lineno)
+
+    roles = infer_roles(assigns)
+    tts = sorted(
+        (c for c in calls if _name(c) == "train_test_split"), key=lambda c: c.lineno
+    )
+    first_split = tts[0].lineno if tts else None
+    full = _full_data_names(assigns, tts, first_split)
+    split_inputs = _all_names(tts[0].args[0]) if tts and tts[0].args else set()
+    # A split of X_train into train/validation is a nested holdout, not a
+    # top-level test split; tuning on X_train there is not a test-set leak.
+    nested_split = bool(split_inputs) and all(name_role(n) for n in split_inputs)
+    group_vars = {
+        name: cls
+        for name, cls in ctor.items()
+        if ("Group" in cls and ("Fold" in cls or "Split" in cls))
+    }
+
+    def is_test(expr) -> bool:
+        return any_test(_all_names(expr), roles)
+
+    def loc(line):
+        if cells:
+            h = [(s, i) for s, i in cells if s <= line]
+            if h:
+                s, i = h[-1]
+                return f"{label}[cell {i}]:{line - s + 1}"
+        return f"{label}:{line}"
 
     # Estimators fitted via a plain .fit() / .fit_transform() / .fit_resample() call keep the
     # class and the data they learned from, so a later ".transform(X)" inherits the same taint
@@ -128,25 +207,18 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 for nm in _tnames(t):
                     tr[nm] = hit
 
-    split_lines = [c.lineno for c in calls if _name(c) == "train_test_split"]
-
-    def loc(line):
-        if cells:
-            h = [(s, i) for s, i in cells if s <= line]
-            if h:
-                s, i = h[-1]
-                return f"{label}[cell {i}]:{line - s + 1}"
-        return f"{label}:{line}"
+    split_lines = [c.lineno for c in tts]
 
     groups: dict = {}
-    test_tuned: list[Finding] = []
+    special: list[Finding] = []
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
         fname = _name(c)
-        xs, who = None, ""
+        xs, who, kind_of_call = None, "", ""
         if fname in CV_FUNCS:
             xs = c.args[1:2] + [kw.value for kw in c.keywords if kw.arg == "X"]
             who = fname
+            kind_of_call = "cv"
         elif isinstance(f, ast.Attribute) and f.attr == "fit":
             b = f.value
             cls = (
@@ -157,36 +229,90 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             if any(s in cls for s in SEARCH):
                 xs = c.args[:1] + [kw.value for kw in c.keywords if kw.arg == "X"]
                 who = cls
+                kind_of_call = "search"
         if not xs:
             continue
+        arg_names = (
+            set().union(*(_all_names(e) for e in xs if e is not None)) if xs else set()
+        )
+        on_test = any(is_test(e) for e in xs)
+
+        # Hyperparameter search fitted/scored on the test partition itself.
+        if kind_of_call == "search" and on_test:
+            special.append(
+                Finding(
+                    "high",
+                    "tuning_on_test_data",
+                    loc(c.lineno),
+                    f"{who}.fit() uses test data for hyperparameter tuning; the test "
+                    f"set must only be used once for final evaluation. Tune on training "
+                    f"data with cross-validation instead.",
+                )
+            )
+            continue
+        # Cross-validation over the test partition: legitimate evaluation happens
+        # once, not through repeated folds that overlap each other's test rows.
+        if kind_of_call == "cv" and on_test:
+            special.append(
+                Finding(
+                    "medium",
+                    "cv_on_test_data",
+                    loc(c.lineno),
+                    f"{who}() is run on the held-out test partition; cross-validation "
+                    f"there reuses test rows as both training and validation data. "
+                    f"Cross-validate on X_train and evaluate on X_test once.",
+                )
+            )
+            continue
+        # Hyperparameter choice made before the explicit split, using the whole
+        # dataset that the split later divides. A manually built X_train slice is
+        # not the full frame, so role hints on the arguments take precedence.
+        manual_subset = any(name_role(n) in ("train", "validation") for n in arg_names)
+        if (
+            first_split is not None
+            and c.lineno < first_split
+            and arg_names & full
+            and not manual_subset
+        ):
+            special.append(
+                Finding(
+                    "medium",
+                    "tuning_before_split",
+                    loc(c.lineno),
+                    f"{who}() tunes or cross-validates on the full dataset before the "
+                    f"split at {loc(first_split)}; the held-out rows help choose the "
+                    f"model/hyperparameters. Split first, then tune on X_train.",
+                )
+            )
+            continue
+        # A search fitted on the original full frame after the split exists.
+        if (
+            kind_of_call == "search"
+            and first_split is not None
+            and c.lineno > first_split
+            and arg_names & full
+            and not nested_split
+        ):
+            special.append(
+                Finding(
+                    "medium",
+                    "tuning_on_full_data",
+                    loc(c.lineno),
+                    f"{who}.fit() uses data that also feeds the earlier split at "
+                    f"{loc(first_split)}; tune on the training partition only.",
+                )
+            )
+
         hit = None
         for e in xs:
+            if e is None:
+                continue
             for nm in sorted(_all_names(e)):
                 if nm in tr and tr[nm][0] < c.lineno:
                     hit = tr[nm]
                     break
             if hit:
                 break
-        # 2.4: hyperparameter search fitted/scored on the test partition itself.
-        # Checked independently of `hit` (preprocessing taint) — a search fitted
-        # on the test set is a leak even when no preprocessing was done.
-        if who in SEARCH or any(s in who for s in SEARCH):
-            arg_names = set()
-            for e in xs:
-                arg_names |= _all_names(e)
-            if any(
-                "test" in n.lower() or n.lower().startswith("x_te") for n in arg_names
-            ):
-                test_tuned.append(
-                    Finding(
-                        "high",
-                        "tuning_on_test_data",
-                        loc(c.lineno),
-                        f"{who}.fit() uses test data for hyperparameter tuning; the test "
-                        f"set must only be used once for final evaluation. Tune on training "
-                        f"data with cross-validation instead.",
-                    )
-                )
         if not hit:
             continue
         line, cls, argn = hit
@@ -199,6 +325,139 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             (line, kind), {"first": c, "who": who, "n": 0, "cls": cls, "sev": sev}
         )
         g["n"] += 1
+
+    # Custom hyperparameter loops: for C in [...]: model.fit(X_test, y_test).
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For):
+            continue
+        grid = isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)) or (
+            isinstance(node.iter, ast.Call) and _name(node.iter) in PARAM_GRID_FUNCS
+        )
+        if not grid:
+            continue
+        for inner in ast.walk(node):
+            if not (
+                isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr == "fit"
+            ):
+                continue
+            names = (
+                set().union(*(_all_names(a) for a in inner.args))
+                if inner.args
+                else set()
+            )
+            if any_test(names, roles):
+                special.append(
+                    Finding(
+                        "high",
+                        "tuning_on_test_data",
+                        loc(inner.lineno),
+                        "a loop over hyperparameter values fits the model on the test "
+                        "partition; selecting the best loop iteration on test data "
+                        "leaks the test set. Use GridSearchCV(cv=...) on X_train.",
+                    )
+                )
+                break
+
+    # Group-aware splitters used without the entity column.
+    for c in calls:
+        if not (isinstance(c.func, ast.Attribute) and c.func.attr == "split"):
+            continue
+        receiver = c.func.value
+        receiver_cls = ""
+        if isinstance(receiver, ast.Name):
+            receiver_cls = ctor.get(receiver.id, "")
+        elif isinstance(receiver, ast.Call):
+            receiver_cls = _name(receiver)
+        if "Group" not in receiver_cls:
+            continue
+        if any(kw.arg == "groups" for kw in c.keywords) or len(c.args) >= 3:
+            continue
+        special.append(
+            Finding(
+                "medium",
+                "group_cv_missing_groups",
+                loc(c.lineno),
+                f"{receiver_cls}.split() is called without groups=; the same entity "
+                f"can appear in a training and a validation fold. Pass the entity "
+                f"column (groups=...) or use GroupKFold correctly.",
+            )
+        )
+    for c in calls:
+        if _name(c) not in CV_FUNCS:
+            continue
+        if any(kw.arg == "groups" for kw in c.keywords):
+            continue
+        cv = next((kw.value for kw in c.keywords if kw.arg == "cv"), None)
+        if cv is None or not _is_group_splitter(cv, group_vars):
+            continue
+        special.append(
+            Finding(
+                "medium",
+                "group_cv_missing_groups",
+                loc(c.lineno),
+                f"{_name(c)}() uses a group-aware splitter without groups=; folds can "
+                f"share entities. Pass groups=entity_ids.",
+            )
+        )
+    # GridSearchCV(cv=GroupKFold(...)).fit(X, y) without groups=.
+    for a in assigns:
+        if not (
+            isinstance(a.value, ast.Call) and any(s in _name(a.value) for s in SEARCH)
+        ):
+            continue
+        cv = next((kw.value for kw in a.value.keywords if kw.arg == "cv"), None)
+        if cv is None or not _is_group_splitter(cv, group_vars):
+            continue
+        names = set()
+        for t in a.targets:
+            names |= _tnames(t)
+        if not names:
+            continue
+        for c in calls:
+            if not (
+                isinstance(c.func, ast.Attribute)
+                and c.func.attr == "fit"
+                and isinstance(c.func.value, ast.Name)
+                and c.func.value.id in names
+                and c.lineno > a.lineno
+            ):
+                continue
+            if any(kw.arg == "groups" for kw in c.keywords):
+                continue
+            special.append(
+                Finding(
+                    "medium",
+                    "group_cv_missing_groups",
+                    loc(c.lineno),
+                    f"{_name(a.value)} was built with a group-aware cv splitter, but "
+                    f"fit() receives no groups=; folds can share entities.",
+                )
+            )
+
+    # Repeated scoring of the same held-out partition suggests model selection on
+    # the test set. Low severity: some notebooks legitimately log several metrics.
+    scored = [
+        c
+        for c in calls
+        if isinstance(c.func, ast.Attribute)
+        and c.func.attr == "score"
+        and c.args
+        and is_test(c.args[0])
+    ]
+    if len(scored) >= 3:
+        special.append(
+            Finding(
+                "low",
+                "test_set_reuse",
+                loc(scored[0].lineno),
+                f"the held-out partition is scored {len(scored)} times; choosing between "
+                f"models or hyperparameters after looking at test scores leaks the test "
+                f"set. Select on a validation split and touch the test set once.",
+            )
+        )
+
     out = []
     for (line, kind), g in groups.items():
         more = g["n"] - 1
@@ -212,4 +471,4 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 f"has seen every fold's validation rows. Put it inside a Pipeline passed to {g['who']}",
             )
         )
-    return out + test_tuned
+    return out + special

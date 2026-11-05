@@ -23,6 +23,8 @@ HINTS = (
     "SelectK",
     "SelectPercentile",
     "SelectFromModel",
+    "RFE",
+    "SequentialFeatureSelector",
     "RandomOverSampler",
     "RandomUnderSampler",
     "Binarizer",
@@ -31,6 +33,17 @@ HINTS = (
 RESAMPLE = ("SMOTE", "ADASYN", "RandomOverSampler", "RandomUnderSampler")
 BENIGN = ("LabelEncoder", "OrdinalEncoder", "OneHotEncoder")
 UNSURE = ("ColumnTransformer",)
+# Feature selectors learn which columns are useful from the label. Fitting them
+# before the split uses held-out labels to choose the feature set.
+FEATURE_SELECTION = (
+    "Selector",
+    "SelectK",
+    "SelectPercentile",
+    "SelectFromModel",
+    "RFE",
+    "SequentialFeatureSelector",
+)
+TARGET_ENCODERS = ("TargetEncoder", "CatBoostEncoder", "WOEEncoder", "CountEncoder")
 # Splitters whose folds are random only when shuffle=True (fold order is deterministic without it).
 SHUFFLED_SPLITS = {"KFold", "StratifiedKFold", "StratifiedGroupKFold"}
 # Repeated splitters always shuffle, so a missing random_state always makes them non-reproducible.
@@ -441,6 +454,10 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 kind = "resample_before_split"
             elif any(b in cls for b in BENIGN):
                 kind = "encoder_before_split"
+            elif any(t in cls for t in TARGET_ENCODERS):
+                kind = "target_encode_before_split"
+            elif any(h in cls for h in FEATURE_SELECTION):
+                kind = "feature_selection_before_split"
             elif any(u in cls for u in UNSURE):
                 kind = "transformer_before_split"
             else:
@@ -607,6 +624,137 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     f"before the split at {loc(first)}",
                 )
             )
+
+    # Target-derived aggregates pasted back with map/merge, and frequency
+    # encodings built from the full column, both before the split.
+    if first is not None:
+        column_assign_calls = set()
+        for a in assigns:
+            if a.lineno >= first:
+                continue
+            targets = (
+                set().union(*(_tnames(t) for t in a.targets)) if a.targets else set()
+            )
+            if any(isinstance(t, ast.Subscript) for t in a.targets) or targets & full:
+                for n in ast.walk(a.value):
+                    if isinstance(n, ast.Call):
+                        column_assign_calls.add(id(n))
+
+        target_stats, freq_stats = set(), set()
+        for a in assigns:
+            if a.lineno >= first:
+                continue
+            value_calls = [n for n in ast.walk(a.value) if isinstance(n, ast.Call)]
+            named = (
+                set().union(*(_tnames(t) for t in a.targets)) if a.targets else set()
+            )
+            aggregates = any(
+                isinstance(n.func, ast.Attribute)
+                and n.func.attr in ("mean", "median", "agg", "sum", "count", "size")
+                for n in value_calls
+            )
+            if uses_target(a.value) and aggregates:
+                target_stats |= named
+            if any(_name(n) == "value_counts" for n in value_calls):
+                freq_stats |= named
+
+        seen_target_lines = set()
+        for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+            if c.lineno >= first or not isinstance(c.func, ast.Attribute):
+                continue
+            method = c.func.attr
+            if method not in ("map", "replace", "merge"):
+                continue
+            if id(c) not in column_assign_calls:
+                continue
+            exprs = list(c.args) + [
+                kw.value
+                for kw in c.keywords
+                if kw.arg not in ("on", "how", "suffixes", "validate", "copy")
+            ]
+            expr_names = (
+                set().union(*(_all_names(e) for e in exprs)) if exprs else set()
+            )
+            direct_target = any(uses_target(e) for e in exprs)
+            direct_freq = any(
+                isinstance(n, ast.Call) and _name(n) == "value_counts"
+                for e in exprs
+                for n in ast.walk(e)
+            )
+            if expr_names & target_stats or direct_target:
+                if c.lineno in seen_target_lines:
+                    continue
+                seen_target_lines.add(c.lineno)
+                out.append(
+                    Finding(
+                        "high",
+                        "target_encode_before_split",
+                        loc(c.lineno),
+                        f"{ast.unparse(c)} turns a target-derived statistic into a feature "
+                        f"before the split at {loc(first)}; held-out labels shape the encoding",
+                    )
+                )
+            elif expr_names & freq_stats or direct_freq:
+                out.append(
+                    Finding(
+                        "low",
+                        "frequency_encode_before_split",
+                        loc(c.lineno),
+                        f"{ast.unparse(c)} encodes category frequency using every row before "
+                        f"the split at {loc(first)}; held-out rows help set the values",
+                    )
+                )
+
+    # Time-ordered data split with shuffling enabled: adjacent timestamps leak
+    # across the boundary even when no column is literally named "target".
+    if first is not None:
+        time_like = re.compile(
+            r"(date|time|timestamp|datetime|month|year|week|day)", re.IGNORECASE
+        )
+        sorted_names = set()
+        for a in assigns:
+            if a.lineno >= first:
+                continue
+            value = a.value
+            if not (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and value.func.attr == "sort_values"
+            ):
+                continue
+            by = list(value.args) + [
+                kw.value for kw in value.keywords if kw.arg in ("by", "key")
+            ]
+            labels = set().union(*(_strings(x) for x in by)) if by else set()
+            receiver = _all_names(value.func.value)
+            if any(time_like.search(s) for s in labels) or any(
+                time_like.search(n) for n in receiver
+            ):
+                sorted_names |= set().union(*(_tnames(t) for t in a.targets))
+        split_names = set()
+        for c in tts:
+            for arg in list(c.args) + [
+                kw.value for kw in c.keywords if kw.arg in ("X", "y")
+            ]:
+                split_names |= _all_names(arg)
+        if sorted_names & split_names:
+            for c in tts:
+                shuffle = next(
+                    (kw.value for kw in c.keywords if kw.arg == "shuffle"), None
+                )
+                if isinstance(shuffle, ast.Constant) and shuffle.value is False:
+                    continue
+                explicit = isinstance(shuffle, ast.Constant) and shuffle.value is True
+                out.append(
+                    Finding(
+                        "high" if explicit else "medium",
+                        "temporal_split_shuffle",
+                        loc(c.lineno),
+                        "train_test_split() shuffles data that was sorted by a time "
+                        "column; use shuffle=False or a time-based split so future rows "
+                        "cannot land in the training set",
+                    )
+                )
     return out
 
 
@@ -620,9 +768,13 @@ def scan_file(path) -> list[Finding]:
     except ValueError as e:
         return [Finding("low", "parse_error", str(p), str(e))]
     parts, cells, line = [], [], 1
+    executed = []
     for i, c in enumerate(nb.get("cells", [])):
         if c.get("cell_type") != "code":
             continue
+        count = c.get("execution_count")
+        if isinstance(count, int) and not isinstance(count, bool):
+            executed.append((i, count))
         src = c.get("source", "")
         if isinstance(src, list):
             src = "".join(src)
@@ -635,8 +787,21 @@ def scan_file(path) -> list[Finding]:
         parts.append("\n".join(lines))
         line += max(len(lines), 1)
     out = scan_source("\n".join(parts), str(p), cells)
+    order_finding = None
+    if len(executed) >= 2:
+        counts = [count for _, count in executed]
+        if counts != sorted(counts):
+            order_finding = Finding(
+                "low",
+                "notebook_out_of_order_execution",
+                str(p),
+                "code cells were executed out of order (execution_count "
+                + ", ".join(str(count) for count in counts)
+                + "); runtime state may not match cell order, so a split or "
+                "preprocessing step can run in a different order than it appears",
+            )
     if not any(f.kind == "parse_error" for f in out):
-        return out
+        return out + ([order_finding] if order_finding else [])
     # A single bad cell (e.g. a "%%writefile" body that is not Python) makes the whole
     # notebook unparseable, hiding the leaks in every other cell. Skip only the cells that
     # fail to parse on their own and keep scanning the rest with unchanged line offsets.
@@ -652,7 +817,11 @@ def scan_file(path) -> list[Finding]:
         parts[idx] = "\n".join(["pass"] * (parts[idx].count("\n") + 1))
     out = scan_source("\n".join(parts), str(p), cells)
     skipped = [f"cell {cells[idx][1]} skipped: {e}" for idx, e in bad]
-    return [*out, Finding("low", "parse_error", str(p), "; ".join(skipped))]
+    return [
+        *out,
+        *([order_finding] if order_finding else []),
+        Finding("low", "parse_error", str(p), "; ".join(skipped)),
+    ]
 
 
 def scan_path(path) -> list[Finding]:
