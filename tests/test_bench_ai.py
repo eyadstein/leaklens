@@ -8,8 +8,8 @@ from leaklens import bench_ai
 def test_benchmark_reports_measured_metrics_and_limitations():
     data = bench_ai.evaluate()
 
-    assert data["corpus"]["cases"] == 185
-    assert data["corpus"]["train_cases"] == 145
+    assert data["corpus"]["cases"] == 219
+    assert data["corpus"]["train_cases"] == 179
     assert data["corpus"]["validation_cases"] == 40
     assert data["external_cases"] > 100
     assert 0.05 <= data["model"]["threshold"] <= 0.95
@@ -68,7 +68,9 @@ def test_benchmark_markdown_states_the_limits(tmp_path, capsys):
     assert "## Split integrity" in text
     assert "## Baseline comparison" in text
     assert "## Locked independent test (evaluated once)" in text
-    assert "These cases are not used for training" in text
+    assert "These cases are not used for fitting, calibration" in text
+    assert "used for Phase 6 error analysis" in text
+    assert "development result, not independent" in text
     assert "## External false-positive analysis" in text
     assert "## Overfitting checks" in text
     assert "never change deterministic findings" in text

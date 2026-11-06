@@ -25,13 +25,16 @@ The layer has three parts:
    identifier names and train/test shared keys.
 2. **A small learned CPU detector** (`leaklens/ai/learned.py`) trains an in-memory
    calibrated lightweight model (a logistic regression or shallow tree ensemble, chosen on
-   validation) on 94 interpretable code indicators. The 98-feature extractor covers split
-   ordering, frame identity, target-derived columns, duplicate handling, grouping and
-   temporal order. The development corpus is split by *scenario source and template
-   family* into 145 training cases (9 sources) and 40 validation cases (4 further sources);
-   a 47-case locked test from 4 more sources is imported only by the benchmark. Grouped
-   cross-validation keeps a template family inside one fold. The model is never serialized
-   to disk and never loaded from an untrusted artifact.
+   validation) on 108 interpretable code indicators drawn from a 112-feature extractor.
+   The extractor covers split ordering, frame identity, target-derived columns, duplicate
+   handling, grouping, temporal order, functional and hand-written scaling, full-frame
+   imputation, `get_dummies`, CV on the test partition, `GroupKFold` without `groups`,
+   repeated test scoring, frequency encoding and fold-local fitting. The development
+   corpus is split by *scenario source and template family* into 179 training cases
+   (10 sources) and 40 validation cases (4 further sources); a 47-case locked test from 4
+   more sources is imported only by the benchmark. Grouped cross-validation keeps a
+   template family inside one fold. The model is never serialized to disk and never loaded
+   from an untrusted artifact.
 3. **Evidence-bound reasoning** (`leaklens/ai/reasoning.py`) groups related deterministic
    findings and AI hypotheses into root causes, then writes a remediation plan with actions,
    a code hint and verification steps. The plan is deterministic unless you opt into LLM
@@ -112,22 +115,42 @@ python -m leaklens.bench_ai            # JSON
 python -m leaklens.bench_ai --write docs/AI_BENCHMARK.md
 ```
 
-The current report is [AI_BENCHMARK.md](AI_BENCHMARK.md). It lists the split protocol and
-provenance, candidate architectures, grouped out-of-fold and validation metrics, calibration,
-the locked independent test (accuracy 0.979, precision 1.000, recall 0.960, F1 0.980,
-FPR 0.000 on 47 unseen cases), per-category and per-source results, external transfer to the
-existing scanner benchmark, a diagnostic threshold sweep, the semantic regression set, global
-feature importances, and every false positive and miss. The shipped threshold is chosen on
-validation only (`0.64` for the current model) and probabilities are calibrated from grouped
-out-of-fold scores, so behaviour does not drift at import time. Metrics can vary slightly
-between scikit-learn releases because the fitted model is not bit-identical.
+[AI_BENCHMARK.md](AI_BENCHMARK.md) lists the split protocol and provenance, candidate
+architectures, grouped out-of-fold and validation metrics, calibration, the unchanged Phase 5
+locked test (accuracy 0.979, precision 1.000, recall 0.960, F1 0.980, FPR 0.000 on 47 authored
+cases), per-category and per-source results, external transfer to the existing scanner
+benchmark, a diagnostic threshold sweep, the semantic regression set, global feature
+importances, and every false positive and miss. The external scanner set was used for Phase 6
+error analysis, so its perfect score is a development result, not independent evidence.
+
+[AI_REALWORLD.md](AI_REALWORLD.md) is the independent real-world evaluation:
+48 reviewed pipeline units from 12 public repositories that never appear in training,
+validation or the locked test, plus a small smoke check on eight real public notebooks with
+definitive hand labels. The measured holdout result is accuracy 0.833, precision 0.767,
+recall 0.958, F1 0.852 and FPR 0.292; the report lists every false positive and miss,
+repository-cluster intervals and calibration. It is not a production-accuracy claim.
+
+The shipped threshold is chosen on validation only (0.50 for the current model) and
+probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at
+import time. Metrics can vary slightly between scikit-learn releases because the fitted model
+is not bit-identical. [AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory
+on the holdout and on a representative project scan.
 
 ## Limitations
 
-- The corpus is small, authored and Python-only; the locked test has 47 cases, not real
-  repositories, so production code may look different.
-- Learned probabilities are calibrated on 40 validation cases; treat them as approximate,
-  not as a guarantee against false positives.
+- The development corpus is small, authored and Python-only; the locked test has 47 cases,
+  not real repositories.
+- The real-world holdout has 48 cases from 12 repositories and is a convenience sample.
+  44 of the 48 units are reviewed reconstructions of a cited idiom, not verbatim upstream
+  files, and one reviewer labelled all of them. A post-freeze audit found 7 of 23 cited file
+  paths had moved or did not exist at the pinned commit (13 reconstruction cases); the
+  affected citations are listed in [REALWORLD_CORPUS.md](REALWORLD_CORPUS.md).
+- On that holdout the model reaches recall 0.958 but precision 0.767 (7 false positives on
+  24 legitimate units). Most false positives are safe CV, temporal-split, CatBoost Pool and
+  EDA-only patterns that the current indicators cannot separate from leaks.
+- Learned probabilities are calibrated on 40 validation cases and do **not** transfer:
+  holdout Brier is 0.115 and ECE is 0.126. Treat the probability as a ranking score, not a
+  risk estimate.
 - The single locked-test miss is a random split over repeated applicants where the only cue
   is an unseen identifier name (`applicant_id`), which the feature extractor does not treat
   as a leak on its own.

@@ -120,6 +120,22 @@ _INDICATOR_NAMES = (
     "group_aggregate_before_split",
     "nested_cv",
     "cv_full_data_safe",
+    # Phase 6 additions: functional/manual transforms, fold-local fitting,
+    # test-partition scoring and category-only encodings.
+    "functional_scaling_before_split",
+    "manual_scaling_before_split",
+    "full_data_imputation_before_split",
+    "get_dummies_before_split",
+    "cv_on_test_partition",
+    "group_kfold_without_groups",
+    "repeated_test_scoring",
+    "frequency_encoding_before_split",
+    "default_shuffle_after_sort",
+    "fold_local_fit",
+    "search_over_pipeline_safe",
+    "onehot_only_full_data",
+    "train_only_transformer_fit",
+    "target_lag_safe",
 )
 
 FEATURE_NAMES = _INDICATOR_NAMES
@@ -193,7 +209,8 @@ _SUMMARY = re.compile(r"\.(?:describe|value_counts|agg|aggregate)\s*\(")
 _STATS = re.compile(r"(?:\.|\b)(?:mean|median|std|var|quantile|describe)\s*\(")
 _NON_FEATURE_RHS = re.compile(
     r"train_test_split\s*\(|cross_val|cross_validate|GridSearch|RandomizedSearch|"
-    r"\.fit\s*\(|\.score\s*\(|\.predict\s*\(|\.drop\s*\(|\.groupby\s*\(|"
+    r"\.fit\s*\(|\.fit_transform\s*\(|\.fit_resample\s*\(|\.score\s*\(|"
+    r"\.predict\s*\(|\.drop\s*\(|\.groupby\s*\(|\.assign\s*\(|"
     r"\.agg\s*\(|\.aggregate\s*\(|\.describe\s*\(|\.value_counts\s*\(|"
     r"\.mean\s*\(|\.median\s*\(|\.std\s*\(|\.sum\s*\("
 )
@@ -449,6 +466,14 @@ def extract_features(source: str) -> np.ndarray:
             frame_match = _IDENT.search(arguments[0])
             split_frame = frame_match.group(0) if frame_match else ""
 
+    split_outputs = re.findall(
+        r"^\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)[^=\n]*=\s*train_test_split\s*\(",
+        text,
+        re.MULTILINE,
+    )
+    split_train_name = split_outputs[0][0] if split_outputs else ""
+    split_test_name = split_outputs[0][1] if split_outputs else ""
+
     fit_at = _first_line(lines, _FIT_CALL)
     transform_at = _first_line(lines, _TRANSFORM_CALL)
     cv_at = _first_line(lines, _CV_CALL)
@@ -533,10 +558,13 @@ def extract_features(source: str) -> np.ndarray:
     fit_on_train_frame = False
     unsafe_transformer_count = 0
     for index, _receiver, _kind, first, klass in fit_events:
-        if _is_test_frame(first):
+        first_name = first.strip()
+        if _is_test_frame(first) or (split_test_name and first_name == split_test_name):
             fit_on_test_frame = True
             continue
-        if _is_train_frame(first):
+        if _is_train_frame(first) or (
+            split_train_name and first_name == split_train_name
+        ):
             if not _before_split(index, split_at):
                 fit_on_train_frame = True
             continue
@@ -660,6 +688,7 @@ def extract_features(source: str) -> np.ndarray:
             if (
                 not is_target_lhs
                 and not _NON_FEATURE_RHS.search(rhs)
+                and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
                 and (
                     _references_target(rhs, target_names)
                     or bool(_LEAK_NAME.search(rhs))
@@ -682,6 +711,7 @@ def extract_features(source: str) -> np.ndarray:
             if (
                 not is_target_lhs
                 and not _NON_FEATURE_RHS.search(rhs)
+                and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
                 and (
                     _references_target(rhs, target_names)
                     or bool(_LEAK_NAME.search(rhs))
@@ -778,6 +808,210 @@ def extract_features(source: str) -> np.ndarray:
         if not _before_split(index, split_at)
     )
     safe_boundary_ratio = round(after_fits / len(fit_events), 4) if fit_events else 0.0
+
+    # Phase 6: local transforms that Phase 5 could not see.  Functional
+    # scalers and hand-written normalisation are common in notebooks and in
+    # code that predates scikit-learn pipelines.
+    def _first_matching(pattern: re.Pattern[str]) -> int | None:
+        for index, line in enumerate(lines):
+            if pattern.search(line):
+                return index
+        return None
+
+    functional_scaling = re.compile(
+        r"(?<![\w.])(?:scale|normalize|power_transform|quantile_transform|"
+        r"robust_scale|minmax_scale|maxabs_scale)\s*\("
+    )
+    functional_scaling_at = _first_matching(functional_scaling)
+    functional_scaling_before_split = (
+        functional_scaling_at is not None
+        and _before_split(functional_scaling_at, split_at)
+    )
+
+    manual_scaling_before_split = False
+    for index, line in enumerate(lines):
+        if not _before_split(index, split_at):
+            continue
+        if not (_ASSIGN.match(line) or _DATA_COLUMN.match(line)):
+            continue
+        if _is_train_frame(line):
+            continue
+        column = _DATA_COLUMN.match(line)
+        assignment = _ASSIGN.match(line)
+        if column is not None:
+            in_place = bool(
+                re.search(rf"\b{re.escape(column.group(1))}\b", column.group(2))
+            )
+        elif assignment is not None:
+            in_place = bool(
+                re.search(rf"\b{re.escape(assignment.group(1))}\b", assignment.group(2))
+            )
+        else:  # pragma: no cover - one of the two patterns always matches above
+            in_place = False
+        if (
+            split_frame
+            and not in_place
+            and not re.search(rf"\b{re.escape(split_frame)}\b", line)
+        ):
+            continue
+        if not re.search(r"\.(?:max|min|std|mean|var)\s*\(\s*\)", line):
+            continue
+        if re.search(
+            r"\.(?:groupby|agg|aggregate|describe|value_counts|rolling|shift|"
+            r"expanding|ewm|fillna|map)\b",
+            line,
+        ):
+            continue
+        if re.search(
+            r"[/*+-]\s*[A-Za-z_][\w.\[\]'\"]*\.(?:max|min|std|mean)\s*\(", line
+        ):
+            manual_scaling_before_split = True
+            break
+
+    full_data_imputation_before_split = False
+    for index, line in enumerate(lines):
+        if not _before_split(index, split_at) or _is_train_frame(line):
+            continue
+        if not re.search(r"\.fillna\s*\(", line):
+            continue
+        after_fill = line.split(".fillna", 1)[1]
+        if re.search(
+            r"\.(?:mode|mean|median|value_counts|agg|aggregate|describe)\s*\(",
+            after_fill,
+        ):
+            full_data_imputation_before_split = True
+            break
+
+    get_dummies_at = _first_matching(re.compile(r"get_dummies\s*\("))
+    get_dummies_before_split = get_dummies_at is not None and _before_split(
+        get_dummies_at, split_at
+    )
+
+    cv_on_test_partition = bool(
+        re.search(
+            r"cross_val_(?:score|validate|predict)\s*\((?:[^()]|\([^()]*\))*"
+            r"\b(?:X_)?test\w*\b",
+            text,
+        )
+    )
+
+    group_kfold_without_groups = bool(
+        re.search(r"\bGroupKFold\s*\(", text) and not re.search(r"\bgroups\s*=", text)
+    )
+
+    test_score_calls = len(
+        re.findall(
+            r"\.score\s*\(\s*(?:X_)?test\w*\s*[,)]|\bscore\s*\(\s*test\w*\s*[,)]",
+            text,
+        )
+    )
+    repeated_test_scoring = test_score_calls >= 2
+
+    frequency_encoding_before_split = False
+    frequency_vars: set[str] = set()
+    for index, line in enumerate(lines):
+        if not _before_split(index, split_at):
+            continue
+        column = _DATA_COLUMN.match(line)
+        assign = _ASSIGN.match(line)
+        rhs = (
+            column.group(2)
+            if column is not None
+            else (assign.group(2) if assign is not None else "")
+        )
+        if ".value_counts(" in rhs and ".map(" in rhs:
+            frequency_encoding_before_split = True
+            break
+        if ".map(" in rhs and any(
+            re.search(rf"\b{re.escape(name)}\b", rhs) for name in frequency_vars
+        ):
+            frequency_encoding_before_split = True
+            break
+        if assign is not None and ".value_counts(" in assign.group(2):
+            frequency_vars.add(assign.group(1))
+
+    default_shuffle_after_sort = bool(
+        re.search(r"\.sort_values\s*\(", text)
+        and re.search(r"train_test_split\s*\(", text)
+        and not re.search(r"shuffle\s*=\s*False", text)
+        and _TIME_WORDS.search(text)
+    )
+
+    fold_local_fit = False
+    loop_indent: int | None = None
+    for line in lines:
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        indent = len(line) - len(stripped)
+        if loop_indent is not None and indent <= loop_indent:
+            loop_indent = None
+        if re.match(r"for\b", stripped) and re.search(
+            r"\.split\s*\(|\bKFold\b|\bStratifiedKFold\b", stripped
+        ):
+            loop_indent = indent
+            continue
+        if (
+            loop_indent is not None
+            and indent > loop_indent
+            and re.search(r"\.(?:fit|fit_transform|fit_resample)\s*\(", stripped)
+        ):
+            fold_local_fit = True
+
+    search_over_pipeline_safe = bool(
+        re.search(
+            r"\b(?:GridSearchCV|RandomizedSearchCV|HalvingGridSearchCV)\s*\(", text
+        )
+        and _PIPELINE.search(text)
+        and split_at is None
+    )
+
+    onehot_only_full_data = False
+    non_import_text = "\n".join(
+        line for line in lines if not line.lstrip().startswith(("import ", "from "))
+    )
+    if not re.search(
+        r"\b(?:StandardScaler|MinMaxScaler|RobustScaler|MaxAbsScaler|Normalizer|"
+        r"PowerTransformer|QuantileTransformer|SimpleImputer|IterativeImputer|"
+        r"KNNImputer|PCA|KernelPCA|TruncatedSVD|SelectKBest|SelectFromModel|"
+        r"TargetEncoder|WOEEncoder|CatBoostEncoder)\b",
+        non_import_text,
+    ):
+        for index, _receiver, _kind, _first, klass in fit_events:
+            if not _before_split(index, split_at):
+                continue
+            line = lines[index] if index < len(lines) else ""
+            if (
+                re.search(
+                    r"\b(?:OneHotEncoder|OrdinalEncoder|ColumnTransformer)\b",
+                    line + klass,
+                )
+                or "get_dummies" in line
+            ):
+                onehot_only_full_data = True
+                break
+
+    train_only_transformer_fit = any(
+        split_at is not None
+        and index > split_at
+        and (
+            _is_train_frame(first)
+            or (split_train_name and first.strip() == split_train_name)
+        )
+        and any(pattern.search(klass) for pattern in transformer_patterns)
+        for index, _receiver, _kind, first, klass in fit_events
+    )
+
+    target_lag_safe = bool(
+        not future_feature_risk
+        and re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", text)
+        and any(
+            ".shift(" in line
+            and _references_target(line, target_names)
+            and _before_split(index, split_at)
+            for index, line in enumerate(lines)
+        )
+    )
 
     features = {
         "log_lines": math.log1p(len(lines)),
@@ -904,6 +1138,26 @@ def extract_features(source: str) -> np.ndarray:
         "group_aggregate_before_split": 1.0 if group_aggregate_before_split else 0.0,
         "nested_cv": 1.0 if nested_cv else 0.0,
         "cv_full_data_safe": 1.0 if cv_full_data_safe else 0.0,
+        "functional_scaling_before_split": 1.0
+        if functional_scaling_before_split
+        else 0.0,
+        "manual_scaling_before_split": 1.0 if manual_scaling_before_split else 0.0,
+        "full_data_imputation_before_split": 1.0
+        if full_data_imputation_before_split
+        else 0.0,
+        "get_dummies_before_split": 1.0 if get_dummies_before_split else 0.0,
+        "cv_on_test_partition": 1.0 if cv_on_test_partition else 0.0,
+        "group_kfold_without_groups": 1.0 if group_kfold_without_groups else 0.0,
+        "repeated_test_scoring": 1.0 if repeated_test_scoring else 0.0,
+        "frequency_encoding_before_split": 1.0
+        if frequency_encoding_before_split
+        else 0.0,
+        "default_shuffle_after_sort": 1.0 if default_shuffle_after_sort else 0.0,
+        "fold_local_fit": 1.0 if fold_local_fit else 0.0,
+        "search_over_pipeline_safe": 1.0 if search_over_pipeline_safe else 0.0,
+        "onehot_only_full_data": 1.0 if onehot_only_full_data else 0.0,
+        "train_only_transformer_fit": 1.0 if train_only_transformer_fit else 0.0,
+        "target_lag_safe": 1.0 if target_lag_safe else 0.0,
     }
 
     vector = np.asarray([features[name] for name in FEATURE_NAMES], dtype=float)

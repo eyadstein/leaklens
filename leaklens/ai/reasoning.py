@@ -214,6 +214,31 @@ _CATEGORIES: dict[str, _Category] = {
             "Ablate the column and compare held-out performance.",
         ),
     ),
+    "notebook_order": _Category(
+        title="Notebook cells were executed out of order",
+        explanation=(
+            "Execution counters show cells ran in a different order than they appear. "
+            "The runtime state can then contain a split or fitted transformer from a "
+            "different position, so the visible cell order is not the data flow."
+        ),
+        priority="medium",
+        actions=(
+            "Restart the kernel and run all cells top to bottom before trusting a score.",
+            "Move the split and any fit/transform calls into a single ordered cell.",
+            "Delete stale outputs or export the pipeline to a script that enforces order.",
+        ),
+        verification=(
+            "Re-run the notebook from a clean kernel and confirm no out-of-order warning.",
+            "Check that the split precedes every fit/fit_transform in execution order.",
+            "Re-scan the saved notebook after clearing execution counts.",
+        ),
+        code_hint=(
+            "# Cell 1\n"
+            "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+            "# Cell 2\n"
+            "scaler = StandardScaler().fit(X_train)"
+        ),
+    ),
     "syntax": _Category(
         title="The scanned file could not be parsed",
         explanation=(
@@ -277,16 +302,27 @@ _FINDING_CATEGORY = {
     "encoder_before_split": "preprocessing_order",
     "target_encode_before_split": "preprocessing_order",
     "feature_selection_before_split": "preprocessing_order",
+    "frequency_encode_before_split": "preprocessing_order",
+    "preprocess_outside_cv": "preprocessing_order",
     "resample_before_split": "resampling",
+    "resample_outside_cv": "resampling",
     "target_leakage": "target_leakage",
     "categorical_target_leakage": "target_leakage",
     "split_overlap": "overlap",
     "feature_overlap": "overlap",
     "near_duplicate_overlap": "overlap",
     "temporal_leakage": "temporal",
+    "temporal_split_shuffle": "temporal",
     "group_leakage_risk": "grouping",
     "group_overlap": "grouping",
     "group_missing": "grouping",
+    "group_cv_missing_groups": "grouping",
+    "tuning_on_test_data": "tuning",
+    "tuning_before_split": "tuning",
+    "tuning_on_full_data": "tuning",
+    "cv_on_test_data": "tuning",
+    "test_set_reuse": "tuning",
+    "notebook_out_of_order_execution": "notebook_order",
     "id_like": "identifier",
     "parse_error": "syntax",
 }

@@ -42,8 +42,43 @@ the default branch when the corpus was assembled; URLs are commit-pinned.
 | [catboost/catboost](https://github.com/catboost/catboost) | Apache-2.0 | `ecf5e12` | 2026-11-05 |
 
 Verbatim excerpts are redistributed under those licences with attribution to the
-upstream project; the exact file, commit and line source are stored per case in
-`source_url`.
+upstream project. Each case stores the repository, commit and file path in
+`source_url`. For the four verbatim excerpts that is the exact upstream file. For
+the 44 reconstructions the path identifies the upstream idiom the unit was
+modelled on, not a byte-exact source line; the 2026-11-06 audit below records
+where that citation is only approximate.
+
+## Provenance audit (2026-11-06)
+
+After the corpus was frozen, every distinct cited path was requested at its
+pinned commit. **16 of 23 paths resolve; 7 do not, affecting 13 of 48 cases.**
+The failures are recorded here rather than by editing the frozen corpus, so the
+manifest digest and the single-pass result stay intact.
+
+| Cited path (frozen) | Cases | Actual state at the pinned commit |
+|---|---:|---|
+| `aladdinpersson/.../ML/Scikit_learn/KNN/knn.ipynb` | 3 | Directory is `ML/algorithms/knn/`, and the file is `knn.py`, a from-scratch k-NN classifier — there is no notebook, imputer or scaler in it. |
+| `aladdinpersson/.../ML/Scikit_learn/SVM/svm.ipynb` | 1 | Directory is `ML/algorithms/svm/`, and the file is `svm.py`, a from-scratch SVM. The `sklearn.preprocessing.scale` idiom is not present. |
+| `automl/auto-sklearn/.../example_methods_to_load_and_export_models.py` | 4 | No file of that name at the pinned commit. The nearest examples are `examples/20_basic/example_classification.py` (split before `fit`) and `examples/40_advanced/example_pandas_train_test.py` (test data passed to `fit`). |
+| `catboost/.../tutorials/regression/regression_tutorial.ipynb` | 1 | No generic regression tutorial at that commit; the directory holds `poisson.ipynb`, `survival.ipynb` and `tweedie.ipynb`. |
+| `imbalanced-learn/.../examples/over_sampling/plot_random_over_sampling.py` | 1 | Directory is `examples/over-sampling/`; the file is `plot_comparison_over_sampling.py`. |
+| `imbalanced-learn/.../examples/over_sampling/plot_smote.py` | 2 | Directory is `examples/over-sampling/`; SMOTE is demonstrated in `plot_comparison_over_sampling.py`. |
+| `imbalanced-learn/.../examples/under_sampling/plot_tomek_links.py` | 1 | Directory is `examples/under-sampling/`; the file is `plot_illustration_tomek_links.py`. |
+
+What this does and does not mean:
+
+- All 13 affected cases are `reconstructed_excerpt`, not verbatim excerpts, so
+  no upstream code is misattributed as copied text.
+- The code, labels, rationales and the scored probabilities are unchanged. The
+  manifest digest is unchanged, and the holdout was not rescored for this audit.
+- The aladdinpersson entries are the weakest citations: that repository contains
+  from-scratch implementations rather than scikit-learn notebook pipelines, so
+  the two `notebook_order` units are generic notebook idioms attached to the
+  wrong repository. They remain valid leakage examples, but their provenance
+  claim should be read as "synthetic" rather than "modelled on this file".
+- The remaining four repositories with broken citations still contain the
+  families involved (auto-sklearn holdout/AutoML, CatBoost ordered splits,
+  imbalanced-learn resampling); the specific file names drifted.
 
 ## What is in the corpus
 
@@ -105,6 +140,16 @@ code. Both caveats are repeated in the generated report and in the model card.
 - The holdout result is reported as measured, including every false positive and
   false negative. It is not used to choose features, labels or thresholds.
 - The Phase 5 locked authored test in `leaklens/ai/corpus_test.py` is unchanged.
+
+## Measured result
+
+`python -m leaklens.bench_realworld` applies the frozen model to this holdout
+once and writes [AI_REALWORLD.md](AI_REALWORLD.md). On the current frozen
+model the measured result is **accuracy 0.833, precision 0.767, recall 0.958,
+F1 0.852, FPR 0.292** (TP/FP/FN/TN = 23/7/1/17). The report lists every mistake,
+per-category and per-repository metrics, repository-cluster bootstrap intervals,
+calibration, the candidate comparison and the separate public-notebook smoke
+check. The score is not a production-accuracy claim.
 
 ## Known limits
 

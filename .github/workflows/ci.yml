@@ -20,6 +20,7 @@ jobs:
       - run: python -m leaklens.bench
       - run: python -m leaklens.bench_data
       - run: python -m leaklens.bench_ai
+      - run: python -m leaklens.bench_realworld --no-profile
   security:
     runs-on: ubuntu-latest
     steps:

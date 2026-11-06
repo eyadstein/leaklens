@@ -17,6 +17,7 @@ claim that the model understands arbitrary production code.
 
 from __future__ import annotations
 
+from .corpus_phase6 import PHASE6_CASES
 from .corpus_types import LOCKED_TEST, TRAIN, VALIDATION, CorpusCase
 from .corpus_validation import VALIDATION_CASES
 
@@ -1563,6 +1564,9 @@ _add(
     "X_train, X_test, y_train, y_test = train_test_split(X, frame['fraud'])\n",
     source="train:identifiers",
 )
+
+
+_CASES.extend(PHASE6_CASES)
 
 
 def corpus_cases(split: str | None = None) -> tuple[CorpusCase, ...]:

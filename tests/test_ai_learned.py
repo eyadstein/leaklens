@@ -56,25 +56,25 @@ def test_corpus_is_grouped_labeled_and_split_by_source():
     cases = corpus_cases()
 
     assert stats == {
-        "cases": 185,
-        "leaky": 99,
-        "legitimate": 86,
-        "groups": 137,
-        "leaky_groups": 70,
-        "legitimate_groups": 67,
-        "sources": 13,
-        "train_cases": 145,
-        "train_leaky": 78,
-        "train_legitimate": 67,
-        "train_groups": 97,
+        "cases": 219,
+        "leaky": 116,
+        "legitimate": 103,
+        "groups": 154,
+        "leaky_groups": 87,
+        "legitimate_groups": 84,
+        "sources": 14,
+        "train_cases": 179,
+        "train_leaky": 95,
+        "train_legitimate": 84,
+        "train_groups": 114,
         "validation_cases": 40,
         "validation_leaky": 21,
         "validation_legitimate": 19,
         "validation_groups": 40,
-        "train_sources": 9,
+        "train_sources": 10,
         "validation_sources": 4,
     }
-    assert len(cases) == 185
+    assert len(cases) == 219
     assert all(case.name and case.code and case.category for case in cases)
     assert all(case.split in {"train", "validation"} for case in cases)
     assert {case.split for case in training_cases()} == {"train"}
@@ -168,17 +168,17 @@ def test_grouped_folds_never_split_a_template_family():
 
 
 def test_model_features_exclude_shortcuts_but_keep_indicators():
-    assert len(FEATURE_NAMES) == 98
+    assert len(FEATURE_NAMES) == 112
     assert EXCLUDED_MODEL_FEATURES == {
         "log_lines",
         "log_bytes",
         "has_random_state",
         "target_column_passed",
     }
-    assert len(MODEL_FEATURE_NAMES) == 94
+    assert len(MODEL_FEATURE_NAMES) == 108
     assert not set(MODEL_FEATURE_NAMES) & EXCLUDED_MODEL_FEATURES
-    assert extract_features(LEAKY).shape == (98,)
-    assert model_features(LEAKY).shape == (94,)
+    assert extract_features(LEAKY).shape == (112,)
+    assert model_features(LEAKY).shape == (108,)
     values = model_features(LEAKY)
     assert np.isfinite(values).all()
 
@@ -235,9 +235,9 @@ def test_measured_metrics_are_reported_with_a_model_card():
     _evaluation, model = get_model()
 
     assert evaluation.examples == 40
-    assert evaluation.train_examples == 145
+    assert evaluation.train_examples == 179
     assert evaluation.validation_examples == 40
-    assert evaluation.groups == 137
+    assert evaluation.groups == 154
     assert evaluation.folds == 5
     assert 0.05 <= evaluation.threshold <= 0.95
     assert evaluation.model_name in {row["name"]: row for row in evaluation.candidates}
@@ -257,10 +257,10 @@ def test_measured_metrics_are_reported_with_a_model_card():
     assert "validation" in evaluation.protocol
     assert "locked test" in evaluation.protocol
 
-    assert model.card.name == "leaklens-ai-p5"
+    assert model.card.name == "leaklens-ai-p6"
     assert model.card.version == learned.MODEL_VERSION
-    assert model.card.features == 94
-    assert model.card.training_examples == 185
+    assert model.card.features == 108
+    assert model.card.training_examples == 219
     assert model.card.validation_examples == 40
     assert model.card.calibration
     assert model.card.candidates
@@ -348,6 +348,13 @@ def test_learned_hypotheses_are_optional_evidence_bound_and_not_certain():
         learned.MODEL_VERSION in span.excerpt for span in item.evidence
     )
     assert "not a verified finding" in item.explanation
+    assert any(span.source == "code" for span in item.evidence)
+    for span in item.evidence:
+        if span.source != "code":
+            continue
+        line_number = int(span.location.rsplit(":", 1)[1])
+        assert LEAKY.splitlines()[line_number - 1].strip() == span.excerpt
+    assert "(" in item.title and item.title.endswith(")")
 
 
 def test_learned_hypotheses_can_corroborate_a_deterministic_finding():

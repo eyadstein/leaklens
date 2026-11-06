@@ -53,15 +53,18 @@ from .schemas import EvidenceSpan, Hypothesis, ModelCard
 from .semantics import CodeSource
 
 _RANDOM_STATE = 0
-MODEL_VERSION = "leaklens-ai-p5-2026.11"
+MODEL_VERSION = "leaklens-ai-p6-2026.11"
 _MAX_FALSE_POSITIVE_RATE = 0.05
 
 MODEL_LIMITATIONS = (
-    "Trained on an authored synthetic corpus; it is not production-code evidence.",
-    "The locked test is a small authored corpus of 47 cases, not real repositories.",
+    "Trained on an authored synthetic corpus plus 34 Phase 6 idiom cases "
+    "(17 leaky/legitimate pairs).",
+    "The Phase 5 locked test is a small authored corpus of 47 cases, not real repositories.",
+    "The Phase 6 real-world holdout is 48 reviewed units from 12 public repositories; "
+    "44 of them are reconstructions, not verbatim upstream files.",
     "Probabilities are calibrated on 40 validation cases; treat them as approximate.",
     "English identifiers and Python control-flow cues may not transfer to other styles.",
-    "External scanner transfer is a separate check, not an improvement claim.",
+    "External scanner transfer and the real-world holdout are checks, not improvement claims.",
 )
 
 
@@ -300,6 +303,41 @@ def _candidate_specs() -> tuple[tuple[str, Any], ...]:
             make_pipeline(
                 StandardScaler(),
                 LogisticRegression(C=1.0, max_iter=500, random_state=_RANDOM_STATE),
+            ),
+        ),
+        (
+            "logistic_regression_l1",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    C=0.5,
+                    penalty="l1",
+                    solver="liblinear",
+                    max_iter=1000,
+                    random_state=_RANDOM_STATE,
+                ),
+            ),
+        ),
+        (
+            "logistic_regression_balanced",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    C=1.0,
+                    class_weight="balanced",
+                    max_iter=500,
+                    random_state=_RANDOM_STATE,
+                ),
+            ),
+        ),
+        (
+            "random_forest_depth4",
+            RandomForestClassifier(
+                n_estimators=250,
+                max_depth=4,
+                min_samples_leaf=2,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
             ),
         ),
     )
@@ -550,7 +588,7 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
         if key in {"precision", "recall", "f1", "false_positive_rate", "accuracy"}
     }
     card = ModelCard(
-        name="leaklens-ai-p5",
+        name="leaklens-ai-p6",
         kind="calibrated_ensemble"
         if "forest" in selected_name or "trees" in selected_name
         else selected_name,
@@ -740,6 +778,101 @@ def _evidence_line(lines: Sequence[str]) -> int:
     return 1
 
 
+# Feature -> the line-level construct that activates it.  The mapping is
+# deliberately narrow: it is used to point a reviewer at code, not to explain
+# the model causally.  Unknown features fall back to the keyword heuristic.
+_FEATURE_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "fit_before_split": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_transform_before_split": re.compile(r"\.fit_transform\s*\("),
+    "transformer_before_split": re.compile(
+        r"\b(?:StandardScaler|MinMaxScaler|RobustScaler|Normalizer|"
+        r"PowerTransformer|QuantileTransformer|SimpleImputer|KNNImputer|PCA)"
+    ),
+    "encoder_before_split": re.compile(
+        r"\b(?:OneHotEncoder|OrdinalEncoder|TargetEncoder)\b|get_dummies"
+    ),
+    "target_encoder_before_split": re.compile(
+        r"\b(?:TargetEncoder|WOEEncoder|CatBoostEncoder)\b"
+    ),
+    "target_mean_before_split": re.compile(r"groupby\([^)]*\).*(?:mean|agg)\("),
+    "functional_scaling_before_split": re.compile(
+        r"\b(?:scale|normalize|power_transform|quantile_transform|"
+        r"robust_scale|minmax_scale|maxabs_scale)\s*\("
+    ),
+    "manual_scaling_before_split": re.compile(
+        r"[/][^=\n]*\.(?:max|min|std|mean)\s*\(|"
+        r"\([^)]*\.(?:mean|min)\s*\([^)]*\)\s*\)\s*/"
+    ),
+    "full_data_imputation_before_split": re.compile(
+        r"\.fillna\([^)]*\.(?:mode|mean|median|value_counts)\("
+    ),
+    "get_dummies_before_split": re.compile(r"get_dummies\s*\("),
+    "cv_on_test_partition": re.compile(
+        r"cross_val_(?:score|validate|predict)\([^)]*test"
+    ),
+    "group_kfold_without_groups": re.compile(r"GroupKFold\s*\("),
+    "group_boundary_ignored": re.compile(r"train_test_split\s*\("),
+    "repeated_test_scoring": re.compile(r"\.score\(\s*(?:X_)?test"),
+    "frequency_encoding_before_split": re.compile(r"value_counts\(\)"),
+    "default_shuffle_after_sort": re.compile(r"\.sort_values\s*\("),
+    "temporal_order_risk": re.compile(r"train_test_split\s*\("),
+    "future_feature_risk": re.compile(r"(?:shift\s*\(\s*-|bfill|center\s*=\s*True)"),
+    "target_feature_risk": re.compile(r"\[['\"][^'\"]+['\"]\]\s*="),
+    "duplicates_after_split": re.compile(r"drop_duplicates\s*\("),
+    "search_over_pipeline_safe": re.compile(
+        r"(?:GridSearchCV|RandomizedSearchCV)\s*\("
+    ),
+    "pipeline_boundary": re.compile(r"(?:Pipeline|make_pipeline)\s*\("),
+    # Coarse features that still deserve a pointer to code.  These are only
+    # used to cite a line for a reviewer; they do not affect the prediction.
+    "has_fit": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "has_fit_transform": re.compile(r"\.fit_transform\s*\("),
+    "fit_without_split": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_on_train_frame": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_on_test_frame": re.compile(r"\.(?:fit|fit_transform)\s*\(\s*(?:X_)?test"),
+    "cv_on_full_data": re.compile(r"cross_val_|\.split\s*\("),
+    "cross_validation": re.compile(r"cross_val_|\.split\s*\("),
+    "plain_kfold": re.compile(r"\bKFold\s*\("),
+    "has_shuffle": re.compile(r"shuffle\s*=\s*True"),
+    "target_in_assignment": re.compile(r"\b(?:target|label|outcome)\b"),
+    "target_reference": re.compile(r"\b(?:target|label|outcome)\b"),
+    "target_relabel_safe": re.compile(r"\b(?:target|label|outcome)\b"),
+    "time_words": re.compile(r"\b(?:timestamp|datetime|date|time)\b"),
+    "sort_values": re.compile(r"\.sort_values\s*\("),
+    "train_only_marker": re.compile(r"\btrain(?:ing)?\b"),
+    "log_split_position": re.compile(r"train_test_split\s*\(|\.split\s*\("),
+    "test_concat": re.compile(r"\.concat\s*\("),
+}
+
+
+def _signal_lines(
+    lines: Sequence[str],
+    contributions: Sequence[tuple[str, float, float]],
+    *,
+    limit: int = 2,
+) -> list[tuple[int, str]]:
+    """Return distinct code lines that activate the strongest contributions."""
+
+    found: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for name, _value, _importance in contributions:
+        pattern = _FEATURE_EVIDENCE.get(name)
+        if pattern is None:
+            continue
+        for index, line in enumerate(lines, start=1):
+            if index in seen:
+                continue
+            if pattern.search(line) and not line.lstrip().startswith(
+                ("import ", "from ")
+            ):
+                seen.add(index)
+                found.append((index, line.strip()))
+                break
+        if len(found) >= limit:
+            break
+    return found
+
+
 def learned_hypotheses(
     code: Sequence[CodeSource],
     findings: Sequence[Finding] = (),
@@ -784,52 +917,68 @@ def learned_hypotheses(
             contributions = model.top_contributions(context, limit=5)
             line_number = _evidence_line(text.splitlines())
             first_line = text.splitlines()[line_number - 1] if text.splitlines() else ""
+            signal_lines = _signal_lines(context.splitlines(), contributions)
+            primary_line = signal_lines[0][0] if signal_lines else line_number
             evidence = [
                 _evidence(
                     "model",
                     "probability",
-                    f"{label}:{line_number}",
+                    f"{label}:{primary_line}",
                     f"calibrated p(leaky pattern)={probability:.3f}; "
                     f"threshold={cutoff:.2f}; model={MODEL_VERSION}",
-                ),
-                _evidence(
-                    "code",
-                    "pattern",
-                    f"{label}:{line_number}",
-                    first_line or f"code unit {label}",
-                ),
+                )
             ]
+            if signal_lines:
+                for index, snippet in signal_lines:
+                    evidence.append(
+                        _evidence("code", "pattern", f"{label}:{index}", snippet)
+                    )
+            else:
+                evidence.append(
+                    _evidence(
+                        "code",
+                        "pattern",
+                        f"{label}:{line_number}",
+                        first_line or f"code unit {label}",
+                    )
+                )
             for name, value, importance in contributions:
                 evidence.append(
                     _evidence(
                         "model",
                         "feature",
-                        f"{label}:{line_number}",
+                        f"{label}:{primary_line}",
                         f"{name}={value:.2f} (global importance {importance:.3f})",
                     )
                 )
             confidence = min(0.95, 0.45 + 0.40 * probability)
             signal_text = ", ".join(name for name, _value, _c in contributions[:3])
+            top_signal = contributions[0][0] if contributions else "none"
+            excerpt = signal_lines[0][1] if signal_lines else first_line
             digest = hashlib.sha1(
-                f"{label}|{line_number}|{probability:.6f}".encode("utf-8", "replace"),
+                f"{label}|{primary_line}|{probability:.6f}".encode("utf-8", "replace"),
                 usedforsecurity=False,
             ).hexdigest()[:12]
             hypotheses.append(
                 Hypothesis(
                     hypothesis_id=f"hyp-learned-{digest}",
                     concept="learned_leakage_pattern",
-                    title="Learned model sees a leakage-like code pattern",
+                    title=(
+                        "Learned model sees a leakage-like code pattern"
+                        + (f" ({top_signal})" if contributions else "")
+                    ),
                     explanation=(
                         f"A calibrated local ensemble trained on labeled authored "
                         f"pipelines gives this unit p={probability:.3f} for a leakage-like "
                         f"pattern (threshold {cutoff:.2f}). Active signals: "
-                        f"{signal_text or 'none'}. Feature importances are global to the "
+                        f"{signal_text or 'none'}. The cited line is "
+                        f"`{excerpt[:160]}`. Feature importances are global to the "
                         "model, not a causal explanation. This is a statistical hint, not "
                         "a verified finding."
                     ),
                     confidence=round(confidence, 4),
                     evidence=tuple(evidence),
-                    location=f"{label}:{line_number}",
+                    location=f"{label}:{primary_line}",
                     detector="learned",
                     severity_hint="medium" if probability >= 0.85 else "low",
                     corroborates=corroborating,

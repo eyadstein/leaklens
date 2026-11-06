@@ -95,6 +95,31 @@ def test_build_plan_connects_related_observations_without_changing_findings():
     assert findings[0].severity == "high"
 
 
+def test_phase6_finding_kinds_get_specific_root_cause_and_remediation():
+    findings = (
+        Finding("medium", "tuning_on_test_data", "model.py:9", "search on test"),
+        Finding(
+            "low",
+            "notebook_out_of_order_execution",
+            "nb.ipynb",
+            "cells ran out of order",
+        ),
+        Finding(
+            "medium", "group_cv_missing_groups", "model.py:12", "GroupKFold no groups"
+        ),
+    )
+    plan = build_plan(findings, ())
+
+    categories = {group.category for group in plan.root_causes}
+    assert {"tuning", "notebook_order", "grouping"} <= categories
+    notebook = next(
+        group for group in plan.root_causes if group.category == "notebook_order"
+    )
+    assert notebook.remediation.code_hint
+    assert "train_test_split" in notebook.remediation.code_hint
+    assert "Restart the kernel" in " ".join(notebook.remediation.actions)
+
+
 def test_build_plan_handles_clean_inputs_without_claiming_safety():
     plan = build_plan((), ())
 

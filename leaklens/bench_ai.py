@@ -447,8 +447,10 @@ def markdown(data: dict) -> str:
         "## Protocol and data provenance",
         "",
         f"- Model: `{model['name']}` ({model['version']}), {model['features']} features.",
-        f"- Training: {model['train_examples']} authored cases from 9 scenario sources.",
-        f"- Validation: {model['validation_examples']} authored cases from 4 disjoint sources.",
+        f"- Training: {model['train_examples']} authored cases from "
+        f"{corpus['train_sources']} scenario sources.",
+        f"- Validation: {model['validation_examples']} authored cases from "
+        f"{corpus['validation_sources']} disjoint sources.",
         f"- Locked test: {locked['cases']} authored cases from 4 further disjoint sources.",
         f"- Groups: {corpus['groups']} template groups across the development corpus; "
         "grouped folds never split a family.",
@@ -628,14 +630,50 @@ def markdown(data: dict) -> str:
     lines.extend(
         [
             "",
-            "## External transfer to existing scanner cases",
+            "## External transfer to existing scanner cases (development)",
             "",
             f"Cases: {data['external_cases']} (labels from the existing scanner "
-            "benchmark). These cases are not used for training, calibration or "
-            "threshold selection; they are a separate transfer check on different "
-            "code styles.",
+            "benchmark). These cases are not used for fitting, calibration or "
+            "threshold selection. **They were used for Phase 6 error analysis**, "
+            "so the current perfect score is a development result, not independent "
+            "evidence. The frozen real-world holdout, not this set, is the "
+            "generalization check.",
             "",
             *_metric_table(external),
+            "",
+            "### Phase 5 external errors and the Phase 6 response",
+            "",
+            "Phase 5 recorded 6 false positives and 10 named misses on this set "
+            "(the task summary counts 11 misses; only 10 were named in the "
+            "report). Phase 6 added paired authored cases and explicit indicators "
+            "for each family:",
+            "",
+            "| Phase 5 error family | Phase 6 response |",
+            "|---|---|",
+            "| FP: fit inside a KFold loop, scaler fitted per fold | "
+            "`fold_local_fit`, `train_only_transformer_fit` |",
+            "| FP: GridSearchCV over a pipeline with raw `X` | "
+            "`search_over_pipeline_safe` |",
+            "| FP: ColumnTransformer with only one-hot before split | "
+            "`onehot_only_full_data` |",
+            "| FP: KNN imputer fitted on train only | `train_only_transformer_fit` |",
+            "| FP: positive target lag before split | `target_lag_safe` |",
+            "| FN: `scale()` / `normalize()` / `power_transform()` before split | "
+            "`functional_scaling_before_split` |",
+            "| FN: hand-written divide-by-max / column min-max | "
+            "`manual_scaling_before_split` |",
+            "| FN: full-frame `fillna(mode/mean)` | "
+            "`full_data_imputation_before_split` |",
+            "| FN: `get_dummies` on the full frame | `get_dummies_before_split` |",
+            "| FN: CV or repeated scoring on the test partition | "
+            "`cv_on_test_partition`, `repeated_test_scoring` |",
+            "| FN: GroupKFold without `groups` | `group_kfold_without_groups` |",
+            "| FN: frequency encoding from all rows | "
+            "`frequency_encoding_before_split` |",
+            "",
+            "The response is evaluated on the set that motivated it, so it cannot "
+            "be read as an accuracy claim. The Phase 6 real-world holdout exposes "
+            "where the new indicators still over-fire.",
             "",
             "## Threshold sweep on external cases",
             "",

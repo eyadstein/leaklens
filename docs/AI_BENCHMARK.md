@@ -4,13 +4,13 @@ This benchmark measures the **optional, experimental AI layer** only. It is not 
 
 ## Protocol and data provenance
 
-- Model: `logistic_regression` (leaklens-ai-p5-2026.11), 94 features.
-- Training: 145 authored cases from 9 scenario sources.
+- Model: `logistic_regression_balanced` (leaklens-ai-p6-2026.11), 108 features.
+- Training: 179 authored cases from 10 scenario sources.
 - Validation: 40 authored cases from 4 disjoint sources.
 - Locked test: 47 authored cases from 4 further disjoint sources.
-- Groups: 137 template groups across the development corpus; grouped folds never split a family.
-- Threshold: 0.64 (chosen on validation only).
-- train=145 cases/9 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; threshold rule=validation_midpoint.
+- Groups: 154 template groups across the development corpus; grouped folds never split a family.
+- Threshold: 0.50 (chosen on validation only).
+- train=179 cases/10 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; threshold rule=validation_midpoint.
 
 Splits are by **scenario source and template family**, not by random row. The locked test is imported only by this benchmark and its tests; training, feature selection, calibration and threshold selection never import it.
 
@@ -39,14 +39,17 @@ Selection uses grouped CV on training cases followed by validation, with the sam
 
 | Candidate | CV F1 | Validation F1 | Validation FPR |
 |---|---:|---:|---:|
-| `gradient_boosting_depth2` | 0.880 | 1.000 | 0.000 |
-| `gradient_boosting_depth1` | 0.830 | 0.930 | 0.105 |
-| `random_forest_depth6` | 0.817 | 0.933 | 0.158 |
-| `random_forest_unbounded` | 0.822 | 0.930 | 0.105 |
-| `extra_trees_depth8` | 0.854 | 0.955 | 0.105 |
-| `extra_trees_unbounded` | 0.833 | 1.000 | 0.000 |
-| `hist_gradient_boosting` | 0.740 | 0.792 | 0.421 |
-| `logistic_regression` **(selected)** | 0.895 | 1.000 | 0.000 |
+| `gradient_boosting_depth2` | 0.868 | 0.977 | 0.053 |
+| `gradient_boosting_depth1` | 0.806 | 0.955 | 0.105 |
+| `random_forest_depth6` | 0.824 | 0.955 | 0.105 |
+| `random_forest_unbounded` | 0.821 | 0.955 | 0.105 |
+| `extra_trees_depth8` | 0.860 | 0.955 | 0.105 |
+| `extra_trees_unbounded` | 0.832 | 0.955 | 0.105 |
+| `hist_gradient_boosting` | 0.796 | 0.750 | 0.474 |
+| `logistic_regression` | 0.890 | 1.000 | 0.000 |
+| `logistic_regression_l1` | 0.860 | 1.000 | 0.000 |
+| `logistic_regression_balanced` **(selected)** | 0.895 | 1.000 | 0.000 |
+| `random_forest_depth4` | 0.783 | 0.889 | 0.210 |
 
 ## Development results (not the independent test)
 
@@ -54,13 +57,13 @@ Selection uses grouped CV on training cases followed by validation, with the sam
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.897 |
-| Precision | 0.931 |
-| Recall | 0.872 |
-| F1 | 0.901 |
-| Specificity | 0.925 |
-| False-positive rate | 0.075 |
-| TP / FP / FN / TN | 68 / 5 / 10 / 62 |
+| Accuracy | 0.883 |
+| Precision | 0.911 |
+| Recall | 0.863 |
+| F1 | 0.886 |
+| Specificity | 0.905 |
+| False-positive rate | 0.095 |
+| TP / FP / FN / TN | 82 / 8 / 13 / 76 |
 
 ### Validation metrics
 
@@ -80,9 +83,9 @@ Validation is used for architecture selection and threshold choice. Because the 
 
 | Metric | Value |
 |---|---:|
-| `brier` | 0.0098 |
-| `expected_calibration_error` | 0.0580 |
-| `mean_probability` | 0.5575 |
+| `brier` | 0.0088 |
+| `expected_calibration_error` | 0.0655 |
+| `mean_probability` | 0.5330 |
 | `observed_rate` | 0.5250 |
 
 ## Locked independent test (evaluated once)
@@ -103,9 +106,9 @@ The frozen model and frozen threshold are applied to 47 cases from four scenario
 
 | Metric | Value |
 |---|---:|
-| `brier` | 0.0229 |
-| `expected_calibration_error` | 0.0356 |
-| `mean_probability` | 0.5283 |
+| `brier` | 0.0247 |
+| `expected_calibration_error` | 0.0457 |
+| `mean_probability` | 0.5468 |
 | `observed_rate` | 0.5319 |
 
 ### Locked-test metrics by category
@@ -134,21 +137,42 @@ The frozen model and frozen threshold are applied to 47 cases from four scenario
 ### Locked-test mistakes
 
 - No false positives on the locked test.
-- Missed leak: `random split over repeated applicants` (test:credit, p=0.084; signals: log_split_position, fit_on_train_frame, target_reference, has_fit)
+- Missed leak: `random split over repeated applicants` (test:credit, p=0.141; signals: log_split_position, fit_on_train_frame, has_fit, target_reference)
 
-## External transfer to existing scanner cases
+## External transfer to existing scanner cases (development)
 
-Cases: 141 (labels from the existing scanner benchmark). These cases are not used for training, calibration or threshold selection; they are a separate transfer check on different code styles.
+Cases: 141 (labels from the existing scanner benchmark). These cases are not used for fitting, calibration or threshold selection. **They were used for Phase 6 error analysis**, so the current perfect score is a development result, not independent evidence. The frozen real-world holdout, not this set, is the generalization check.
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.879 |
-| Precision | 0.913 |
-| Recall | 0.851 |
-| F1 | 0.881 |
-| Specificity | 0.910 |
-| False-positive rate | 0.090 |
-| TP / FP / FN / TN | 63 / 6 / 11 / 61 |
+| Accuracy | 1.000 |
+| Precision | 1.000 |
+| Recall | 1.000 |
+| F1 | 1.000 |
+| Specificity | 1.000 |
+| False-positive rate | 0.000 |
+| TP / FP / FN / TN | 74 / 0 / 0 / 67 |
+
+### Phase 5 external errors and the Phase 6 response
+
+Phase 5 recorded 6 false positives and 10 named misses on this set (the task summary counts 11 misses; only 10 were named in the report). Phase 6 added paired authored cases and explicit indicators for each family:
+
+| Phase 5 error family | Phase 6 response |
+|---|---|
+| FP: fit inside a KFold loop, scaler fitted per fold | `fold_local_fit`, `train_only_transformer_fit` |
+| FP: GridSearchCV over a pipeline with raw `X` | `search_over_pipeline_safe` |
+| FP: ColumnTransformer with only one-hot before split | `onehot_only_full_data` |
+| FP: KNN imputer fitted on train only | `train_only_transformer_fit` |
+| FP: positive target lag before split | `target_lag_safe` |
+| FN: `scale()` / `normalize()` / `power_transform()` before split | `functional_scaling_before_split` |
+| FN: hand-written divide-by-max / column min-max | `manual_scaling_before_split` |
+| FN: full-frame `fillna(mode/mean)` | `full_data_imputation_before_split` |
+| FN: `get_dummies` on the full frame | `get_dummies_before_split` |
+| FN: CV or repeated scoring on the test partition | `cv_on_test_partition`, `repeated_test_scoring` |
+| FN: GroupKFold without `groups` | `group_kfold_without_groups` |
+| FN: frequency encoding from all rows | `frequency_encoding_before_split` |
+
+The response is evaluated on the set that motivated it, so it cannot be read as an accuracy claim. The Phase 6 real-world holdout exposes where the new indicators still over-fire.
 
 ## Threshold sweep on external cases
 
@@ -156,14 +180,14 @@ This sweep is diagnostic only. The shipped threshold was chosen on validation, n
 
 | Threshold | Precision | Recall | F1 | FPR |
 |---:|---:|---:|---:|---:|
-| 0.30 | 0.886 | 0.946 | 0.915 | 0.134 |
-| 0.40 | 0.887 | 0.851 | 0.869 | 0.119 |
-| 0.50 | 0.887 | 0.851 | 0.869 | 0.119 |
-| 0.60 | 0.913 | 0.851 | 0.881 | 0.090 |
-| 0.63 | 0.913 | 0.851 | 0.881 | 0.090 |
-| 0.70 | 0.913 | 0.851 | 0.881 | 0.090 |
-| 0.80 | 0.938 | 0.811 | 0.870 | 0.060 |
-| 0.90 | 0.967 | 0.797 | 0.874 | 0.030 |
+| 0.30 | 0.937 | 1.000 | 0.967 | 0.075 |
+| 0.40 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.50 | 1.000 | 1.000 | 1.000 | 0.000 |
+| 0.60 | 1.000 | 0.987 | 0.993 | 0.000 |
+| 0.63 | 1.000 | 0.987 | 0.993 | 0.000 |
+| 0.70 | 1.000 | 0.973 | 0.986 | 0.000 |
+| 0.80 | 1.000 | 0.973 | 0.986 | 0.000 |
+| 0.90 | 1.000 | 0.973 | 0.986 | 0.000 |
 
 ## Semantic-rule regression set
 
@@ -176,41 +200,26 @@ This sweep is diagnostic only. The shipped threshold was chosen on validation, n
 
 | Feature | Importance |
 |---|---:|
-| `target_feature_risk` | 0.0416 |
-| `group_boundary_ignored` | 0.0363 |
-| `group_aggregate_before_split` | 0.0335 |
-| `group_columns_used` | 0.0323 |
-| `identifier_feature_risk` | 0.0318 |
-| `future_feature_risk` | 0.0307 |
-| `dedupe_before_split` | 0.0302 |
-| `duplicates_after_split` | 0.0266 |
-| `shuffle_false` | 0.0254 |
-| `target_relabel_safe` | 0.0232 |
-| `manual_full_data_stats` | 0.0222 |
-| `unsafe_resampling` | 0.0218 |
+| `target_feature_risk` | 0.0332 |
+| `group_boundary_ignored` | 0.0310 |
+| `group_aggregate_before_split` | 0.0281 |
+| `group_columns_used` | 0.0274 |
+| `future_feature_risk` | 0.0270 |
+| `identifier_feature_risk` | 0.0263 |
+| `dedupe_before_split` | 0.0242 |
+| `cv_on_full_data` | 0.0226 |
+| `duplicates_after_split` | 0.0220 |
+| `manual_full_data_stats` | 0.0192 |
+| `fold_local_fit` | 0.0188 |
+| `fit_before_split` | 0.0185 |
 
 Global importance is not a causal explanation for any single prediction.
 
 ## External false-positive analysis
 
-- Clean case flagged: `fit inside KFold loop` (p=0.999)
-- Clean case flagged: `GridSearchCV over a pipeline with raw X` (p=0.852)
-- Clean case flagged: `ColumnTransformer with only one-hot before split` (p=0.734)
-- Clean case flagged: `scaler fitted per fold inside the loop` (p=0.779)
-- Clean case flagged: `knn imputer train only` (p=0.825)
-- Clean case flagged: `positive target lag before split` (p=0.961)
+- No clean external cases were flagged at the selected threshold.
 
-Leaky cases missed:
-- `scale() before split` (p=0.336)
-- `divide by max before split` (p=0.336)
-- `column max scaling before split` (p=0.336)
-- `power_transform() on all data before split` (p=0.336)
-- `dataframe mode fill before split` (p=0.184)
-- `get_dummies on full data before split` (p=0.336)
-- `cross-validation on the test partition` (p=0.018)
-- `group CV without groups` (p=0.346)
-- `repeated scoring on the test partition` (p=0.053)
-- `frequency encoding from all rows before split` (p=0.008)
+No leaky external cases were missed at the selected threshold.
 
 ## Overfitting checks
 
@@ -221,11 +230,12 @@ Leaky cases missed:
 
 ## Limitations
 
-- Trained on an authored synthetic corpus; it is not production-code evidence.
-- The locked test is a small authored corpus of 47 cases, not real repositories.
+- Trained on an authored synthetic corpus plus 34 Phase 6 idiom cases (17 leaky/legitimate pairs).
+- The Phase 5 locked test is a small authored corpus of 47 cases, not real repositories.
+- The Phase 6 real-world holdout is 48 reviewed units from 12 public repositories; 44 of them are reconstructions, not verbatim upstream files.
 - Probabilities are calibrated on 40 validation cases; treat them as approximate.
 - English identifiers and Python control-flow cues may not transfer to other styles.
-- External scanner transfer is a separate check, not an improvement claim.
+- External scanner transfer and the real-world holdout are checks, not improvement claims.
 - The corpus is authored and small; it is a regression corpus, not production evidence.
 - The semantic rules are name and control-flow heuristics, not a proof of safety.
 - External transfer is measured on a synthetic/scanner benchmark, not production data.
