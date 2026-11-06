@@ -269,6 +269,47 @@ def test_measured_metrics_are_reported_with_a_model_card():
     assert "Grouped" in model.card.evaluation
 
 
+def test_runtime_path_fits_the_frozen_candidate_and_matches_the_benchmark():
+    reset_model_cache()
+    runtime_evaluation, runtime_model = get_model(compare_candidates=False)
+    reset_model_cache()
+    full_evaluation, full_model = get_model()
+
+    # Only the benchmark pays for the full comparison.
+    assert len(runtime_evaluation.candidates) == 1
+    assert runtime_evaluation.candidates[0]["name"] == learned._FROZEN_CANDIDATE
+    assert len(full_evaluation.candidates) == 11
+
+    cases = (
+        list(development_cases())
+        + list(LOCKED_TEST_CASES)
+        + list(learned._external_cases())
+    )
+    matrix = np.vstack(
+        [
+            model_features(case.code if hasattr(case, "code") else case[1])
+            for case in cases
+        ]
+    )
+    if full_evaluation.model_name == learned._FROZEN_CANDIDATE:
+        # On the reference scikit-learn release the frozen winner is also the
+        # validation winner, so both paths must be numerically identical.
+        np.testing.assert_array_equal(
+            runtime_model.predict_matrix(matrix), full_model.predict_matrix(matrix)
+        )
+        assert runtime_model.threshold == full_model.threshold
+        assert runtime_model.card.external == full_model.card.external
+
+    # The frozen model must be reproducible from a clean cache even when a
+    # scikit-learn release ranks a tied candidate differently.
+    reset_model_cache()
+    _second_evaluation, second_model = get_model(compare_candidates=False)
+    np.testing.assert_array_equal(
+        runtime_model.predict_matrix(matrix), second_model.predict_matrix(matrix)
+    )
+    assert second_model.threshold == runtime_model.threshold
+
+
 def test_locked_independent_test_meets_the_phase5_targets():
     reset_model_cache()
     data = evaluate_locked_test()

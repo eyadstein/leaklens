@@ -248,7 +248,7 @@ def evaluate_semantics() -> dict[str, object]:
 
 
 def _threshold_sweep() -> list[dict[str, float]]:
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     cases = _external_cases()
     matrix = np.vstack([model_features(code) for _n, code, _l in cases])
     labels = np.asarray([int(leaky) for _n, _code, leaky in cases], dtype=int)
@@ -311,7 +311,8 @@ def _split_integrity() -> dict[str, object]:
 
 
 def evaluate() -> dict[str, object]:
-    evaluation, model = get_model()
+    comparison, _comparison_model = get_model()
+    evaluation, model = get_model(compare_candidates=False)
     external_cases = _external_cases()
     external_matrix = np.vstack(
         [model_features(code) for _n, code, _l in external_cases]
@@ -367,7 +368,7 @@ def evaluate() -> dict[str, object]:
             "validation_examples": evaluation.validation_examples,
         },
         "protocol": evaluation.protocol,
-        "candidates": list(evaluation.candidates),
+        "candidates": list(comparison.candidates),
         "train_out_of_fold": evaluation.train_metrics,
         "validation": evaluation.metrics,
         "calibration": evaluation.calibration,

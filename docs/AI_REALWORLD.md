@@ -229,7 +229,7 @@ The Phase 5 locked test is unchanged from Phase 5. The scanner-benchmark transfe
 
 ## Candidate comparison (development data only)
 
-Every candidate is trained on the same development corpus, calibrated from grouped out-of-fold scores and scored with the same threshold rule. Selection uses validation F1 and never the real-world holdout.
+Every candidate is trained on the same development corpus, calibrated from grouped out-of-fold scores and scored with the same threshold rule. Selection uses validation F1 and never the real-world holdout. The shipped runtime model is the class-balanced logistic regression frozen after Phase 6; the winner shown here is what the development pipeline would pick in this scikit-learn version.
 
 | Candidate | CV F1 | Validation F1 | Validation FPR |
 |---|---:|---:|---:|
@@ -242,7 +242,7 @@ Every candidate is trained on the same development corpus, calibrated from group
 | `hist_gradient_boosting` | 0.796 | 0.750 | 0.474 |
 | `logistic_regression` | 0.890 | 1.000 | 0.000 |
 | `logistic_regression_l1` | 0.860 | 1.000 | 0.000 |
-| `logistic_regression_balanced` **(selected)** | 0.895 | 1.000 | 0.000 |
+| `logistic_regression_balanced` **(validation winner)** | 0.895 | 1.000 | 0.000 |
 | `random_forest_depth4` | 0.783 | 0.889 | 0.210 |
 
 ## Top global signals

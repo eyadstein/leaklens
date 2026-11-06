@@ -10,7 +10,7 @@ This benchmark measures the **optional, experimental AI layer** only. It is not 
 - Locked test: 47 authored cases from 4 further disjoint sources.
 - Groups: 154 template groups across the development corpus; grouped folds never split a family.
 - Threshold: 0.50 (chosen on validation only).
-- train=179 cases/10 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; threshold rule=validation_midpoint.
+- train=179 cases/10 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; candidate selection frozen after validation; threshold rule=validation_midpoint.
 
 Splits are by **scenario source and template family**, not by random row. The locked test is imported only by this benchmark and its tests; training, feature selection, calibration and threshold selection never import it.
 

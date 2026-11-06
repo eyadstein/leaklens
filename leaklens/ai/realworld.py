@@ -249,7 +249,7 @@ def evaluate_public_notebooks() -> dict[str, object]:
 
     matrix = np.vstack([model_features(str(case["code"])) for case in cases])
     labels = np.asarray([int(bool(case["leaky"])) for case in cases], dtype=int)
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     probabilities = model.predict_matrix(matrix)
     predicted = (probabilities >= model.threshold).astype(int)
     metrics = _metrics(labels, predicted)
@@ -293,7 +293,7 @@ def evaluate_realworld(*, bootstrap: int = 2000, seed: int = 0) -> dict[str, obj
     cases = holdout_cases()
     matrix = np.vstack([model_features(case.code) for case in cases])
     labels = np.asarray([int(case.leaky) for case in cases], dtype=int)
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     probabilities = model.predict_matrix(matrix)
     predicted = (probabilities >= model.threshold).astype(int)
     metrics = _metrics(labels, predicted)

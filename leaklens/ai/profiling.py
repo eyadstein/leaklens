@@ -54,10 +54,17 @@ def profile_holdout(bootstrap: int = 5) -> dict[str, object]:
 
     tracemalloc.start()
     started = time.perf_counter()
-    evaluation, model = get_model()
+    evaluation, model = get_model(compare_candidates=False)
     training_seconds = time.perf_counter() - started
     training_peak = tracemalloc.get_traced_memory()[1]
     tracemalloc.stop()
+
+    # The runtime path fits only the frozen candidate.  Time the full
+    # comparison separately because the benchmark, not a request, pays for it.
+    reset_model_cache()
+    started = time.perf_counter()
+    full_evaluation, _full_model = get_model()
+    comparison_seconds = time.perf_counter() - started
 
     extraction: list[float] = []
     matrices = []
@@ -90,6 +97,7 @@ def profile_holdout(bootstrap: int = 5) -> dict[str, object]:
         "features": len(matrix[0]),
         "cold_training_seconds": round(training_seconds, 4),
         "cold_training_peak_bytes": int(training_peak),
+        "candidate_comparison_seconds": round(comparison_seconds, 4),
         "extraction_total_seconds": round(extraction_seconds, 6),
         "extraction_median_ms": round(statistics.median(extraction) * 1000, 4),
         "extraction_p95_ms": round(_percentile(extraction, 0.95) * 1000, 4),
@@ -99,7 +107,8 @@ def profile_holdout(bootstrap: int = 5) -> dict[str, object]:
         "inference_median_ms": round(statistics.median(inference) * 1000, 6),
         "inference_p95_ms": round(_percentile(inference, 0.95) * 1000, 6),
         "inference_peak_bytes": int(inference_peak),
-        "model_candidates": len(evaluation.candidates),
+        "model_candidates": len(full_evaluation.candidates),
+        "runtime_candidates": len(evaluation.candidates),
         "model_threshold": evaluation.threshold,
         "model_name": evaluation.model_name,
         "footprint": _model_footprint(model),
@@ -120,7 +129,7 @@ def profile_project(root: Path | None = None, *, limit: int = 400) -> dict[str, 
     if not sources:
         return {"files": 0}
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     per_file: list[float] = []
     tracemalloc.start()
     started = time.perf_counter()

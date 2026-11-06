@@ -324,7 +324,8 @@ def build_report(
     # ------------------------------------------------------------------
     # Authored and synthetic comparison
     # ------------------------------------------------------------------
-    evaluation, model = get_model()
+    comparison, _comparison_model = get_model()
+    evaluation, model = get_model(compare_candidates=False)
     locked = evaluate_locked_test()
     external_cases = _external_cases()
     external_matrix = np.vstack(
@@ -383,14 +384,19 @@ def build_report(
             "",
             "Every candidate is trained on the same development corpus, calibrated "
             "from grouped out-of-fold scores and scored with the same threshold rule. "
-            "Selection uses validation F1 and never the real-world holdout.",
+            "Selection uses validation F1 and never the real-world holdout. The "
+            "shipped runtime model is the class-balanced logistic regression frozen "
+            "after Phase 6; the winner shown here is what the development pipeline "
+            "would pick in this scikit-learn version.",
             "",
             "| Candidate | CV F1 | Validation F1 | Validation FPR |",
             "|---|---:|---:|---:|",
         ]
     )
-    for row in evaluation.candidates:
-        marker = " **(selected)**" if row["name"] == evaluation.model_name else ""
+    for row in comparison.candidates:
+        marker = (
+            " **(validation winner)**" if row["name"] == comparison.model_name else ""
+        )
         lines.append(
             f"| `{row['name']}`{marker} | {row['cv_f1']:.3f} | "
             f"{row['validation_f1']:.3f} | "
@@ -406,7 +412,7 @@ def build_report(
             "|---|---:|",
         ]
     )
-    _evaluation, frozen_model = get_model()
+    _evaluation, frozen_model = get_model(compare_candidates=False)
     for index in np.argsort(frozen_model.feature_importances)[::-1][:12]:
         lines.append(
             f"| `{MODEL_FEATURE_NAMES[int(index)]}` | "
@@ -433,8 +439,9 @@ def build_report(
                 f"- Python: {measured['python']}",
                 f"- Platform: `{measured['platform']}`",
                 f"- Model: `{measured['model_name']}`, threshold "
-                f"{measured['model_threshold']:.2f}, "
-                f"{measured['model_candidates']} candidates evaluated at fit time",
+                f"{measured['model_threshold']:.2f}; "
+                f"{measured['runtime_candidates']} candidate fitted at request time "
+                f"({measured['model_candidates']} compared when the benchmark is built)",
                 f"- Model footprint: `{measured['footprint']}`",
                 "",
                 "## Holdout workload",
@@ -443,10 +450,12 @@ def build_report(
                 "|---|---:|",
                 f"| Cases | {measured['cases']} |",
                 f"| Model features | {measured['features']} |",
-                f"| Cold training (all candidates) | "
-                f"{measured['cold_training_seconds']:.2f} s |",
+                f"| Cold training (shipped model) | "
+                f"{measured['cold_training_seconds']:.3f} s |",
                 f"| Cold training peak memory | "
                 f"{measured['cold_training_peak_bytes'] / 1024 / 1024:.2f} MiB |",
+                f"| Full candidate comparison (11 models) | "
+                f"{measured['candidate_comparison_seconds']:.2f} s |",
                 f"| Feature extraction, total | "
                 f"{measured['extraction_total_seconds'] * 1000:.2f} ms |",
                 f"| Feature extraction, median per unit | "

@@ -132,9 +132,12 @@ repository-cluster intervals and calibration. It is not a production-accuracy cl
 
 The shipped threshold is chosen on validation only (0.50 for the current model) and
 probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at
-import time. Metrics can vary slightly between scikit-learn releases because the fitted model
-is not bit-identical. [AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory
-on the holdout and on a representative project scan.
+import time. The eleven candidates are compared when the benchmark is built; a request fits
+only the class-balanced logistic regression frozen after Phase 6 validation, so a cold opt-in
+API call stays well inside the server's time budget. Metrics can vary slightly between
+scikit-learn releases because the fitted model is not bit-identical.
+[AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory on the holdout and on a
+representative project scan.
 
 ## Limitations
 

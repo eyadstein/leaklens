@@ -56,6 +56,12 @@ _RANDOM_STATE = 0
 MODEL_VERSION = "leaklens-ai-p6-2026.11"
 _MAX_FALSE_POSITIVE_RATE = 0.05
 
+# Selection frozen after Phase 6 validation.  The runtime path fits only this
+# candidate so a cold API request never trains all eleven; the benchmark still
+# compares every candidate and reports when a scikit-learn release ranks a tied
+# variant differently.
+_FROZEN_CANDIDATE = "logistic_regression_balanced"
+
 MODEL_LIMITATIONS = (
     "Trained on an authored synthetic corpus plus 34 Phase 6 idiom cases "
     "(17 leaky/legitimate pairs).",
@@ -515,7 +521,9 @@ def _groups(cases: Sequence[CorpusCase]) -> np.ndarray:
     return np.asarray([case.group for case in cases], dtype=object)
 
 
-def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+def _evaluate(
+    *, include_external: bool = True, candidate: str | None = None
+) -> tuple[ModelEvaluation, LearnedModel]:
     train = training_cases()
     validation = validation_cases()
     development = development_cases()
@@ -528,13 +536,44 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
     development_labels = _labels(development)
 
     folds, splits = _grouped_folds(_groups(train), train_labels)
-    candidate_rows, selected_name, train_oof = _candidate_results(
-        train_matrix,
-        train_labels,
-        folds,
-        validation_matrix,
-        validation_labels,
-    )
+    if candidate is None:
+        candidate_rows, selected_name, train_oof = _candidate_results(
+            train_matrix,
+            train_labels,
+            folds,
+            validation_matrix,
+            validation_labels,
+        )
+    else:
+        # Runtime path: fit the frozen winner only.  The remaining candidates are
+        # still compared by the benchmark, never by a user-facing request.
+        specs = dict(_candidate_specs())
+        if candidate not in specs:
+            raise ValueError(f"unknown candidate {candidate!r}")
+        selected_name = candidate
+        oof = _oof_probabilities(specs[candidate], train_matrix, train_labels, folds)
+        train_oof = {candidate: oof}
+        cv = _metrics(train_labels, (oof >= 0.5).astype(int))
+        calibrated = _fit_calibrated(specs[candidate], train_matrix, train_labels, oof)
+        validation_row = _metrics(
+            validation_labels,
+            (calibrated.predict_proba(validation_matrix) >= 0.5).astype(int),
+        )
+        candidate_rows = [
+            {
+                "name": candidate,
+                "cv_accuracy": cv["accuracy"],
+                "cv_precision": cv["precision"],
+                "cv_recall": cv["recall"],
+                "cv_f1": cv["f1"],
+                "cv_false_positive_rate": cv["false_positive_rate"],
+                "validation_accuracy": validation_row["accuracy"],
+                "validation_precision": validation_row["precision"],
+                "validation_recall": validation_row["recall"],
+                "validation_f1": validation_row["f1"],
+                "validation_false_positive_rate": validation_row["false_positive_rate"],
+            }
+        ]
     selected = dict(_candidate_specs())[selected_name]
 
     calibrated_train = _fit_calibrated(
@@ -576,11 +615,16 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
             )
 
     stats = corpus_stats()
+    selection = (
+        "candidate selection frozen after validation"
+        if candidate is not None
+        else "candidate comparison repeated on grouped CV + validation"
+    )
     protocol = (
         f"train={stats['train_cases']} cases/{stats['train_sources']} sources; "
         f"validation={stats['validation_cases']} cases/{stats['validation_sources']} "
-        "sources; locked test imported only by the benchmark; threshold rule="
-        f"{threshold_rule}."
+        "sources; locked test imported only by the benchmark; "
+        f"{selection}; threshold rule={threshold_rule}."
     )
     external_rates = {
         key: value
@@ -639,22 +683,40 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
 
 _lock = threading.Lock()
 _cached: tuple[ModelEvaluation, LearnedModel] | None = None
+_runtime_cached: tuple[ModelEvaluation, LearnedModel] | None = None
 
 
 def evaluate_model(*, include_external: bool = True) -> ModelEvaluation:
     return get_model(include_external=include_external)[0]
 
 
-def get_model(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+def get_model(
+    *, include_external: bool = True, compare_candidates: bool = True
+) -> tuple[ModelEvaluation, LearnedModel]:
     """Train once, cache in memory, and return the evaluation plus the model.
+
+    ``compare_candidates=False`` is the runtime path used by the public API: it
+    fits only the candidate frozen after validation instead of retraining all
+    eleven, which keeps a cold opt-in AI request inside a small server's time
+    budget.  Both paths use the same corpus, grouped folds, calibration and
+    threshold rule; where the full comparison picks the same winner they are
+    numerically identical.  The benchmark always asks for the full comparison.
 
     Nothing is written to disk and no serialized model is loaded, so a tampered
     file cannot execute code.  The cache is guarded because the public API may
     serve concurrent requests.
     """
 
-    global _cached
+    global _cached, _runtime_cached
     with _lock:
+        if not compare_candidates:
+            if _runtime_cached is None or (
+                include_external and not _runtime_cached[0].external
+            ):
+                _runtime_cached = _evaluate(
+                    include_external=include_external, candidate=_FROZEN_CANDIDATE
+                )
+            return _runtime_cached
         if _cached is None or (include_external and not _cached[0].external):
             _cached = _evaluate(include_external=include_external)
         return _cached
@@ -663,9 +725,10 @@ def get_model(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
 def reset_model_cache() -> None:
     """Testing helper.  Never needed at runtime."""
 
-    global _cached
+    global _cached, _runtime_cached
     with _lock:
         _cached = None
+        _runtime_cached = None
 
 
 def evaluate_locked_test() -> dict[str, object]:
@@ -677,7 +740,7 @@ def evaluate_locked_test() -> dict[str, object]:
 
     from .corpus_test import LOCKED_TEST_CASES
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     matrix = _matrix(LOCKED_TEST_CASES)
     labels = _labels(LOCKED_TEST_CASES)
     probabilities = model.predict_matrix(matrix)
@@ -881,7 +944,7 @@ def learned_hypotheses(
 ) -> tuple[Hypothesis, ...]:
     """Return at most one learned hypothesis per source unit above threshold."""
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     cutoff = model.threshold if threshold is None else float(threshold)
     known_kinds = {finding.kind for finding in findings}
     corroborating = next(
