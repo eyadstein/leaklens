@@ -18,7 +18,8 @@ claim that the model understands arbitrary production code.
 from __future__ import annotations
 
 from .corpus_phase6 import PHASE6_CASES
-from .corpus_types import LOCKED_TEST, TRAIN, VALIDATION, CorpusCase
+from .corpus_phase7 import PHASE7_CASES, PHASE7_HOLDOUT_CASES
+from .corpus_types import HOLDOUT, LOCKED_TEST, TRAIN, VALIDATION, CorpusCase
 from .corpus_validation import VALIDATION_CASES
 
 _SPLIT = "from sklearn.model_selection import train_test_split\n"
@@ -1567,13 +1568,21 @@ _add(
 
 
 _CASES.extend(PHASE6_CASES)
+_CASES.extend(PHASE7_CASES)
+
+
+def phase7_holdout_cases() -> tuple[CorpusCase, ...]:
+    """Return the frozen Phase 7 holdout.  Never used for fitting."""
+
+    return PHASE7_HOLDOUT_CASES
 
 
 def corpus_cases(split: str | None = None) -> tuple[CorpusCase, ...]:
     """Return development cases, or only one split.
 
     ``None`` means train + validation.  The locked test set lives in
-    :mod:`leaklens.ai.corpus_test` and is deliberately not importable from here.
+    :mod:`leaklens.ai.corpus_test` and the frozen Phase 7 holdout lives in
+    :mod:`leaklens.ai.corpus_phase7`; neither is part of the development corpus.
     """
 
     development = tuple(_CASES) + VALIDATION_CASES
@@ -1583,6 +1592,8 @@ def corpus_cases(split: str | None = None) -> tuple[CorpusCase, ...]:
         return tuple(_CASES)
     if split == VALIDATION:
         return VALIDATION_CASES
+    if split == HOLDOUT:
+        return PHASE7_HOLDOUT_CASES
     raise ValueError(f"unknown corpus split: {split}")
 
 
@@ -1615,6 +1626,7 @@ def corpus_stats() -> dict[str, object]:
     train = _stats(tuple(_CASES))
     validation = _stats(VALIDATION_CASES)
     development = _stats(development_cases())
+    holdout = _stats(PHASE7_HOLDOUT_CASES)
     return {
         **development,
         "train_cases": train["cases"],
@@ -1627,10 +1639,16 @@ def corpus_stats() -> dict[str, object]:
         "validation_groups": validation["groups"],
         "train_sources": train["sources"],
         "validation_sources": validation["sources"],
+        "holdout_cases": holdout["cases"],
+        "holdout_leaky": holdout["leaky"],
+        "holdout_legitimate": holdout["legitimate"],
+        "holdout_groups": holdout["groups"],
+        "holdout_sources": holdout["sources"],
     }
 
 
 __all__ = [
+    "HOLDOUT",
     "LOCKED_TEST",
     "TRAIN",
     "VALIDATION",
@@ -1638,6 +1656,7 @@ __all__ = [
     "corpus_cases",
     "corpus_stats",
     "development_cases",
+    "phase7_holdout_cases",
     "training_cases",
     "validation_cases",
 ]

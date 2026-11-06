@@ -163,7 +163,9 @@ def test_frozen_model_scores_the_holdout_within_reported_bounds():
         "verbatim_excerpt",
     }
     assert data["model"]["features"] == 108
-    assert data["model"]["threshold"] == 0.5
+    # The shipped threshold is chosen on authored validation only; it is 0.53
+    # after the Phase 7 rebuild. The Phase 6 report stays a historical record.
+    assert data["model"]["threshold"] == 0.53
     assert data["calibration"]["brier"] <= 0.5
 
 

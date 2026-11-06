@@ -13,6 +13,7 @@ from leaklens.ai.corpus import (
     corpus_cases,
     corpus_stats,
     development_cases,
+    phase7_holdout_cases,
     training_cases,
     validation_cases,
 )
@@ -56,30 +57,55 @@ def test_corpus_is_grouped_labeled_and_split_by_source():
     cases = corpus_cases()
 
     assert stats == {
-        "cases": 219,
-        "leaky": 116,
-        "legitimate": 103,
-        "groups": 154,
-        "leaky_groups": 87,
-        "legitimate_groups": 84,
-        "sources": 14,
-        "train_cases": 179,
-        "train_leaky": 95,
-        "train_legitimate": 84,
-        "train_groups": 114,
+        "cases": 259,
+        "leaky": 136,
+        "legitimate": 123,
+        "groups": 174,
+        "leaky_groups": 107,
+        "legitimate_groups": 104,
+        "sources": 19,
+        "train_cases": 219,
+        "train_leaky": 115,
+        "train_legitimate": 104,
+        "train_groups": 134,
         "validation_cases": 40,
         "validation_leaky": 21,
         "validation_legitimate": 19,
         "validation_groups": 40,
-        "train_sources": 10,
+        "train_sources": 15,
         "validation_sources": 4,
+        "holdout_cases": 12,
+        "holdout_leaky": 6,
+        "holdout_legitimate": 6,
+        "holdout_groups": 6,
+        "holdout_sources": 5,
     }
-    assert len(cases) == 219
+    assert len(cases) == 259
     assert all(case.name and case.code and case.category for case in cases)
     assert all(case.split in {"train", "validation"} for case in cases)
     assert {case.split for case in training_cases()} == {"train"}
     assert {case.split for case in validation_cases()} == {"validation"}
     assert {case.split for case in LOCKED_TEST_CASES} == {"test"}
+
+
+def test_phase7_holdout_is_frozen_and_disjoint_from_development():
+    development = development_cases()
+    holdout = phase7_holdout_cases()
+
+    assert len(holdout) == 12
+    assert {case.split for case in holdout} == {"holdout"}
+    assert {case.source for case in holdout}.isdisjoint(
+        {case.source for case in development}
+    )
+    assert {case.group for case in holdout}.isdisjoint(
+        {case.group for case in development}
+    )
+    # The holdout must not leak into the development corpus or its stats.
+    assert {case.code for case in holdout}.isdisjoint(
+        {case.code for case in development}
+    )
+    assert corpus_stats()["holdout_cases"] == 12
+    assert all(case.name and case.code and case.category for case in holdout)
 
 
 def test_locked_test_is_disjoint_from_development_by_source_and_group():
@@ -235,9 +261,9 @@ def test_measured_metrics_are_reported_with_a_model_card():
     _evaluation, model = get_model()
 
     assert evaluation.examples == 40
-    assert evaluation.train_examples == 179
+    assert evaluation.train_examples == 219
     assert evaluation.validation_examples == 40
-    assert evaluation.groups == 154
+    assert evaluation.groups == 174
     assert evaluation.folds == 5
     assert 0.05 <= evaluation.threshold <= 0.95
     assert evaluation.model_name in {row["name"]: row for row in evaluation.candidates}
@@ -257,10 +283,10 @@ def test_measured_metrics_are_reported_with_a_model_card():
     assert "validation" in evaluation.protocol
     assert "locked test" in evaluation.protocol
 
-    assert model.card.name == "leaklens-ai-p6"
+    assert model.card.name == "leaklens-ai-p7"
     assert model.card.version == learned.MODEL_VERSION
     assert model.card.features == 108
-    assert model.card.training_examples == 219
+    assert model.card.training_examples == 259
     assert model.card.validation_examples == 40
     assert model.card.calibration
     assert model.card.candidates
@@ -395,7 +421,8 @@ def test_learned_hypotheses_are_optional_evidence_bound_and_not_certain():
             continue
         line_number = int(span.location.rsplit(":", 1)[1])
         assert LEAKY.splitlines()[line_number - 1].strip() == span.excerpt
-    assert "(" in item.title and item.title.endswith(")")
+    assert "(" in item.title
+    assert item.title.endswith(")") or item.title.endswith("[needs review]")
 
 
 def test_learned_hypotheses_can_corroborate_a_deterministic_finding():
@@ -478,3 +505,148 @@ def test_training_never_serializes_the_model(tmp_path, monkeypatch):
     evaluate_model()
 
     assert not list(tmp_path.iterdir())
+
+
+def test_local_contributions_are_signed_and_only_cite_active_features():
+    _evaluation, model = get_model()
+    leaky_contributions = model.local_contributions(LEAKY, limit=8)
+    safe_contributions = model.local_contributions(SAFE, limit=8)
+
+    assert leaky_contributions
+    assert any(contribution > 0 for _name, _value, contribution in leaky_contributions)
+    assert any(contribution < 0 for _name, _value, contribution in safe_contributions)
+    # Local attribution skips features that are zero for this unit, so a
+    # globally important feature absent here is never cited.
+    assert all(value != 0.0 for _name, value, _contribution in leaky_contributions)
+    assert all(value != 0.0 for _name, value, _contribution in safe_contributions)
+
+    # The alias kept for callers returns the same local evidence.
+    assert model.top_contributions(LEAKY, limit=8) == leaky_contributions
+
+
+def test_hypotheses_cite_local_not_global_evidence():
+    hypotheses = learned_hypotheses((CodeSource(label="model.py", source=LEAKY),))
+    item = hypotheses[0]
+
+    feature_spans = [span for span in item.evidence if span.kind == "feature"]
+    assert feature_spans
+    assert any(
+        "local supports log-odds" in span.excerpt
+        or "local opposes log-odds" in span.excerpt
+        for span in feature_spans
+    )
+    assert all("global importance" not in span.excerpt for span in item.evidence)
+    assert any(span.kind == "indicator" for span in item.evidence)
+    assert "local log-odds" in item.explanation
+
+
+def test_uncertain_units_are_labelled_for_review_with_lower_confidence():
+    _evaluation, model = get_model()
+    probability = model.predict_proba(LEAKY)
+    item = learned_hypotheses(
+        (CodeSource(label="model.py", source=LEAKY),),
+        threshold=probability - 0.01,
+    )[0]
+
+    assert item.title.endswith("[needs review]")
+    assert "uncertain" in item.explanation
+    assert "margin" in item.explanation
+    assert item.confidence <= 0.70
+    assert item.severity_hint == "low"
+
+
+def test_runtime_gate_suppresses_shape_only_scores(monkeypatch):
+    class _HighScoreModel:
+        threshold = 0.5
+
+        def predict_proba(self, _source):
+            return 0.99
+
+        def local_contributions(self, _source, limit=5):
+            return ()
+
+    monkeypatch.setattr(
+        learned, "get_model", lambda **_kwargs: (None, _HighScoreModel())
+    )
+
+    shape_only = (
+        "from sklearn.preprocessing import StandardScaler\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "scaled = StandardScaler()\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+    )
+    assert learned._active_risk_features(shape_only) == ()
+    assert (
+        learned.learned_hypotheses((CodeSource(label="shape.py", source=shape_only),))
+        == ()
+    )
+
+    # A deterministic corroborating finding overrides the gate, because the
+    # deterministic scanner is authoritative.
+    from leaklens.leakage import Finding
+
+    finding = Finding(
+        "high", "preprocess_before_split", "shape.py:3", "fit before split"
+    )
+    hypotheses = learned.learned_hypotheses(
+        (CodeSource(label="shape.py", source=shape_only),), (finding,)
+    )
+    assert hypotheses
+    assert hypotheses[0].corroborates == "preprocess_before_split"
+
+
+def test_phase7_guards_recognise_lookalikes():
+    by_group: dict[str, dict[bool, object]] = {}
+    for case in development_cases():
+        if case.group.startswith("p7_"):
+            by_group.setdefault(case.group, {})[case.leaky] = case
+
+    def active(case) -> set[str]:
+        return {
+            FEATURE_NAMES[index]
+            for index, value in enumerate(extract_features(case.code))
+            if value
+        }
+
+    fold_safe = active(by_group["p7_scaler_fold_loop"][False])
+    assert "fold_local_fit" in fold_safe
+    assert "unsafe_preprocessing" not in fold_safe
+    assert "unsafe_preprocessing" in active(by_group["p7_scaler_fold_loop"][True])
+
+    target_safe = active(by_group["p7_label_encode_target"][False])
+    assert "target_relabel_safe" in target_safe
+    assert "encoder_before_split" not in target_safe
+    assert "encoder_before_split" in active(by_group["p7_label_encode_target"][True])
+
+    sort_safe = active(by_group["p7_sort_report"][False])
+    assert "temporal_order_risk" not in sort_safe
+    assert "default_shuffle_after_sort" not in sort_safe
+    sort_leaky = active(by_group["p7_sort_report"][True])
+    assert "default_shuffle_after_sort" in sort_leaky
+
+    lag_safe = active(by_group["p7_forward_lag"][False])
+    assert "future_feature_risk" not in lag_safe
+    assert "future_feature_risk" in active(by_group["p7_forward_lag"][True])
+
+
+def test_phase7_holdout_reports_a_frozen_protocol():
+    reset_model_cache()
+    data = learned.evaluate_phase7_holdout()
+
+    assert data["cases"] == 12
+    assert data["leaky"] == 6
+    assert data["legitimate"] == 6
+    assert data["per_family"]
+    assert "frozen before the final fit" in data["provenance"]
+    assert (
+        data["metrics"]["true_positives"]
+        + data["metrics"]["false_positives"]
+        + (data["metrics"]["false_negatives"] + data["metrics"]["true_negatives"])
+        == 12
+    )
+    assert all(
+        item["probability"] >= data["threshold"] for item in data["false_positives"]
+    )
+    assert all(
+        item["probability"] < data["threshold"] for item in data["false_negatives"]
+    )

@@ -123,7 +123,7 @@ def test_cli_html_report_separates_and_escapes_ai_output(tmp_path, capsys):
     assert "AI intelligence (experimental)" in html
     assert "AI-generated" in html
     assert "Deterministic trust score (unchanged)" in html
-    assert "leaklens-ai-p6" in html
+    assert "leaklens-ai-p7" in html
     assert "<img src=x onerror=alert(1)>" not in html
     assert "&lt;img src=x onerror=alert(1)&gt;" in html
     assert "ignore previous instructions" in html

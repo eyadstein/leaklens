@@ -193,6 +193,15 @@ _TIME_WORDS = re.compile(
     r"\b(?:date|time|timestamp|datetime|month|year|day|week|quarter|hour|"
     r"minute|second)\b"
 )
+# A *column* that carries time, as opposed to a bare word that happens to look
+# temporal (``time_start``, ``runtime`` or a comment).  Used to keep temporal
+# indicators from firing on ordinary columns.
+_TIME_COLUMN = re.compile(
+    r"['\"](?:[a-z0-9_]*_)?"
+    r"(?:date|time|timestamp|datetime|month|year|week|day|quarter|hour)"
+    r"(?:_[a-z0-9_]+)?['\"]|\.dt\.",
+    re.IGNORECASE,
+)
 _GROUP_WORDS = re.compile(
     r"\b(?:customer|account|patient|user|store|device|session|merchant|employee)"
     r"_?id\b"
@@ -207,6 +216,9 @@ _LEAK_NAME = re.compile(
 )
 _SUMMARY = re.compile(r"\.(?:describe|value_counts|agg|aggregate)\s*\(")
 _STATS = re.compile(r"(?:\.|\b)(?:mean|median|std|var|quantile|describe)\s*\(")
+_DISPLAY_CALL = re.compile(
+    r"^\s*(?:print|display|pprint|logger\.\w+|logging\.\w+)\s*\("
+)
 _NON_FEATURE_RHS = re.compile(
     r"train_test_split\s*\(|cross_val|cross_validate|GridSearch|RandomizedSearch|"
     r"\.fit\s*\(|\.fit_transform\s*\(|\.fit_resample\s*\(|\.score\s*\(|"
@@ -480,17 +492,64 @@ def extract_features(source: str) -> np.ndarray:
     tuning_at = _first_line(lines, _TUNING_CALL)
     tuning_fit_at = _first_line(lines, _TUNING_FIT)
 
+    # A fit inside a cross-validation loop is fitted per fold.  That is the
+    # correct pattern, so it must not be counted as "preprocessing before the
+    # split" just because the script has no single ``train_test_split`` call.
+    fold_local_rows: set[int] = set()
+    loop_indent: int | None = None
+    for index, line in enumerate(lines):
+        stripped = line.lstrip()
+        if not stripped:
+            continue
+        indent = len(line) - len(stripped)
+        if loop_indent is not None and indent <= loop_indent:
+            loop_indent = None
+        if re.match(r"for\b", stripped) and re.search(
+            r"\.split\s*\(|\bKFold\b|\bStratifiedKFold\b|\bGroupKFold\b", stripped
+        ):
+            loop_indent = indent
+            continue
+        if (
+            loop_indent is not None
+            and indent > loop_indent
+            and re.search(r"\.(?:fit|fit_transform|fit_resample)\s*\(", stripped)
+        ):
+            fold_local_rows.add(index)
+    fold_local_fit = bool(fold_local_rows)
+    boundary_fit_events = [
+        event for event in fit_events if event[0] not in fold_local_rows
+    ]
+
     def any_fit_before(classes: tuple[re.Pattern[str], ...]) -> bool:
-        for index, _receiver, _kind, _arg, klass in fit_events:
+        for index, _receiver, _kind, _arg, klass in boundary_fit_events:
             if not _before_split(index, split_at):
                 continue
             if any(pattern.search(klass) for pattern in classes):
                 return True
         return False
 
+    def any_feature_fit_before(classes: tuple[re.Pattern[str], ...]) -> bool:
+        """Like ``any_fit_before`` but ignores fits on the label vector only.
+
+        ``LabelEncoder().fit_transform(y)`` encodes the target; it does not
+        learn anything from the feature matrix, so it is not a preprocessing
+        leak.  A fit that mixes features and the target still counts.
+        """
+
+        for index, _receiver, _kind, first, klass in boundary_fit_events:
+            if not _before_split(index, split_at):
+                continue
+            if not any(pattern.search(klass) for pattern in classes):
+                continue
+            tokens = _tokens(first)
+            if tokens and tokens <= target_names:
+                continue
+            return True
+        return False
+
     transformer_patterns = (_SCALER, _IMPUTER, _PCA, _SELECTOR, _VECTORIZER)
     transformer_before_split = any_fit_before(transformer_patterns)
-    encoder_before_split = any_fit_before((_ENCODER,))
+    encoder_before_split = any_feature_fit_before((_ENCODER,))
     target_encoder_before_split = any_fit_before((_TARGET_ENCODER,))
     selector_before_split = any_fit_before((_SELECTOR,))
     resampler_before_split = any_fit_before((_RESAMPLER,))
@@ -537,6 +596,9 @@ def extract_features(source: str) -> np.ndarray:
     for index, line in enumerate(lines):
         if not _STATS.search(line) and "agg('mean')" not in line:
             continue
+        if _DISPLAY_CALL.match(line):
+            # ``print(df['x'].mean())`` is inspection, not feature engineering.
+            continue
         if re.search(
             r"\b(?:groupby|agg|describe|value_counts|summary|rolling|shift|"
             r"expanding|ewm|bfill|ffill|clip|map|apply)\b",
@@ -559,6 +621,8 @@ def extract_features(source: str) -> np.ndarray:
     unsafe_transformer_count = 0
     for index, _receiver, _kind, first, klass in fit_events:
         first_name = first.strip()
+        if index in fold_local_rows:
+            continue
         if _is_test_frame(first) or (split_test_name and first_name == split_test_name):
             fit_on_test_frame = True
             continue
@@ -620,7 +684,7 @@ def extract_features(source: str) -> np.ndarray:
         or _before_split(_first_line(lines, re.compile(r"concat")), split_at)
     )
     temporal_order_risk = (
-        bool(_TIME_WORDS.search(text))
+        bool(_TIME_COLUMN.search(text))
         and bool(
             re.search(r"shuffle\s*=\s*True", text)
             or re.search(r"(?<!Group)(?<!Stratified)\bKFold\s*\(", text)
@@ -629,7 +693,6 @@ def extract_features(source: str) -> np.ndarray:
         and not re.search(r"shuffle\s*=\s*False", text)
     )
     group_aware = bool(_GROUP_AWARE.search(text))
-    group_words = bool(_GROUP_WORDS.search(text))
     group_columns_used = bool(re.search(r"\bgroups\s*=", text))
     drop_identifier_at = _first_line(
         lines,
@@ -641,8 +704,37 @@ def extract_features(source: str) -> np.ndarray:
     identifier_dropped = bool(
         drop_identifier_at is not None and _before_split(drop_identifier_at, split_at)
     )
+    # Drop the identifier from the *features*, and the group boundary is still
+    # ignored when rows are split randomly: repeated entities straddle the
+    # split.  Merely mentioning an id inside ``drop_duplicates`` is not enough
+    # evidence that the id is part of the modelling frame.
+    group_identifier_in_frame = bool(
+        _GROUP_WORDS.search(text)
+        and (
+            re.search(
+                r"\[\s*\[[^\]]*(?:customer|account|patient|user|store|device|"
+                r"session|merchant|employee)_?id",
+                text,
+            )
+            or re.search(
+                r"\.drop\s*\([^)]*(?:customer|account|patient|user|store|device|"
+                r"session|merchant|employee)_?id",
+                text,
+            )
+            or re.search(
+                r"groupby\s*\([^)]*(?:customer|account|patient|user|store|"
+                r"device|session|merchant|employee)_?id",
+                text,
+            )
+            or re.search(
+                r"train_test_split\s*\([^)]*(?:customer|account|patient|user|"
+                r"store|device|session|merchant|employee)_?id",
+                text,
+            )
+        )
+    )
     group_boundary_ignored = (
-        group_words
+        group_identifier_in_frame
         and not group_aware
         and not group_columns_used
         and not identifier_dropped
@@ -678,15 +770,16 @@ def extract_features(source: str) -> np.ndarray:
         column = _DATA_COLUMN.match(line)
         if column is not None:
             lhs, rhs = column.groups()
-            if _references_target(rhs, target_names):
+            if _references_target(rhs, target_names) and not _NON_FEATURE_RHS.search(
+                rhs
+            ):
                 target_in_assignment = True
-            is_target_lhs = bool(_tokens(lhs) & target_names) or bool(
-                re.search(r"(?:target|label|outcome)", lhs, re.IGNORECASE)
-            )
+            is_target_lhs = bool(_tokens(lhs) & target_names)
             if is_target_lhs and _references_target(rhs, target_names):
                 target_relabel_safe = True
             if (
                 not is_target_lhs
+                and _before_split(index, split_at)
                 and not _NON_FEATURE_RHS.search(rhs)
                 and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
                 and (
@@ -701,15 +794,16 @@ def extract_features(source: str) -> np.ndarray:
         assign = _ASSIGN.match(line)
         if assign:
             lhs, rhs = assign.groups()
-            if _references_target(rhs, target_names):
+            if _references_target(rhs, target_names) and not _NON_FEATURE_RHS.search(
+                rhs
+            ):
                 target_in_assignment = True
-            is_target_lhs = bool(_tokens(lhs) & target_names) or bool(
-                re.search(r"(?:target|label|outcome)", lhs, re.IGNORECASE)
-            )
+            is_target_lhs = bool(_tokens(lhs) & target_names)
             if is_target_lhs and _references_target(rhs, target_names):
                 target_relabel_safe = True
             if (
                 not is_target_lhs
+                and _before_split(index, split_at)
                 and not _NON_FEATURE_RHS.search(rhs)
                 and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
                 and (
@@ -730,17 +824,35 @@ def extract_features(source: str) -> np.ndarray:
                 summary_used_as_feature = True
     eda_summary_only = bool(summary_vars) and not summary_used_as_feature
 
-    future_feature_risk = bool(
-        re.search(r"\.bfill\s*\(|method\s*=\s*['\"](?:bfill|backfill)", text)
-        or re.search(r"\.rolling\s*\([^)]*center\s*=\s*True", text)
-        or re.search(r"\.shift\s*\(\s*-\s*\d", text)
-        or re.search(
-            r"read_(?:csv|json|parquet|excel)\s*\([^)]*\b(?:future|next_)",
+    shifted_columns: set[str] = set()
+    for line in lines:
+        column = _DATA_COLUMN.match(line)
+        if column is not None and re.search(r"\.shift\s*\(\s*-\s*\d", column.group(2)):
+            shifted_columns.add(column.group(1))
+    # A forward shift used only to build the *label* is a forecasting target,
+    # not a future feature.  It counts as safe only when the derived column is
+    # explicitly dropped from the feature matrix before the split.
+    forward_label_excluded = bool(shifted_columns) and all(
+        re.search(
+            rf"drop\s*\([^)]*['\"]{re.escape(name)}['\"]",
             text,
-            re.IGNORECASE,
         )
-        or re.search(r"\.merge\s*\([^)]*\b(?:future|next_month|next_week)", text)
-        or re.search(r"\b(?:future|next)_?\w*\s*=\s*[^\n]*(?:read_|merge\()", text)
+        for name in shifted_columns
+    )
+    future_feature_risk = (
+        bool(
+            re.search(r"\.bfill\s*\(|method\s*=\s*['\"](?:bfill|backfill)", text)
+            or re.search(r"\.rolling\s*\([^)]*center\s*=\s*True", text)
+            or re.search(r"\.shift\s*\(\s*-\s*\d", text)
+            or re.search(
+                r"read_(?:csv|json|parquet|excel)\s*\([^)]*\b(?:future|next_)",
+                text,
+                re.IGNORECASE,
+            )
+            or re.search(r"\.merge\s*\([^)]*\b(?:future|next_month|next_week)", text)
+            or re.search(r"\b(?:future|next)_?\w*\s*=\s*[^\n]*(?:read_|merge\()", text)
+        )
+        and not forward_label_excluded
     )
     pivot_before_split = bool(
         re.search(r"\.pivot(?:_table)?\s*\(", text)
@@ -777,7 +889,7 @@ def extract_features(source: str) -> np.ndarray:
                 group_aggregate_before_split = True
                 break
     train_only_fit = split_at is not None and fit_at is not None and fit_at > split_at
-    fit_without_split = split_at is None and bool(fit_events)
+    fit_without_split = split_at is None and bool(boundary_fit_events)
     leak_column_name = bool(_LEAK_NAME.search(text))
     target_column_passed = any(
         bool(_QUOTED.search(arguments[1]))
@@ -930,33 +1042,18 @@ def extract_features(source: str) -> np.ndarray:
         if assign is not None and ".value_counts(" in assign.group(2):
             frequency_vars.add(assign.group(1))
 
+    # Sorting only creates a temporal ordering when the sort key is a time-like
+    # column and the sort happens before the split.  Sorting by amount for a
+    # report, or sorting after the split, is not a temporal leak.
+    sort_at = _first_line(lines, re.compile(r"\.sort_values\s*\("))
+    sort_line = lines[sort_at] if sort_at is not None else ""
     default_shuffle_after_sort = bool(
-        re.search(r"\.sort_values\s*\(", text)
-        and re.search(r"train_test_split\s*\(", text)
+        sort_at is not None
+        and split_at is not None
+        and sort_at < split_at
+        and _TIME_COLUMN.search(sort_line)
         and not re.search(r"shuffle\s*=\s*False", text)
-        and _TIME_WORDS.search(text)
     )
-
-    fold_local_fit = False
-    loop_indent: int | None = None
-    for line in lines:
-        stripped = line.lstrip()
-        if not stripped:
-            continue
-        indent = len(line) - len(stripped)
-        if loop_indent is not None and indent <= loop_indent:
-            loop_indent = None
-        if re.match(r"for\b", stripped) and re.search(
-            r"\.split\s*\(|\bKFold\b|\bStratifiedKFold\b", stripped
-        ):
-            loop_indent = indent
-            continue
-        if (
-            loop_indent is not None
-            and indent > loop_indent
-            and re.search(r"\.(?:fit|fit_transform|fit_resample)\s*\(", stripped)
-        ):
-            fold_local_fit = True
 
     search_over_pipeline_safe = bool(
         re.search(
@@ -1021,9 +1118,9 @@ def extract_features(source: str) -> np.ndarray:
         "log_split_position": math.log1p(split_at) / 5.0
         if split_at is not None
         else 0.0,
-        "fit_before_split": _fitting_before(fit_events, split_at),
+        "fit_before_split": _fitting_before(boundary_fit_events, split_at),
         "fit_transform_before_split": _fitting_before(
-            fit_events, split_at, kind="fit_transform"
+            boundary_fit_events, split_at, kind="fit_transform"
         ),
         "fit_without_split": 1.0 if fit_without_split else 0.0,
         "has_fit": 1.0 if fit_events else 0.0,

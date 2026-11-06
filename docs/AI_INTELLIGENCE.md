@@ -29,12 +29,21 @@ The layer has three parts:
    The extractor covers split ordering, frame identity, target-derived columns, duplicate
    handling, grouping, temporal order, functional and hand-written scaling, full-frame
    imputation, `get_dummies`, CV on the test partition, `GroupKFold` without `groups`,
-   repeated test scoring, frequency encoding and fold-local fitting. The development
-   corpus is split by *scenario source and template family* into 179 training cases
-   (10 sources) and 40 validation cases (4 further sources); a 47-case locked test from 4
-   more sources is imported only by the benchmark. Grouped cross-validation keeps a
-   template family inside one fold. The model is never serialized to disk and never loaded
-   from an untrusted artifact.
+   repeated test scoring, frequency encoding and fold-local fitting, plus the Phase 7
+   hard-negative guards (fold-local fit detection, target-only encoder fits, sort position
+   relative to a real time column, group boundaries that require an id in the modelling
+   frame, and forward-label columns that are explicitly dropped). The development corpus is
+   split by *scenario source and template family* into 219 training cases (15 sources) and
+   40 validation cases (4 further sources); a 47-case locked test from 4 more sources is
+   imported only by the benchmark, and a 12-case Phase 7 holdout from 5 further source
+   families was frozen before the final fit and is scored once. Grouped cross-validation
+   keeps a template family inside one fold. The model is never serialized to disk and never
+   loaded from an untrusted artifact.
+   Hypotheses cite **local** signed log-odds contributions for the current unit, not global
+   feature importance, and report a margin plus an uncertainty band. A runtime gate emits a
+   hint only when at least one context-aware semantic risk indicator is active (or the
+   deterministic scanner already corroborates the unit), so a high score driven only by
+   script shape cannot raise an alarm.
 3. **Evidence-bound reasoning** (`leaklens/ai/reasoning.py`) groups related deterministic
    findings and AI hypotheses into root causes, then writes a remediation plan with actions,
    a code hint and verification steps. The plan is deterministic unless you opt into LLM
@@ -104,6 +113,11 @@ its own panel with `textContent` only, never mixed into the deterministic findin
   existing group ids and cannot introduce new evidence.
 - **No silent escalation.** AI hypotheses cap at `medium`; deterministic `Finding` objects
   and `leakage.score()` remain the only source of severity and the trust score.
+- **No score-only alarm.** A learned hint is emitted only when a context-aware semantic risk
+  indicator is active or a deterministic finding corroborates the unit. Low-margin units are
+  titled `[needs review]` and carry reduced confidence.
+- **No global-importance citation.** Hypotheses cite signed local contributions for that
+  unit, and each contribution names the feature value it came from.
 - **No zero-risk claim.** A clean AI pass says so explicitly and still lists limitations.
 
 ## Measured behaviour
@@ -118,10 +132,18 @@ python -m leaklens.bench_ai --write docs/AI_BENCHMARK.md
 [AI_BENCHMARK.md](AI_BENCHMARK.md) lists the split protocol and provenance, candidate
 architectures, grouped out-of-fold and validation metrics, calibration, the unchanged Phase 5
 locked test (accuracy 0.979, precision 1.000, recall 0.960, F1 0.980, FPR 0.000 on 47 authored
-cases), per-category and per-source results, external transfer to the existing scanner
-benchmark, a diagnostic threshold sweep, the semantic regression set, global feature
-importances, and every false positive and miss. The external scanner set was used for Phase 6
-error analysis, so its perfect score is a development result, not independent evidence.
+cases), the frozen Phase 7 holdout (6/6 leaks caught, 1 false positive on 6 legitimate units),
+the runtime hypothesis gate on development (precision 1.000, recall 0.963, FPR 0.000),
+per-category and per-source results, external transfer to the existing scanner benchmark, a
+diagnostic threshold sweep, the semantic regression set, a local-attribution example, global
+feature importances, and every false positive and miss. The external scanner set was used for
+Phase 6 error analysis, so its perfect score is a development result, not independent
+evidence.
+
+The Phase 7 holdout is authored synthetic data, not a real-world benchmark: it checks that
+the hard-positive/hard-negative guards generalize to unseen templates. Its one false positive
+is a fold-local transformer whose slice fit the extractor cannot tie to a split boundary; it
+is reported rather than tuned away.
 
 [AI_REALWORLD.md](AI_REALWORLD.md) is the independent real-world evaluation:
 48 reviewed pipeline units from 12 public repositories that never appear in training,
@@ -130,10 +152,10 @@ definitive hand labels. The measured holdout result is accuracy 0.833, precision
 recall 0.958, F1 0.852 and FPR 0.292; the report lists every false positive and miss,
 repository-cluster intervals and calibration. It is not a production-accuracy claim.
 
-The shipped threshold is chosen on validation only (0.50 for the current model) and
+The shipped threshold is chosen on validation only (0.53 for the current model) and
 probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at
 import time. The eleven candidates are compared when the benchmark is built; a request fits
-only the class-balanced logistic regression frozen after Phase 6 validation, so a cold opt-in
+only the class-balanced logistic regression frozen after Phase 7 validation, so a cold opt-in
 API call stays well inside the server's time budget. Metrics can vary slightly between
 scikit-learn releases because the fitted model is not bit-identical.
 [AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory on the holdout and on a
@@ -152,8 +174,12 @@ representative project scan.
   24 legitimate units). Most false positives are safe CV, temporal-split, CatBoost Pool and
   EDA-only patterns that the current indicators cannot separate from leaks.
 - Learned probabilities are calibrated on 40 validation cases and do **not** transfer:
-  holdout Brier is 0.115 and ECE is 0.126. Treat the probability as a ranking score, not a
+  holdout Brier is 0.087 and ECE is 0.111. Treat the probability as a ranking score, not a
   risk estimate.
+- The Phase 7 holdout is 12 authored synthetic units. It measures whether the hard-negative
+  guards transfer to unseen templates; it is not production evidence.
+- Local contributions explain the linear model's log-odds for one unit. They are not causal
+  and do not prove that removing a cited line makes the pipeline safe.
 - The single locked-test miss is a random split over repeated applicants where the only cue
   is an unseen identifier name (`applicant_id`), which the feature extractor does not treat
   as a leak on its own.

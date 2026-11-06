@@ -24,6 +24,8 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from leaklens import __version__  # noqa: E402
+from leaklens.ai import analyze_code  # noqa: E402
+from leaklens.ai.semantics import CodeSource  # noqa: E402
 from leaklens.fixes import advice  # noqa: E402
 from leaklens.leakage import (  # noqa: E402
     feature_overlap,
@@ -80,6 +82,58 @@ def _counts(findings) -> dict:
     }
 
 
+def _ai_fixture(filename: str, source: str, findings) -> dict:
+    """Run the real optional AI layer and keep only what the demo renders."""
+
+    payload = analyze_code(
+        (CodeSource(label=filename, source=source),), findings
+    ).to_dict()
+    model = payload["models"][0]
+    return {
+        "engine": payload["engine"],
+        "schemaVersion": payload["schema_version"],
+        "changesDeterministicFindings": payload["changes_deterministic_findings"],
+        "model": {
+            "name": model["name"],
+            "version": model["version"],
+            "threshold": model["threshold"],
+            "features": model["features"],
+        },
+        "hypotheses": [
+            {
+                "id": hypothesis["hypothesis_id"],
+                "concept": hypothesis["concept"],
+                "title": hypothesis["title"],
+                "confidence": hypothesis["confidence"],
+                "severityHint": hypothesis["severity_hint"],
+                "location": hypothesis["location"],
+                "corroborates": hypothesis["corroborates"],
+                "explanation": hypothesis["explanation"],
+                "evidence": [
+                    {
+                        "source": span["source"],
+                        "kind": span["kind"],
+                        "location": span["location"],
+                        "excerpt": span["excerpt"],
+                    }
+                    for span in hypothesis["evidence"][:6]
+                ],
+            }
+            for hypothesis in payload["hypotheses"]
+        ],
+        "remediation": [
+            {
+                "title": cause["title"],
+                "priority": cause["priority"],
+                "actions": list(cause["remediation"]["actions"])[:3],
+                "verification": list(cause["remediation"]["verification"])[:2],
+            }
+            for cause in payload["plan"]["root_causes"][:3]
+        ],
+        "limitations": list(payload["limitations"][:3]),
+    }
+
+
 def _code_fixture(
     fixture_id: str,
     filename: str,
@@ -103,6 +157,7 @@ def _code_fixture(
         "counts": _counts(findings),
         "clean": not serialized,
         "trustScore": score(findings),
+        "ai": _ai_fixture(filename, source, findings),
     }
 
 

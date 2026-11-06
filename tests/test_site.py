@@ -201,6 +201,47 @@ def test_safe_pipeline_example_matches_the_recorded_fixture(fixtures):
     assert safe["trustScore"] == 100
 
 
+def test_recorded_ai_output_is_real_bounded_and_opt_in(fixtures):
+    code = [fixture for fixture in fixtures["code"] if fixture.get("ai")]
+    assert {fixture["id"] for fixture in code} == {"advanced", "unsafe", "safe"}
+
+    for fixture in code:
+        ai = fixture["ai"]
+        assert ai["engine"] == "leaklens.ai.experimental"
+        assert ai["changesDeterministicFindings"] is False
+        assert ai["model"]["name"] == "leaklens-ai-p7"
+        assert ai["model"]["version"].startswith("leaklens-ai-p7")
+        assert 0.05 <= ai["model"]["threshold"] <= 0.95
+        assert ai["limitations"]
+        for hypothesis in ai["hypotheses"]:
+            assert 0 <= hypothesis["confidence"] <= 0.95
+            assert hypothesis["severityHint"] in {"low", "medium"}
+            assert hypothesis["title"] and hypothesis["explanation"]
+            assert hypothesis["evidence"]
+            assert {span["source"] for span in hypothesis["evidence"]} <= {
+                "model",
+                "code",
+                "schema",
+                "relationship",
+                "statistic",
+                "finding",
+            }
+
+    advanced = next(fixture for fixture in code if fixture["id"] == "advanced")
+    assert advanced["ai"]["hypotheses"]
+    assert any(
+        hypothesis["concept"] == "target_derived_feature"
+        for hypothesis in advanced["ai"]["hypotheses"]
+    )
+    # The AI layer is additive: the deterministic findings are unchanged by it.
+    assert advanced["findings"]
+    assert advanced["ai"]["remediation"]
+
+    safe = next(fixture for fixture in code if fixture["id"] == "safe")
+    assert safe["ai"]["hypotheses"] == []
+    assert safe["ai"]["changesDeterministicFindings"] is False
+
+
 @pytest.mark.parametrize(
     "script",
     [

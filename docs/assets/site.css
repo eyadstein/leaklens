@@ -3621,3 +3621,62 @@ table.data td code {
     padding: 0;
   }
 }
+
+/* Experimental AI panel in the prerecorded demo. */
+.ai-panel {
+  padding-bottom: 12px;
+}
+.ai-panel > p,
+.ai-panel > ul,
+.ai-panel > details {
+  margin: 10px 13px 0;
+}
+.ai-list {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+.ai-item {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  padding: 10px 11px;
+  display: grid;
+  gap: 7px;
+}
+.ai-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-weight: 600;
+}
+.ai-meta {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+.ai-evidence,
+.ai-remediation {
+  font-size: 0.85rem;
+}
+.ai-evidence summary,
+.ai-remediation summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+.ai-evidence ul,
+.ai-remediation ul,
+.ai-remediation ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+.ai-evidence code {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}

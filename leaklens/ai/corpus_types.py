@@ -7,6 +7,7 @@ from dataclasses import dataclass
 TRAIN = "train"
 VALIDATION = "validation"
 LOCKED_TEST = "test"
+HOLDOUT = "holdout"
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,4 +21,4 @@ class CorpusCase:
     source: str = "phase4-core"
 
 
-__all__ = ["LOCKED_TEST", "TRAIN", "VALIDATION", "CorpusCase"]
+__all__ = ["HOLDOUT", "LOCKED_TEST", "TRAIN", "VALIDATION", "CorpusCase"]
