@@ -9,6 +9,9 @@ from pathlib import Path
 from .leakage import Finding
 
 FIT = {"fit", "fit_transform", "fit_resample"}
+# Builders that only wrap the step which really learns from the data: the leak, if any,
+# is inside them, so the class name has to be read from the wrapped steps.
+WRAPPERS = {"make_pipeline", "Pipeline"}
 HINTS = (
     "Scaler",
     "Imputer",
@@ -73,6 +76,22 @@ def _name(c: ast.Call) -> str:
     if isinstance(f, ast.Attribute):
         return f.attr
     return ""
+
+
+def _step(expr, aliases: dict[str, str] | None = None) -> str:
+    """Class that learns behind an expression, through import aliases and pipeline builders."""
+    if not isinstance(expr, ast.Call):
+        return ""
+    aliases = aliases or {}
+    names = [_name(expr)]
+    if names[0] in WRAPPERS:
+        for a in expr.args:
+            names += [_name(x) for x in ast.walk(a) if isinstance(x, ast.Call)]
+    for n in names:
+        real = aliases.get(n, n)
+        if any(h in real for h in HINTS):
+            return real
+    return aliases.get(names[0], names[0])
 
 
 def _sev(cls: str) -> str:
@@ -158,6 +177,14 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     except SyntaxError as e:
         return [Finding("low", "parse_error", label, str(e))]
     ctor, calls, funcs, assigns = {}, [], set(), []
+    # Estimators imported under a local name (`from ... import KBinsDiscretizer as KBD`).
+    # Matching a class on its local name only hides it from the hint lists (issue #333).
+    sk_aliases: dict[str, str] = {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("sklearn"):
+            for al in n.names:
+                if al.asname:
+                    sk_aliases[al.asname] = al.name
 
     pandas_aliases, get_dummies_aliases = set(), set()
 
@@ -167,7 +194,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             if isinstance(n.value, ast.Call):
                 for t in n.targets:
                     if isinstance(t, ast.Name):
-                        ctor[t.id] = _name(n.value)
+                        ctor[t.id] = _step(n.value, sk_aliases)
         elif isinstance(n, ast.Call):
             calls.append(n)
         elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
@@ -430,7 +457,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             if isinstance(b, ast.Name):
                 cls = ctor.get(b.id, "")
             elif isinstance(b, ast.Call):
-                cls = _name(b)
+                cls = _step(b, sk_aliases)
             else:
                 cls = ""
             if not any(h in cls for h in HINTS):
