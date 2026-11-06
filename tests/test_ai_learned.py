@@ -8,6 +8,7 @@ import socket
 import numpy as np
 import pytest
 
+from leaklens.ai import features as feature_module
 from leaklens.ai import learned
 from leaklens.ai.corpus import (
     corpus_cases,
@@ -21,6 +22,7 @@ from leaklens.ai.corpus_test import LOCKED_TEST_CASES
 from leaklens.ai.features import (
     EXCLUDED_MODEL_FEATURES,
     FEATURE_NAMES,
+    MODEL_FEATURE_INDICES,
     MODEL_FEATURE_NAMES,
     extract_features,
     model_features,
@@ -207,6 +209,104 @@ def test_model_features_exclude_shortcuts_but_keep_indicators():
     assert model_features(LEAKY).shape == (108,)
     values = model_features(LEAKY)
     assert np.isfinite(values).all()
+
+
+def test_feature_metadata_references_only_emitted_features():
+    """Every name in the explanation tables must exist in the emitted vector.
+
+    ``target_encoder_before_split`` was a local intermediate that never became an
+    emitted feature, yet both tables below treated it as one.  A key that cannot
+    be produced is dead metadata: it can never fire, and it hides the missing
+    evidence pattern for the indicator that replaced it.
+    """
+
+    emitted = set(FEATURE_NAMES)
+    model_eligible = set(MODEL_FEATURE_NAMES)
+
+    assert sorted(set(learned._FEATURE_EVIDENCE) - emitted) == []
+    assert sorted(set(learned._FEATURE_EVIDENCE) - model_eligible) == []
+    assert sorted(set(learned._SEMANTIC_RISK_FEATURES) - emitted) == []
+    assert sorted(set(learned._SEMANTIC_RISK_FEATURES) - model_eligible) == []
+    assert learned.feature_metadata_errors() == ()
+
+
+def test_feature_metadata_errors_are_reported_for_unknown_and_excluded_names(
+    monkeypatch,
+):
+    monkeypatch.setitem(learned._FEATURE_EVIDENCE, "mystery_indicator", re.compile("x"))
+    errors = learned.feature_metadata_errors()
+    assert any("mystery_indicator" in error for error in errors)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(learned, "_SEMANTIC_RISK_FEATURES", frozenset({"log_lines"}))
+    errors = learned.feature_metadata_errors()
+    assert any("log_lines" in error for error in errors)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(learned._FEATURE_EVIDENCE, "log_lines", re.compile("x"))
+    errors = learned.feature_metadata_errors()
+    assert any("model-excluded feature: log_lines" in error for error in errors)
+
+
+def test_feature_names_are_unique_and_model_indices_match_their_names():
+    assert len(set(FEATURE_NAMES)) == len(FEATURE_NAMES)
+    assert set(MODEL_FEATURE_NAMES) == set(FEATURE_NAMES) - EXCLUDED_MODEL_FEATURES
+    assert [FEATURE_NAMES[index] for index in MODEL_FEATURE_INDICES] == list(
+        MODEL_FEATURE_NAMES
+    )
+
+
+def test_extractor_rejects_a_feature_that_was_not_registered(monkeypatch):
+    """A produced-but-unregistered indicator must fail loudly, not vanish.
+
+    The vector is built by iterating ``FEATURE_NAMES``, so an extra key in the
+    extractor's dict used to be dropped without a trace and the model silently
+    trained on a narrower vector.
+    """
+
+    monkeypatch.setattr(feature_module, "FEATURE_NAMES", FEATURE_NAMES[:-1])
+    with pytest.raises(RuntimeError, match="not registered"):
+        extract_features(LEAKY)
+
+
+def test_extractor_rejects_a_registered_feature_it_never_produces(monkeypatch):
+    """A catalogue entry without a value must fail, not raise a bare KeyError."""
+
+    monkeypatch.setattr(
+        feature_module, "FEATURE_NAMES", (*FEATURE_NAMES, "phantom_indicator")
+    )
+    with pytest.raises(RuntimeError, match="did not produce"):
+        extract_features(LEAKY)
+
+
+def test_reordering_the_catalogue_reorders_the_vector(monkeypatch):
+    """Order is the contract: renaming must never silently follow a sort.
+
+    The model consumes position, not names, so a refactor that sorts or
+    re-inserts names would keep every set-based check green while feeding the
+    model different columns under the same weights.
+    """
+
+    baseline = extract_features(LEAKY)
+    reordered = (FEATURE_NAMES[1], FEATURE_NAMES[0], *FEATURE_NAMES[2:])
+    monkeypatch.setattr(feature_module, "FEATURE_NAMES", reordered)
+    moved = extract_features(LEAKY)
+    assert moved[0] == baseline[1]
+    assert moved[1] == baseline[0]
+    assert np.array_equal(np.delete(moved, [0, 1]), np.delete(baseline, [0, 1]))
+
+
+def test_local_contributions_name_the_value_stored_at_their_own_index():
+    """Pins positional integrity: a name must always describe its own value."""
+
+    reset_model_cache()
+    _evaluation, model = get_model(compare_candidates=False)
+    stored = dict(zip(FEATURE_NAMES, extract_features(LEAKY), strict=True))
+    contributions = model.local_contributions(LEAKY, limit=len(MODEL_FEATURE_NAMES))
+    assert contributions
+    for name, value, _contribution in contributions:
+        assert name in stored
+        assert value == pytest.approx(stored[name])
 
 
 def test_ordering_and_frame_identity_features_separate_common_confusions():

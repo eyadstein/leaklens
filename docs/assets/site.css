@@ -10,7 +10,7 @@
   --line-soft: rgba(133, 171, 209, 0.14);
   --text: #e9f1f9;
   --muted: #9aadc2;
-  --faint: #6b8098;
+  --faint: #7d92a9;
   --accent: #5eead4;
   --accent-ink: #032b27;
   --accent-soft: rgba(94, 234, 212, 0.12);
@@ -439,14 +439,14 @@ pre code {
 }
 
 .button-small {
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 14px;
   font-size: 0.85rem;
   border-radius: 8px;
 }
 
 .button-ghost {
-  min-height: 38px;
+  min-height: 44px;
   padding: 7px 12px;
   background: transparent;
   border-color: var(--line);
@@ -470,7 +470,7 @@ pre code {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 44px;
   padding: 6px 10px;
   border-radius: 7px;
   border: 1px solid var(--line);
@@ -547,7 +547,7 @@ pre code {
 }
 
 .chip {
-  min-height: 36px;
+  min-height: 44px;
   padding: 7px 13px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -798,18 +798,16 @@ pre code {
   color: var(--faint);
 }
 
-.audit-card.is-fixed .finding-mini li {
-  opacity: 0.35;
-  text-decoration: line-through;
-}
-
-.audit-card.is-fixed {
-  --ring-color: var(--safe);
-}
-
 .audit-action {
   margin-top: 16px;
   width: 100%;
+}
+
+.audit-action[aria-expanded="true"] {
+  background: var(--accent-soft);
+  border-color: rgba(94, 234, 212, 0.45);
+  color: var(--accent);
+  box-shadow: none;
 }
 
 .audit-note {
@@ -819,8 +817,79 @@ pre code {
   line-height: 1.5;
 }
 
-.audit-note.is-safe {
+/* A proposed patch is shown, never applied. The score ring above stays at the
+   recorded 50 until the user changes and re-runs the scanner themselves. */
+.audit-diff {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(4, 9, 15, 0.55);
+}
+
+.audit-diff-head {
+  margin: 0 0 10px;
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.audit-diff-code {
+  margin: 0 0 12px;
+  padding: 12px;
+  overflow-x: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.audit-diff-code code {
+  display: block;
+  white-space: pre;
+}
+
+.diff-del {
+  color: var(--danger);
+}
+
+.diff-add {
   color: var(--safe);
+}
+
+.audit-diff-copy {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.audit-diff-recorded {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.audit-diff-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 22px;
+  padding-inline: 7px;
+  border-radius: 999px;
+  background: var(--safe-soft);
+  color: var(--safe);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 700;
 }
 
 /* Proof strip ------------------------------------------------------------- */
@@ -873,6 +942,11 @@ pre code {
 
 .leak-card h3 {
   font-size: 1.08rem;
+}
+
+/* A severity badge is a label, not a divider: keep it hugging its text. */
+.leak-card .badge {
+  align-self: flex-start;
 }
 
 .leak-card p {
@@ -1116,6 +1190,19 @@ pre code {
   font-size: 0.86rem;
 }
 
+.detection-empty {
+  margin: 0;
+  padding: 22px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--muted);
+  text-align: center;
+}
+
+.detection-empty .chip {
+  margin-left: 8px;
+}
+
 /* Demo preview ------------------------------------------------------------ */
 .demo-preview {
   display: grid;
@@ -1204,6 +1291,7 @@ pre code {
 
 .step {
   position: relative;
+  min-width: 0;
   padding: 22px 20px 20px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -1298,8 +1386,8 @@ pre code {
 
 .stat-card strong {
   display: block;
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  letter-spacing: -0.05em;
+  font-size: clamp(1.7rem, 3vw, 2.2rem);
+  letter-spacing: -0.045em;
   line-height: 1;
 }
 
@@ -1323,6 +1411,30 @@ pre code {
   margin-top: 18px;
   color: var(--faint);
   font-size: 0.8rem;
+}
+
+.bench-honesty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.caveat-strong {
+  padding: 14px 16px;
+  border: 1px solid rgba(247, 198, 90, 0.35);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.caveat-strong a {
+  color: var(--warn);
 }
 
 /* Install ----------------------------------------------------------------- */
@@ -1355,6 +1467,7 @@ pre code {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   padding: 11px 12px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -2524,7 +2637,7 @@ table.data td code {
   .stat-grid,
   .steps,
   .demo-notes {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .limit-grid {
     grid-template-columns: 1fr;
@@ -2658,6 +2771,29 @@ table.data td code {
   }
   a {
     color: #111;
+  }
+  .js .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  /* Print is content, not theme: flatten every surface so no class colour can
+     leave dark text on a dark card. Severity still reads from its text label. */
+  body * {
+    background: #fff !important;
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+  .audit-card,
+  .detection-card,
+  .leak-card,
+  .stat-card,
+  .limit,
+  .result-card,
+  .install-card {
+    border-color: #bbb;
+  }
+  .audit-card::after {
+    display: none;
   }
 }
 

@@ -48,7 +48,7 @@ from .corpus import (
     training_cases,
     validation_cases,
 )
-from .features import MODEL_FEATURE_NAMES, model_features
+from .features import FEATURE_NAMES, MODEL_FEATURE_NAMES, model_features
 from .schemas import EvidenceSpan, Hypothesis, ModelCard
 from .semantics import CodeSource
 
@@ -974,7 +974,7 @@ _FEATURE_EVIDENCE: dict[str, re.Pattern[str]] = {
     "encoder_before_split": re.compile(
         r"\b(?:OneHotEncoder|OrdinalEncoder|TargetEncoder)\b|get_dummies"
     ),
-    "target_encoder_before_split": re.compile(
+    "unsafe_target_encoding": re.compile(
         r"\b(?:TargetEncoder|WOEEncoder|CatBoostEncoder)\b"
     ),
     "target_mean_before_split": re.compile(r"groupby\([^)]*\).*(?:mean|agg)\("),
@@ -1042,7 +1042,6 @@ _SEMANTIC_RISK_FEATURES = frozenset(
         "unsafe_target_encoding",
         "transformer_before_split",
         "encoder_before_split",
-        "target_encoder_before_split",
         "target_mean_before_split",
         "manual_full_data_stats",
         "functional_scaling_before_split",
@@ -1073,14 +1072,45 @@ _SEMANTIC_RISK_FEATURES = frozenset(
 )
 
 
+def feature_metadata_errors() -> tuple[str, ...]:
+    """Return explanation metadata that cannot describe an emitted feature.
+
+    ``FEATURE_NAMES`` is the single authoritative catalogue: the vector, the
+    model view and every explanation table are keyed by it.  Anything else -
+    typically a Phase 5 intermediate that never became an emitted indicator -
+    is dead metadata: it can never fire, and it hides the missing evidence
+    pattern for the indicator that replaced it.
+    """
+
+    emitted = set(FEATURE_NAMES)
+    eligible = set(MODEL_FEATURE_NAMES)
+    errors: list[str] = []
+    for name in sorted(set(_FEATURE_EVIDENCE) - emitted):
+        errors.append(f"evidence pattern for unemitted feature: {name}")
+    for name in sorted(set(_FEATURE_EVIDENCE) - eligible):
+        errors.append(f"evidence pattern for model-excluded feature: {name}")
+    for name in sorted(set(_SEMANTIC_RISK_FEATURES) - emitted):
+        errors.append(f"risk indicator is not an emitted feature: {name}")
+    for name in sorted(set(_SEMANTIC_RISK_FEATURES) - eligible):
+        errors.append(f"risk indicator is excluded from the model: {name}")
+    return tuple(errors)
+
+
+_METADATA_ERRORS = feature_metadata_errors()
+if _METADATA_ERRORS:  # pragma: no cover - import guard
+    raise RuntimeError(
+        "feature metadata drifted from FEATURE_NAMES: " + "; ".join(_METADATA_ERRORS)
+    )
+
+
 def _active_risk_features(source: str) -> tuple[str, ...]:
     """Return the semantic risk indicators active for one source unit."""
 
     vector = model_features(source)
     return tuple(
-        MODEL_FEATURE_NAMES[index]
-        for index, value in enumerate(vector)
-        if value and MODEL_FEATURE_NAMES[index] in _SEMANTIC_RISK_FEATURES
+        name
+        for name, value in zip(MODEL_FEATURE_NAMES, vector, strict=True)
+        if value and name in _SEMANTIC_RISK_FEATURES
     )
 
 

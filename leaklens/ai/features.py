@@ -1257,9 +1257,21 @@ def extract_features(source: str) -> np.ndarray:
         "target_lag_safe": 1.0 if target_lag_safe else 0.0,
     }
 
+    missing = set(FEATURE_NAMES) - set(features)
+    if missing:
+        raise RuntimeError(
+            "feature extractor did not produce registered indicators: "
+            + ", ".join(sorted(missing))
+        )
+
+    unregistered = set(features) - set(FEATURE_NAMES)
+    if unregistered:
+        raise RuntimeError(
+            "feature extractor produced indicators that are not registered: "
+            + ", ".join(sorted(unregistered))
+        )
+
     vector = np.asarray([features[name] for name in FEATURE_NAMES], dtype=float)
-    if vector.shape != (len(FEATURE_NAMES),):  # pragma: no cover - defensive
-        raise RuntimeError("feature vector shape drifted from FEATURE_NAMES")
     return vector
 
 

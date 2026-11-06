@@ -43,23 +43,27 @@
   </div>
 
   <h2>Findings</h2>
-  <table>
-    <thead><tr><th>severity</th><th>kind</th><th>column</th><th>detail</th></tr></thead>
-    <tbody>
-      <tr><td>high</td><td>target_leakage</td><td>chargeback_flag</td><td>alone predicts target (roc_auc=1.000)</td></tr>
-      <tr><td>medium</td><td>id_like</td><td>txn_id</td><td>100.0% unique values; likely an identifier</td></tr>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>severity</th><th>kind</th><th>column</th><th>detail</th></tr></thead>
+      <tbody>
+        <tr><td>high</td><td>target_leakage</td><td>chargeback_flag</td><td>alone predicts target (roc_auc=1.000)</td></tr>
+        <tr><td>medium</td><td>id_like</td><td>txn_id</td><td>100.0% unique values; likely an identifier</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <h2>Model arena</h2>
-  <table>
-    <thead><tr><th>model</th><th>roc_auc</th><th>pr_auc</th><th>best_f1</th><th>f1</th><th>precision</th><th>recall</th></tr></thead>
-    <tbody>
-      <tr><td>neural_net</td><td>0.8374</td><td>0.4219</td><td>0.4353</td><td>0.3077</td><td>0.7778</td><td>0.1918</td></tr>
-      <tr><td>linear</td><td>0.841</td><td>0.4215</td><td>0.4304</td><td>0.3357</td><td>0.2271</td><td>0.6438</td></tr>
-      <tr><td>tree_ensemble</td><td>0.8242</td><td>0.3562</td><td>0.4103</td><td>0.3148</td><td>0.4857</td><td>0.2329</td></tr>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>model</th><th>roc_auc</th><th>pr_auc</th><th>best_f1</th><th>f1</th><th>precision</th><th>recall</th></tr></thead>
+      <tbody>
+        <tr><td>neural_net</td><td>0.8374</td><td>0.4219</td><td>0.4353</td><td>0.3077</td><td>0.7778</td><td>0.1918</td></tr>
+        <tr><td>linear</td><td>0.841</td><td>0.4215</td><td>0.4304</td><td>0.3357</td><td>0.2271</td><td>0.6438</td></tr>
+        <tr><td>tree_ensemble</td><td>0.8242</td><td>0.3562</td><td>0.4103</td><td>0.3148</td><td>0.4857</td><td>0.2329</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <h2>What this report shows</h2>
   <p class="sub" style="line-height:1.65">
