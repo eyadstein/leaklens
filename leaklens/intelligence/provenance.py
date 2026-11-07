@@ -43,6 +43,163 @@ class EvidenceGraph:
             "links": [item.to_dict() for item in self.links],
         }
 
+    @property
+    def evidence_by_id(self) -> dict[str, Evidence]:
+        return {item.evidence_id: item for item in self.evidence}
+
+    def cluster_for(self, finding_index: int) -> EvidenceCluster | None:
+        """Return the cluster that contains a finding index, if any."""
+        for cluster in self.clusters:
+            if finding_index in cluster.finding_indices:
+                return cluster
+        return None
+
+    def neighbors(self, evidence_id: str) -> tuple[tuple[str, str, Evidence], ...]:
+        """Return ``(relation, direction, evidence)`` for one record.
+
+        ``direction`` is ``"out"`` when the record is the link source and
+        ``"in"`` when it is the target. Unknown ids return an empty tuple.
+        Results are sorted by the neighbouring evidence id, then relation.
+        """
+        by_id = self.evidence_by_id
+        found: list[tuple[str, str, Evidence]] = []
+        for link in self.links:
+            if link.source_id == evidence_id:
+                other, direction = link.target_id, "out"
+            elif link.target_id == evidence_id:
+                other, direction = link.source_id, "in"
+            else:
+                continue
+            item = by_id.get(other)
+            if item is not None:
+                found.append((link.relation, direction, item))
+        found.sort(key=lambda item: (item[2].evidence_id, item[0], item[1]))
+        return tuple(found)
+
+    def relation_counts(self) -> dict[str, int]:
+        """Count every link relation, including zeroes, in a stable order."""
+        counts = {"corroborates": 0, "same_anchor": 0, "supports": 0}
+        for link in self.links:
+            counts[link.relation] = counts.get(link.relation, 0) + 1
+        return counts
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "evidence": len(self.evidence),
+            "clusters": len(self.clusters),
+            "links": len(self.links),
+            "relations": self.relation_counts(),
+        }
+
+    def to_mermaid(self) -> str:
+        """Render the graph as a deterministic Mermaid flowchart."""
+        return _render_graph(self, "mermaid")
+
+    def to_dot(self) -> str:
+        """Render the graph as a deterministic Graphviz DOT digraph."""
+        return _render_graph(self, "dot")
+
+
+def _short(value: Any, limit: int = 80) -> str:
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "..."
+
+
+def _node_label(item: Evidence) -> str:
+    return _short(f"{item.evidence_id} - {item.kind} - {item.description}")
+
+
+def _dot_escape(value: str) -> str:
+    return (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+
+def _mermaid_escape(value: str) -> str:
+    return (
+        value.replace("\\", "/")
+        .replace('"', "'")
+        .replace("[", "(")
+        .replace("]", ")")
+        .replace("|", "/")
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+
+def _render_graph(graph: EvidenceGraph, fmt: str) -> str:
+    by_id = graph.evidence_by_id
+    node_ids = {
+        item.evidence_id: f"n{index}" for index, item in enumerate(graph.evidence)
+    }
+    in_cluster = {
+        evidence_id
+        for cluster in graph.clusters
+        for evidence_id in cluster.evidence_ids
+    }
+    if fmt == "mermaid":
+        lines = ["flowchart LR"]
+        for index, cluster in enumerate(graph.clusters):
+            title = _mermaid_escape(
+                _short(f"{cluster.anchor} ({cluster.priority})", 100)
+            )
+            lines.append(f'  subgraph c{index}["{title}"]')
+            for evidence_id in cluster.evidence_ids:
+                item = by_id.get(evidence_id)
+                if item is None:
+                    continue
+                label = _mermaid_escape(_node_label(item))
+                lines.append(f'    {node_ids[evidence_id]}["{label}"]')
+            lines.append("  end")
+        for item in graph.evidence:
+            if item.evidence_id not in in_cluster:
+                label = _mermaid_escape(_node_label(item))
+                lines.append(f'  {node_ids[item.evidence_id]}["{label}"]')
+        for link in graph.links:
+            source = node_ids.get(link.source_id)
+            target = node_ids.get(link.target_id)
+            if source is None or target is None:
+                continue
+            lines.append(f"  {source} -->|{_mermaid_escape(link.relation)}| {target}")
+        return "\n".join(lines) + "\n"
+
+    if fmt == "dot":
+        lines = [
+            "digraph leaklens {",
+            "  rankdir=LR;",
+            "  node [shape=box, fontsize=10];",
+        ]
+        for index, cluster in enumerate(graph.clusters):
+            title = _dot_escape(_short(f"{cluster.anchor} ({cluster.priority})", 100))
+            lines.append(f"  subgraph cluster_{index} {{")
+            lines.append(f'    label="{title}";')
+            for evidence_id in cluster.evidence_ids:
+                item = by_id.get(evidence_id)
+                if item is None:
+                    continue
+                label = _dot_escape(_node_label(item))
+                lines.append(f'    {node_ids[evidence_id]} [label="{label}"];')
+            lines.append("  }")
+        for item in graph.evidence:
+            if item.evidence_id not in in_cluster:
+                label = _dot_escape(_node_label(item))
+                lines.append(f'  {node_ids[item.evidence_id]} [label="{label}"];')
+        for link in graph.links:
+            source = node_ids.get(link.source_id)
+            target = node_ids.get(link.target_id)
+            if source is None or target is None:
+                continue
+            lines.append(
+                f'  {source} -> {target} [label="{_dot_escape(link.relation)}"];'
+            )
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
+    raise ValueError(f"unsupported graph format: {fmt!r}")
+
 
 def _slug(value: str, limit: int = 64) -> str:
     slug = _SLUG.sub("-", value.lower()).strip("-")
@@ -183,11 +340,20 @@ def _links_for(
                 ),
             )
         )
+    # A detector record explains the finding it was attached to, which is not
+    # necessarily the cluster representative.
+    primary_by_finding = {
+        item.finding_index: item for item in primaries if item.finding_index is not None
+    }
     for item in detector:
+        target = primary_by_finding.get(item.finding_index)
+        if target is None:
+            # No verified primary record: do not invent a different target.
+            continue
         links.append(
             EvidenceLink(
                 source_id=item.evidence_id,
-                target_id=representative.evidence_id,
+                target_id=target.evidence_id,
                 relation="supports",
                 rationale=(
                     f"detector evidence explains why finding "

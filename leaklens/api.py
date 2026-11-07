@@ -16,6 +16,7 @@ from .audit import audit
 from .baseline import BaselineError
 from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
 from .drift import audit_drift
+from .intelligence import analyze_findings
 from .leakage import scan, score
 from .missingness import audit_missingness
 from .policy import apply_policy, parse_baseline, parse_suppressions
@@ -36,6 +37,7 @@ class ScanReq(BaseModel):
     target: str | None = None
     split_column: str | None = None
     schema_map: dict[str, dict[str, str]] | None = None
+    intelligence: bool = False
 
 
 class PredictReq(BaseModel):
@@ -113,6 +115,7 @@ async def audit_csv(
     suppressions: str | None = Form(None),
     test: UploadFile | None = File(None),  # noqa: B008
     drift: bool = Form(False),
+    intelligence: bool = Form(False),
 ):
     try:
         data = io.BytesIO(await file.read())
@@ -161,6 +164,8 @@ async def audit_csv(
     }
     if drift_report is not None:
         payload["drift"] = drift_report.to_dict()
+    if intelligence:
+        payload["intelligence"] = analyze_findings(fs).to_dict()
     return payload
 
 
@@ -185,11 +190,14 @@ def scan_code(req: ScanReq):
     else:
         fs = scan_source(req.source, req.name)
     outcome = _apply_policy(fs, baseline=req.baseline, suppressions=req.suppressions)
-    return {
+    payload = {
         "trust_score": score(outcome.active),
         "findings": _finding_payloads(outcome),
         **_policy_payload(outcome),
     }
+    if req.intelligence:
+        payload["intelligence"] = analyze_findings(fs).to_dict()
+    return payload
 
 
 @app.post("/predict")

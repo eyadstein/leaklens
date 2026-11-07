@@ -44,7 +44,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from . import __version__
 from .audit import audit
 from .fixes import advice
-from .intelligence import analyze_dataset_impact
+from .intelligence import analyze_dataset_impact, analyze_findings
 from .leakage import (
     feature_overlap,
     group_overlap,
@@ -512,6 +512,7 @@ def run_audit_job(
     time_col: str | None = None,
     group_col: str | None = None,
     include_ai: bool = False,
+    include_intelligence: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     df = read_guarded_dataset(upload, limits, target, require_target=True)
@@ -586,6 +587,11 @@ def run_audit_job(
         "limits": limits.to_public_dict(),
         "report_filename": "leaklens-report.html",
     }
+    intelligence = (
+        analyze_findings(findings).to_dict() if include_intelligence else None
+    )
+    if intelligence is not None:
+        payload["intelligence"] = intelligence
     ai_payload = None
     if include_ai:
         try:
@@ -610,6 +616,7 @@ def run_audit_job(
             "findings": payload["findings"],
             "audit": audit_data,
             "impact": impact,
+            "intelligence": intelligence,
             "ai": ai_payload,
         },
         title=f"LeakLens report - {upload.filename}",
@@ -617,7 +624,12 @@ def run_audit_job(
     return payload
 
 
-def run_code_job(source: str, name: str, include_ai: bool = False) -> dict[str, Any]:
+def run_code_job(
+    source: str,
+    name: str,
+    include_ai: bool = False,
+    include_intelligence: bool = False,
+) -> dict[str, Any]:
     started = time.perf_counter()
     findings = scan_source(source, name)
     payload = {
@@ -634,6 +646,8 @@ def run_code_job(source: str, name: str, include_ai: bool = False) -> dict[str, 
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         },
     }
+    if include_intelligence:
+        payload["intelligence"] = analyze_findings(findings).to_dict()
     if include_ai:
         try:
             from .ai import CodeSource, analyze_code
@@ -654,6 +668,7 @@ class CodeScanRequest(BaseModel):
     source: str = Field(min_length=1)
     name: str = Field(default=_CODE_NAME, max_length=120)
     include_ai: bool = Field(default=False)
+    include_intelligence: bool = Field(default=False)
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:
@@ -875,6 +890,14 @@ def create_app(
                 "network": "none",
                 "changes_deterministic_findings": False,
             },
+            "intelligence": {
+                "enabled": True,
+                "opt_in": True,
+                "scope": ["dataset", "code"],
+                "engine": "leaklens.intelligence.deterministic",
+                "graph": ["evidence", "clusters", "links"],
+                "changes_deterministic_findings": False,
+            },
             "privacy": (
                 "Uploads are parsed in memory for one request, never written to "
                 "disk, and never retained. Responses contain only your findings."
@@ -905,6 +928,7 @@ def create_app(
         time_col: str | None = Form(default=None, alias="time"),
         group_col: str | None = Form(default=None, alias="group"),
         include_ai: bool = Form(default=False),
+        include_intelligence: bool = Form(default=False),
     ) -> JSONResponse:
         clean_target = target.strip()
         if not clean_target:
@@ -925,6 +949,7 @@ def create_app(
                 _clean_option(time_col, "time"),
                 _clean_option(group_col, "group"),
                 include_ai,
+                include_intelligence,
             )
         )
         return JSONResponse(result)
@@ -946,6 +971,7 @@ def create_app(
                 body.source,
                 name,
                 body.include_ai,
+                body.include_intelligence,
             )
         )
         return JSONResponse(result)

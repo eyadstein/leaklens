@@ -174,6 +174,8 @@ leaklens train.csv --target label --fail-under 80   # exit 1 if trust score < 80
 leaklens train.csv --target label --arena    # needs [arena]
 leaklens train.csv --target label --html report.html
 leaklens train.csv --target label --intelligence   # deterministic confidence + evidence clusters
+leaklens train.csv --target label --intelligence --graph-out evidence.mmd
+leaklens --scan src/ --graph-out evidence.json      # graph export implies intelligence
 leaklens train.csv --target label --ai             # experimental, offline AI hypotheses
 ```
 
@@ -191,6 +193,8 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--json` | Emit JSON |
 | `--explain` | Print a suggested fix under each finding |
 | `--intelligence` | Deterministic confidence, evidence clusters, root-cause and remediation analysis |
+| `--graph-out` | Write the evidence graph to a file (implies `--intelligence`); Mermaid, DOT or JSON by extension |
+| `--graph-format` | Override the graph format inferred from `--graph-out` (`mermaid`, `dot`, `json`) |
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
@@ -207,7 +211,7 @@ With `--test`, LeakLens runs three bounded duplicate checks in order and reports
 
 JSON findings also carry an additive `evidence` list (bounded, privacy-safe provenance for the highest-value detectors) and a stable `fingerprint`. SARIF writes the same evidence under `properties.leaklens.evidence` and the fingerprint under `partialFingerprints["leaklensFinding/v1"]`, so tracked findings keep their identity when only line numbers or messages change. Moving a file, changing the detector kind, changing the affected feature or changing a detector-supplied stable key changes the fingerprint. See [`docs/DETECTORS.md`](docs/DETECTORS.md) for the full detector contract. Existing fields, severities and the trust score are unchanged.
 
-`--intelligence` additionally builds a deterministic evidence graph: existing findings are grouped by an inspectable anchor (feature, split or file), detector evidence is preserved and linked, and each cluster gets its own corroboration-aware confidence plus any measured impact from `--test`. The graph adds no findings and never changes the trust score or exit code. See [`docs/INTELLIGENCE.md`](docs/INTELLIGENCE.md).
+`--intelligence` additionally builds a deterministic evidence graph: existing findings are grouped by an inspectable anchor (feature, split or file), detector evidence is preserved and linked, and each cluster gets its own corroboration-aware confidence plus any measured impact from `--test`. The graph adds no findings and never changes the trust score or exit code. `--graph-out evidence.mmd|.dot|.json` exports the same graph for review; see [`docs/INTELLIGENCE.md`](docs/INTELLIGENCE.md) for traversal APIs, export formats, and the API opt-in (`intelligence=true` / `include_intelligence=true`).
 
 ### `leaklens --scan PATH...`
 
@@ -432,7 +436,7 @@ uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000
 python scripts/smoke_public_api.py          # real HTTP smoke test
 ```
 
-`GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` and `POST /scan` are the complete surface. Defaults are 4 MiB per file, 5,000 rows, 200 columns, 750k cells, one concurrent scan, a 30-second scan budget, 20 POSTs per client per minute, and CSV/JSON only; every limit is configurable by environment variable. Requests are content-sniffed (not trusted by filename or MIME type), parsed in memory, bounded before detection and never written to disk. `POST /audit` and `POST /scan` accept `include_ai=true` for the optional experimental AI layer; the response adds an `ai` object and leaves the deterministic score and findings unchanged.
+`GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` and `POST /scan` are the complete surface. Defaults are 4 MiB per file, 5,000 rows, 200 columns, 750k cells, one concurrent scan, a 30-second scan budget, 20 POSTs per client per minute, and CSV/JSON only; every limit is configurable by environment variable. Requests are content-sniffed (not trusted by filename or MIME type), parsed in memory, bounded before detection and never written to disk. `POST /audit` and `POST /scan` accept `include_ai=true` for the optional experimental AI layer; the response adds an `ai` object and leaves the deterministic score and findings unchanged. They also accept `include_intelligence=true` for the deterministic evidence graph; the response adds an `intelligence` object (evidence, clusters, links) and the HTML report gains its cluster and link tables, while the default payload, score, findings and exit behavior stay unchanged.
 
 This repository **does not deploy a public backend**. The GitHub Pages live page therefore starts disconnected. A free Render web service is documented in [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) together with verified limits (512 MB, 0.1 CPU, spins down after 15 minutes, ~1 minute cold start, ephemeral disk) and `render.yaml` + `Dockerfile.api`. Hugging Face Docker Spaces, Fly.io and Koyeb were checked and are not free for this use case.
 

@@ -81,6 +81,7 @@ def _intelligence_section(data: dict) -> str:
                     "Anchor": cluster.get("anchor", ""),
                     "Kind": cluster.get("anchor_kind", ""),
                     "Findings": ", ".join(cluster.get("finding_kinds", [])),
+                    "Evidence": len(cluster.get("evidence_ids", [])),
                     "Confidence": f"{local.get('level', 'unknown')} ({local_score})",
                     "Priority": cluster.get("priority", ""),
                     "Measured impact": "; ".join(cluster.get("measured_impact", [])),
@@ -91,6 +92,25 @@ def _intelligence_section(data: dict) -> str:
             '<div class="card"><p class="sub">Existing evidence grouped by '
             "feature, split or file. Clusters add no findings and keep every "
             "member traceable.</p>" + _table(rows) + "</div>"
+        )
+
+    links = data.get("links", [])
+    if links:
+        rows = [
+            {
+                "From": link.get("source_id", ""),
+                "Relation": link.get("relation", ""),
+                "To": link.get("target_id", ""),
+                "Why": link.get("rationale", ""),
+            }
+            for link in links
+        ]
+        sections.append(
+            "<h2>Evidence links</h2>"
+            '<div class="card"><p class="sub">Directed relations between '
+            "existing evidence records. Links add no findings.</p>"
+            + _table(rows)
+            + "</div>"
         )
 
     root_causes = data.get("root_causes", [])

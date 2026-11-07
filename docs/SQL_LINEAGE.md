@@ -11,7 +11,14 @@ pip install "leaklens-ml[sql]"
 
 SQLGlot (MIT, evaluated at 30.17.0; the extra requires `>=25`) parses the query
 and resolves column lineage through CTEs, derived tables, joins, unions and
-aggregate aliases.
+aggregate aliases. Every branch of a `UNION`, `UNION ALL`, `INTERSECT` or
+`EXCEPT` is analysed, including parenthesised and nested combinations.
+
+Quoted identifiers are read from SQLGlot's parsed leaves rather than by
+stripping characters from the SQL text. ANSI/PostgreSQL/Snowflake double
+quotes, BigQuery backticks, doubled-quote escapes, table-qualified names and
+quoted table names are supported; single quotes remain string literals and are
+never treated as identifiers.
 
 ## Feasibility gate
 
@@ -108,8 +115,11 @@ with the install command; nothing else about `/scan` changes.
   target name is not flagged. That is a deliberate false-negative.
 - Non-SELECT statements (`MERGE`, `INSERT`, DDL) are parsed and skipped with a
   low diagnostic. Only `SELECT` and set operations are analyzed.
+- Repeated statements and repeated set-operation branches are de-duplicated by
+  finding fingerprint, so one structural issue is reported once.
 - The scanner analyzes at most 20 statements and 200 projections per
-  statement; larger queries are reported as unresolved.
+  statement; larger queries are reported as unresolved. Nested set operations
+  count every SELECT branch toward that projection cap.
 - `sql_future_window` looks at the frame direction only. It does not model
   watermarking, event time or the exact availability lag of a warehouse.
 - Nested subqueries are analysed at the top-level projection list. A target

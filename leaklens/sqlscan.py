@@ -126,16 +126,55 @@ def _statement_lines(text: str, dialect: str | None) -> list[int]:
     return lines
 
 
-def _select_for(statement, exp):
+def _selects_for(statement, exp) -> list:
+    """Every SELECT branch of a statement, including nested set operations."""
     if isinstance(statement, exp.Select):
-        return statement
+        return [statement]
     if isinstance(statement, (exp.Union, exp.Intersect, exp.Except)):
-        left = statement.this
-        while isinstance(left, (exp.Union, exp.Intersect, exp.Except)):
-            left = left.this
-        if isinstance(left, exp.Select):
-            return left
-    return None
+        return _selects_for(statement.this, exp) + _selects_for(
+            statement.expression, exp
+        )
+    if isinstance(statement, (exp.Subquery, exp.Paren)):
+        return _selects_for(statement.this, exp)
+    return []
+
+
+# Identifier quoting supported by the declared dialects. Single quotes are
+# string literals, not identifiers, so they are deliberately absent.
+_QUOTE_PAIRS = {'"': '"', "`": "`", "[": "]"}
+
+
+def _identifier_name(value: str) -> str:
+    """Decode one identifier segment, including doubled-quote escapes."""
+    text = value.strip()
+    if len(text) < 2 or text[0] not in _QUOTE_PAIRS:
+        return text
+    close = _QUOTE_PAIRS[text[0]]
+    if text[-1] != close:
+        return text
+    return text[1:-1].replace(close + close, close)
+
+
+def _unqualified(name: str) -> str:
+    """Drop a table/alias prefix without splitting inside quoted identifiers."""
+    text = name.strip()
+    close = ""
+    start = 0
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if close:
+            if char == close:
+                if index + 1 < len(text) and text[index + 1] == close:
+                    index += 2
+                    continue
+                close = ""
+        elif char in _QUOTE_PAIRS:
+            close = _QUOTE_PAIRS[char]
+        elif char == ".":
+            start = index + 1
+        index += 1
+    return text[start:].strip()
 
 
 def _references_target(expression, target: str, exp) -> bool:
@@ -161,7 +200,7 @@ def _leaf_state(node) -> tuple[set[str], bool]:
         if expression is None or raw in {"?", "*"} or name in {"", "*"}:
             unresolved = True
             continue
-        base = name.rsplit(".", 1)[-1]
+        base = _identifier_name(_unqualified(name))
         if base in {"", "*", "?"}:
             unresolved = True
             continue
@@ -271,26 +310,32 @@ def scan_sql(
 
     for index, statement in enumerate(statements[:MAX_STATEMENTS]):
         line = lines[index] if index < len(lines) else 1
-        select = _select_for(statement, exp)
-        if select is None:
+        selects = _selects_for(statement, exp)
+        if not selects:
             skipped += 1
             continue
         analysed += 1
-        projections = list(select.expressions)
+        projections = [
+            (select, projection)
+            for select in selects
+            for projection in select.expressions
+        ]
         if len(projections) > MAX_PROJECTIONS:
             mark_unresolved(line)
             continue
         statement_sql = statement.sql(dialect=read)
         has_star = False
-        sources = []
-        if select.args.get("from_") is not None:
-            sources.append(select.args["from_"].this)
-        for join in select.args.get("joins") or ():
-            if join.this is not None:
-                sources.append(join.this)
-        multiple_sources = len([source for source in sources if source is not None]) > 1
 
-        for projection in projections:
+        for select, projection in projections:
+            sources = []
+            if select.args.get("from_") is not None:
+                sources.append(select.args["from_"].this)
+            for join in select.args.get("joins") or ():
+                if join.this is not None:
+                    sources.append(join.this)
+            multiple_sources = (
+                len([source for source in sources if source is not None]) > 1
+            )
             expression = (
                 projection.this if isinstance(projection, exp.Alias) else projection
             )
@@ -458,7 +503,12 @@ def scan_sql(
                 diagnostic=True,
             )
         )
-    return findings
+
+    # Repeating the same query must not double-count one structural issue.
+    unique: dict[str, Finding] = {}
+    for finding in findings:
+        unique.setdefault(finding.fingerprint, finding)
+    return list(unique.values())
 
 
 def scan_sql_file(path, *, settings: SqlSettings | None = None, target=None):

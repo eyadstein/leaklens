@@ -360,6 +360,29 @@ def test_audit_can_return_a_clean_dataset_without_inventing_findings(client):
     assert payload["counts"]["total"] == 0
 
 
+def test_audit_intelligence_is_opt_in_and_full_graph(client):
+    plain = client.post("/audit", files=multipart(), data={"target": "y"})
+    assert plain.status_code == 200
+    assert "intelligence" not in plain.json()
+    assert "Evidence clusters" not in plain.json()["report_html"]
+
+    response = client.post(
+        "/audit",
+        files=multipart(),
+        data={"target": "y", "include_intelligence": "true"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    graph = payload["intelligence"]
+
+    assert payload["trust_score"] == plain.json()["trust_score"]
+    assert payload["findings"] == plain.json()["findings"]
+    assert set(graph) >= {"evidence", "clusters", "links"}
+    assert graph["clusters"]
+    assert "Evidence clusters" in payload["report_html"]
+    assert "Evidence links" in payload["report_html"]
+
+
 def test_audit_measures_held_out_overlap_without_estimating_performance(client):
     train = leaky_frame()
     held_out = train.head(10).copy()
@@ -519,6 +542,30 @@ def test_scan_reports_syntax_errors_as_findings(client):
     assert payload["syntax_error"] is True
     assert payload["findings"][0]["kind"] == "parse_error"
     assert payload["findings"][0]["fix"]
+
+
+def test_scan_intelligence_is_opt_in_and_additive(client):
+    source = (
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.preprocessing import StandardScaler\n"
+        "X = StandardScaler().fit_transform(X)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+    )
+
+    plain = client.post("/scan", json={"source": source})
+    assert plain.status_code == 200
+    assert "intelligence" not in plain.json()
+
+    response = client.post(
+        "/scan", json={"source": source, "include_intelligence": True}
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["trust_score"] == plain.json()["trust_score"]
+    assert payload["findings"] == plain.json()["findings"]
+    assert set(payload["intelligence"]) >= {"evidence", "clusters", "links"}
+    assert payload["intelligence"]["clusters"]
 
 
 def test_scan_rejects_empty_and_oversized_sources():
@@ -957,4 +1004,16 @@ def test_capabilities_advertise_ai_as_opt_in_and_offline(client):
     assert ai["network"] == "none"
     assert ai["llm"] is False
     assert ai["changes_deterministic_findings"] is False
-    assert set(ai["scope"]) == {"dataset", "code"}
+
+
+def test_capabilities_advertise_intelligence_as_opt_in(client):
+    intelligence = client.get("/capabilities").json()["intelligence"]
+
+    assert intelligence == {
+        "enabled": True,
+        "opt_in": True,
+        "scope": ["dataset", "code"],
+        "engine": "leaklens.intelligence.deterministic",
+        "graph": ["evidence", "clusters", "links"],
+        "changes_deterministic_findings": False,
+    }

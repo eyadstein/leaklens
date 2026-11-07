@@ -36,6 +36,32 @@ _SEVERITY_COLORS = {
 _RESET = "\033[0m"
 
 
+_GRAPH_FORMATS = {
+    ".mmd": "mermaid",
+    ".mermaid": "mermaid",
+    ".md": "mermaid",
+    ".dot": "dot",
+    ".gv": "dot",
+    ".json": "json",
+}
+
+
+def _write_graph(graph, path: str, fmt: str | None) -> None:
+    suffix = Path(path).suffix.lower()
+    chosen = fmt or _GRAPH_FORMATS.get(suffix)
+    if chosen is None:
+        raise ValueError(f"cannot infer graph format from {path!r}; use --graph-format")
+    if chosen not in {"mermaid", "dot", "json"}:
+        raise ValueError(f"unsupported graph format: {chosen!r}")
+    if chosen == "mermaid":
+        text = graph.to_mermaid()
+    elif chosen == "dot":
+        text = graph.to_dot()
+    else:
+        text = json.dumps(graph.to_dict(), indent=2) + "\n"
+    Path(path).write_text(text, encoding="utf-8", newline="\n")
+
+
 def _severity_label(severity: str) -> str:
     label = f"[{severity.upper()}]"
     if os.environ.get("NO_COLOR") or not sys.stdout.isatty():
@@ -383,6 +409,16 @@ def main(argv=None) -> int:
         help="include deterministic confidence, root-cause, and remediation analysis",
     )
     p.add_argument(
+        "--graph-out",
+        help="write the evidence graph (.mmd/.md, .dot/.gv or .json); "
+        "implies --intelligence",
+    )
+    p.add_argument(
+        "--graph-format",
+        choices=("mermaid", "dot", "json"),
+        help="override the evidence-graph format inferred from --graph-out",
+    )
+    p.add_argument(
         "--llm",
         action="store_true",
         help="ask the configured provider to explain findings",
@@ -636,7 +672,8 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
     intelligence_report = None
-    if a.intelligence:
+    evidence_graph = None
+    if a.intelligence or a.graph_out:
         from .intelligence import analyze_dataset_impact, analyze_findings
 
         impact = None
@@ -655,7 +692,9 @@ def main(argv=None) -> int:
                     else None
                 ),
             )
-        intelligence_report = analyze_findings(fs, impact=impact).to_dict()
+        report = analyze_findings(fs, impact=impact)
+        evidence_graph = report.to_graph()
+        intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
     if explanations is not None:
         for finding_report, explanation in zip(rep["findings"], explanations):
@@ -695,6 +734,12 @@ def main(argv=None) -> int:
                 },
                 fh,
             )
+    if a.graph_out and evidence_graph is not None:
+        try:
+            _write_graph(evidence_graph, a.graph_out, a.graph_format)
+        except (OSError, ValueError) as exc:
+            print(f"leaklens: cannot write evidence graph: {exc}", file=sys.stderr)
+            return 2
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
@@ -742,6 +787,16 @@ def main(argv=None) -> int:
                 if next_step is not None:
                     print(f"    Next step: {next_step['actions'][0]}")
                     print(f"    Verify: {next_step['validation_steps'][0]}")
+            links = intelligence_report.get("links", [])
+            if links:
+                relations: dict[str, int] = {}
+                for link in links:
+                    relations[link["relation"]] = relations.get(link["relation"], 0) + 1
+                summary = ", ".join(
+                    f"{relation} {count}"
+                    for relation, count in sorted(relations.items())
+                )
+                print(f"Evidence links: {len(links)} ({summary})")
             for cause in intelligence_report["root_causes"]:
                 print(f"    Root cause: {cause['title']}")
             for recommendation in intelligence_report["recommendations"]:

@@ -71,6 +71,108 @@ def test_target_expression_is_high_with_evidence():
 
 
 @requires_sql
+@pytest.mark.parametrize(
+    ("dialect", "quoted"),
+    [
+        ("ansi", '"label"'),
+        ("postgres", '"label"'),
+        ("snowflake", '"label"'),
+        ("bigquery", "`label`"),
+    ],
+)
+def test_quoted_target_identifiers_are_resolved(dialect, quoted):
+    findings = _scan(
+        f"SELECT id, {quoted} * 2 AS label_score FROM orders", dialect=dialect
+    )
+    assert "sql_target_as_feature" in _kinds(findings)
+
+
+@requires_sql
+def test_escaped_quoted_identifier_is_decoded():
+    findings = scan_sql(
+        'SELECT id, "la""bel" * 2 AS score FROM orders',
+        "query.sql",
+        dialect="postgres",
+        target='la"bel',
+        schema=None,
+    )
+    assert "sql_target_as_feature" in _kinds(findings)
+
+
+@requires_sql
+def test_qualified_and_table_quoted_identifiers_are_resolved():
+    qualified = _scan(
+        'SELECT o.id, o."label" * 2 AS score FROM orders o', dialect="postgres"
+    )
+    assert "sql_target_as_feature" in _kinds(qualified)
+    table = _scan('SELECT id, "label" * 2 AS score FROM "orders"', dialect="postgres")
+    assert "sql_target_as_feature" in _kinds(table)
+
+
+@requires_sql
+def test_quoted_identifier_with_a_dot_is_not_split_as_qualification():
+    findings = scan_sql(
+        'SELECT id, "la.bel" * 2 AS score FROM orders',
+        "query.sql",
+        dialect="postgres",
+        target="la.bel",
+        schema=None,
+    )
+    assert "sql_target_as_feature" in _kinds(findings)
+
+
+@requires_sql
+def test_string_literals_are_not_treated_as_identifiers():
+    findings = _scan("SELECT id, 'label' AS label_score FROM orders")
+    assert "sql_target_as_feature" not in _kinds(findings)
+
+
+@requires_sql
+@pytest.mark.parametrize("operator", ["UNION", "UNION ALL", "INTERSECT", "EXCEPT"])
+def test_every_set_operation_branch_is_analysed(operator):
+    findings = _scan(
+        f"SELECT id, amount AS value FROM orders "
+        f"{operator} SELECT id, label * 2 AS value FROM orders",
+        dialect="postgres",
+    )
+    assert "sql_target_as_feature" in _kinds(findings)
+
+
+@requires_sql
+def test_nested_set_operation_branches_are_analysed():
+    findings = _scan(
+        "(SELECT id, amount AS value FROM orders) "
+        "UNION ALL "
+        "(SELECT id, label * 2 AS value FROM orders "
+        "INTERSECT SELECT id, label * 3 AS value FROM orders)",
+        dialect="postgres",
+    )
+    assert "sql_target_as_feature" in _kinds(findings)
+
+
+@requires_sql
+def test_set_branch_duplicates_collapse_into_one_finding():
+    findings = _scan(
+        "SELECT id, label * 2 AS value FROM orders "
+        "UNION ALL SELECT id, label * 3 AS value FROM orders",
+        dialect="postgres",
+    )
+    targets = [f for f in findings if f.kind == "sql_target_as_feature"]
+    assert len(targets) == 1
+
+
+@requires_sql
+def test_repeated_identical_statements_do_not_duplicate_findings():
+    findings = _scan(
+        "SELECT id FROM orders;\nSELECT id FROM orders",
+        dialect="postgres",
+        split_column="split",
+    )
+    split = [f for f in findings if f.kind == "sql_split_predicate_missing"]
+    assert len(split) == 1
+
+
+@requires_sql
 def test_target_through_cte_and_aggregate_alias():
     cte = _scan(
         "WITH f AS (SELECT id, amount, label FROM orders) "

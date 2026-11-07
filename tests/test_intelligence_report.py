@@ -154,3 +154,38 @@ def test_report_renders_evidence_clusters_and_escapes_measurements():
     assert "2 of 5 test rows duplicate training rows" in report
     assert "&lt;script&gt;bad()&lt;/script&gt;" in report
     assert "<script>bad()</script>" not in report
+
+
+def test_report_renders_evidence_links_and_escapes_them():
+    report = render(
+        {
+            "trust_score": 80,
+            "findings": [],
+            "intelligence": {
+                "confidence": {
+                    "score": 0.6,
+                    "level": "moderate",
+                    "reasons": ["Evidence present"],
+                },
+                "clusters": [],
+                "links": [
+                    {
+                        "source_id": "scanner-000000-e01",
+                        "target_id": "<script>target</script>",
+                        "relation": "supports",
+                        "rationale": "<img src=x onerror=alert(1)>",
+                    }
+                ],
+                "root_causes": [],
+                "recommendations": [],
+            },
+        }
+    )
+
+    assert "Evidence links" in report
+    assert "supports" in report
+    assert "scanner-000000-e01" in report
+    assert "&lt;script&gt;target&lt;/script&gt;" in report
+    assert "&lt;img src=x" in report
+    assert "<script>target</script>" not in report
+    assert "<img src=x onerror" not in report

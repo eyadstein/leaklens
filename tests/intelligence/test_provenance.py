@@ -4,12 +4,19 @@ import pandas as pd
 import pytest
 
 from leaklens.evidence import Evidence as DetectorEvidence
-from leaklens.intelligence import analyze_dataset_impact
+from leaklens.intelligence import analyze_dataset_impact, analyze_findings
 from leaklens.intelligence.context import build_context
 from leaklens.intelligence.provenance import (
     _MAX_LINKS,
+    _links_for,
+    _render_graph,
     anchor_for,
     build_evidence_graph,
+)
+from leaklens.intelligence.schemas import (
+    ConfidenceAssessment,
+    Evidence,
+    EvidenceCluster,
 )
 from leaklens.leakage import Finding
 
@@ -156,6 +163,159 @@ def test_detector_evidence_records_are_linked_to_their_finding():
         "scanner-000000-e01",
         "scanner-000000-e02",
     }
+
+
+def test_detector_links_target_the_finding_they_explain():
+    graph = build_evidence_graph(
+        [
+            _finding("target_leakage", "amount", "high", (_detector(),)),
+            _finding("id_like", "amount", "medium", (_detector(),)),
+        ]
+    )
+
+    supports = {
+        link.source_id: link for link in graph.links if link.relation == "supports"
+    }
+    assert supports["scanner-000000-e01"].target_id == "scanner-000000"
+    assert supports["scanner-000001-e01"].target_id == "scanner-000001"
+
+
+@pytest.mark.parametrize("finding_index", [None, 7])
+def test_detector_without_a_known_primary_is_not_linked(finding_index):
+    confidence = ConfidenceAssessment(0.5, "moderate", ("reason",), 1, 0)
+    primary = Evidence(
+        "scanner-000000", "scanner", "target_leakage", "primary", finding_index=0
+    )
+    detector = Evidence(
+        "scanner-000000-e01",
+        "dataset",
+        "target_leakage",
+        "detector detail",
+        finding_index=finding_index,
+        metadata=(("role", "detector"),),
+    )
+    cluster = EvidenceCluster(
+        "cluster-x",
+        "dataset:amount",
+        "feature",
+        ("target_leakage",),
+        (0,),
+        ("scanner-000000", "scanner-000000-e01"),
+        ("scanner", "dataset"),
+        "high",
+        "high",
+        confidence,
+    )
+
+    links = _links_for(
+        cluster,
+        {"scanner-000000": primary, "scanner-000000-e01": detector},
+    )
+
+    assert links == []
+
+
+def test_neighbors_and_lookup_return_consistent_stable_views():
+    graph = build_evidence_graph(
+        [
+            _finding("target_leakage", "amount", "high", (_detector(),)),
+            _finding("id_like", "amount", "medium"),
+            _finding("categorical_target_leakage", "amount", "medium"),
+        ]
+    )
+
+    assert set(graph.evidence_by_id) == {item.evidence_id for item in graph.evidence}
+    assert graph.cluster_for(2) is graph.clusters[0]
+    assert graph.cluster_for(99) is None
+    assert graph.neighbors("missing") == ()
+
+    neighbours = graph.neighbors("scanner-000000")
+    assert [
+        (relation, direction, item.evidence_id)
+        for relation, direction, item in neighbours
+    ] == [
+        ("supports", "in", "scanner-000000-e01"),
+        ("corroborates", "out", "scanner-000001"),
+        ("corroborates", "out", "scanner-000002"),
+    ]
+    assert graph.relation_counts() == {
+        "corroborates": 2,
+        "same_anchor": 0,
+        "supports": 1,
+    }
+    assert graph.summary() == {
+        "evidence": 4,
+        "clusters": 1,
+        "links": 3,
+        "relations": {"corroborates": 2, "same_anchor": 0, "supports": 1},
+    }
+
+
+def test_graph_exports_are_deterministic_and_inspectable():
+    graph = build_evidence_graph(
+        [
+            _finding("target_leakage", "amount", "high", (_detector(),)),
+            _finding("id_like", "amount", "medium"),
+        ]
+    )
+    before = graph.to_dict()
+
+    mermaid = graph.to_mermaid()
+    dot = graph.to_dot()
+
+    assert mermaid.startswith("flowchart LR\n")
+    assert "subgraph c0" in mermaid
+    assert "-->|corroborates|" in mermaid
+    assert "-->|supports|" in mermaid
+    assert dot.startswith("digraph leaklens {\n")
+    assert dot.endswith("}\n")
+    assert 'label="corroborates"' in dot
+    assert 'label="supports"' in dot
+    assert graph.to_mermaid() == mermaid
+    assert graph.to_dot() == dot
+    assert graph.to_dict() == before
+
+
+def test_graph_exports_escape_user_controlled_labels():
+    finding = Finding(
+        "high",
+        "target_leakage",
+        "amount",
+        'quoted "label" ] with \\ slash\nnewline',
+    )
+    graph = build_evidence_graph([finding])
+
+    mermaid = graph.to_mermaid()
+    dot = graph.to_dot()
+
+    assert "quoted 'label' ) with / slash newline" in mermaid
+    assert "\\" not in mermaid
+    assert 'quoted \\"label\\" ] with \\\\ slash newline' in dot
+
+
+def test_empty_graph_exports_are_valid_and_empty():
+    graph = build_evidence_graph([])
+
+    assert graph.to_mermaid() == "flowchart LR\n"
+    assert graph.to_dot() == (
+        "digraph leaklens {\n  rankdir=LR;\n  node [shape=box, fontsize=10];\n}\n"
+    )
+
+
+def test_unknown_export_format_is_rejected():
+    graph = build_evidence_graph([_finding("target_leakage", "amount")])
+
+    with pytest.raises(ValueError, match="unsupported graph format"):
+        _render_graph(graph, "svg")
+
+
+def test_report_graph_view_matches_the_analyzed_graph():
+    report = analyze_findings([_finding("target_leakage", "amount")])
+    graph = report.to_graph()
+
+    assert graph.evidence == report.evidence
+    assert graph.clusters == report.clusters
+    assert graph.links == report.links
 
 
 def test_links_are_bounded_and_reference_existing_evidence():

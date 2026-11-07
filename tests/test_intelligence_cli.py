@@ -65,3 +65,94 @@ def test_intelligence_summary_prints_cluster_and_next_step(tmp_path, capsys):
     assert "leaky.py" in output
     assert "Next step:" in output
     assert "Verify:" in output
+
+
+def test_graph_out_json_implies_intelligence(tmp_path, capsys):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.json"
+
+    assert main(["--scan", str(source), "--graph-out", str(graph)]) == 0
+
+    assert json.loads(graph.read_text(encoding="utf-8")) == {
+        "evidence": [],
+        "clusters": [],
+        "links": [],
+    }
+    assert "Intelligence confidence:" in capsys.readouterr().out
+
+
+def test_graph_out_infers_mermaid_and_dot_from_extension(tmp_path):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+
+    mermaid = tmp_path / "graph.mmd"
+    dot = tmp_path / "graph.gv"
+
+    assert main(["--scan", str(source), "--graph-out", str(mermaid)]) == 0
+    assert main(["--scan", str(source), "--graph-out", str(dot)]) == 0
+
+    assert mermaid.read_text(encoding="utf-8").startswith("flowchart LR\n")
+    assert dot.read_text(encoding="utf-8").startswith("digraph leaklens {\n")
+
+
+def test_graph_format_overrides_extension(tmp_path):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "graph.txt"
+
+    assert (
+        main(
+            [
+                "--scan",
+                str(source),
+                "--graph-out",
+                str(graph),
+                "--graph-format",
+                "json",
+            ]
+        )
+        == 0
+    )
+
+    assert json.loads(graph.read_text(encoding="utf-8"))["links"] == []
+
+
+def test_graph_out_rejects_unknown_extension(tmp_path, capsys):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+
+    code = main(["--scan", str(source), "--graph-out", str(tmp_path / "graph.svg")])
+
+    assert code == 2
+    assert "cannot infer graph format" in capsys.readouterr().err
+
+
+def test_graph_out_rejects_a_missing_directory(tmp_path, capsys):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    graph = tmp_path / "missing" / "graph.json"
+
+    code = main(["--scan", str(source), "--graph-out", str(graph)])
+
+    assert code == 2
+    assert "cannot write evidence graph" in capsys.readouterr().err
+
+
+def test_graph_out_does_not_change_findings_or_exit_code(tmp_path, capsys):
+    source = tmp_path / "leaky.py"
+    source.write_text(LEAKY, encoding="utf-8")
+    graph = tmp_path / "graph.mmd"
+    before = source.read_bytes()
+
+    assert main(["--scan", str(source), "--graph-out", str(graph), "--json"]) == 1
+    with_graph = json.loads(capsys.readouterr().out)
+    assert main(["--scan", str(source), "--json"]) == 1
+    plain = json.loads(capsys.readouterr().out)
+
+    assert with_graph["trust_score"] == plain["trust_score"]
+    assert with_graph["findings"] == plain["findings"]
+    assert "intelligence" in with_graph
+    assert "intelligence" not in plain
+    assert source.read_bytes() == before
+    assert graph.read_text(encoding="utf-8").startswith("flowchart LR\n")

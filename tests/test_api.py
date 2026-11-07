@@ -77,6 +77,45 @@ def test_scan_payload_keeps_legacy_fields_and_adds_optional_ones():
         _assert_additive_finding(finding)
 
 
+def test_scan_intelligence_is_opt_in_and_additive():
+    plain = c.post("/scan", json={"source": BAD_SOURCE}).json()
+    response = c.post("/scan", json={"source": BAD_SOURCE, "intelligence": True}).json()
+
+    assert set(response) == {"trust_score", "findings", "intelligence"}
+    assert response["trust_score"] == plain["trust_score"]
+    assert response["findings"] == plain["findings"]
+    graph = response["intelligence"]
+    assert set(graph) == {
+        "evidence",
+        "clusters",
+        "links",
+        "confidence",
+        "root_causes",
+        "recommendations",
+        "finding_count",
+        "impact",
+        "engine",
+        "ai_enriched",
+    }
+
+
+def test_audit_intelligence_is_opt_in_and_additive():
+    plain = c.post(
+        "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}
+    ).json()
+    response = c.post(
+        "/audit",
+        files={"file": ("d.csv", _csv(), "text/csv")},
+        data={"target": "y", "intelligence": "true"},
+    ).json()
+
+    assert "intelligence" not in plain
+    assert response["trust_score"] == plain["trust_score"]
+    assert response["findings"] == plain["findings"]
+    assert response["intelligence"]["clusters"]
+    assert response["intelligence"]["links"]
+
+
 def test_audit_payload_keeps_legacy_fields_and_adds_optional_ones():
     body = c.post(
         "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}

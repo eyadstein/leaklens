@@ -2,13 +2,15 @@
 
 `--intelligence` turns the existing scanner findings into a deterministic
 evidence graph: confidence, root-cause explanations, remediation steps and -
-since Wave 4 - **clusters, links and measured impact**. It is opt-in, offline
-and CPU-only, and it is available in the base install with no new dependency.
+since Wave 5 - **inspectable traversal and portable Mermaid/DOT/JSON exports**
+of the clusters and links. It is opt-in, offline and CPU-only, and it is
+available in the base install with no new dependency.
 
 ```sh
 leaklens train.csv --target label --intelligence
 leaklens train.csv --target label --test test.csv --group patient_id --intelligence
 leaklens --scan src/ --intelligence --json
+leaklens --scan src/ --graph-out evidence.mmd
 ```
 
 Intelligence is **additive**. It never creates a finding, never edits a
@@ -27,9 +29,59 @@ the exit code. The deterministic detectors stay authoritative.
 | `recommendations` | Actions plus explicit validation steps, unchanged from earlier releases. |
 
 The CLI prints a short cluster summary, the measured impact attached to the
-top cluster, and the first remediation action and verification step. `--json`
-exposes the full graph under `intelligence`, and `--html` renders an *Evidence
-clusters* table.
+top cluster, the first remediation action and verification step, and an
+evidence-link count by relation. `--json` exposes the full graph under
+`intelligence`, and `--html` renders *Evidence clusters* and *Evidence links*
+tables. `--graph-out` writes the standalone graph instead (see below).
+
+## Exploring and exporting the graph
+
+Every report already carries the graph; `IntelligenceReport.to_graph()` returns
+an `EvidenceGraph` with the same evidence, clusters and links without recomputing
+anything. The graph is a read-only view:
+
+```python
+from leaklens.intelligence import analyze_findings
+
+graph = analyze_findings(findings).to_graph()
+graph.summary()                     # counts and relation totals
+graph.evidence_by_id["scanner-000000"]
+graph.cluster_for(0)                # cluster containing finding index 0
+graph.neighbors("scanner-000000")   # (relation, "in"|"out", Evidence) tuples
+```
+
+`neighbors` returns an empty tuple for an unknown id, never raises, and orders
+results by neighbouring evidence id, then relation, then direction. Traversal
+never mutates the graph.
+
+Export the same graph as Mermaid, Graphviz DOT or JSON:
+
+```sh
+leaklens --scan src/ --graph-out evidence.mmd     # Mermaid (also .mermaid, .md)
+leaklens --scan src/ --graph-out evidence.dot     # DOT (also .gv)
+leaklens --scan src/ --graph-out evidence.json    # JSON
+leaklens --scan src/ --graph-out evidence.txt --graph-format mermaid
+```
+
+`--graph-out` implies `--intelligence`. Extension inference covers `.mmd`,
+`.mermaid`, `.md`, `.dot`, `.gv` and `.json`; `--graph-format` overrides it.
+An unknown extension or an unwritable path exits 2 instead of reporting success.
+The export does not change findings, the trust score, the exit code or the input
+file.
+
+Mermaid and DOT use positional node ids (`n0`, `n1`, ... in evidence order) and
+cluster subgraphs (`c0`, `c1`, ... in cluster order). Labels are collapsed and
+escaped; brackets, pipes, quotes, backslashes and newlines cannot break the
+document. Links that reference a missing record are skipped, and an empty graph
+renders a valid empty `flowchart LR` / `digraph leaklens`. JSON is the existing
+`to_dict()` payload (`evidence`, `clusters`, `links`).
+
+Both API surfaces expose the same graph only on request: legacy `POST /scan`
+and `/audit` accept `intelligence=true`; the hardened public API accepts
+`include_intelligence=true` on `/audit` and `/scan`. The default payloads are
+unchanged, the response adds an `intelligence` object, and `GET /capabilities`
+advertises the opt-in. The public HTML report gains the cluster and link tables
+only when requested.
 
 ## Anchors
 
@@ -101,15 +153,18 @@ distinct findings, not evidence records.
 
 Links explain why records are shown together. They never add a claim:
 
-- `supports` - detector-level detail explains a primary finding;
+- `supports` - detector-level detail explains a primary finding; the link
+  targets the primary record of the same finding, not the cluster
+  representative;
 - `corroborates` - two findings of different kinds share an anchor;
 - `same_anchor` - two findings of the same kind share an anchor (repeated
   pattern in one file).
 
-Links are emitted per cluster, capped at 400 per report, and only reference
-ids that exist in the same report. Ordering is deterministic: clusters sort by
-priority, then confidence, then anchor; ids are slugs with a numeric suffix on
-collision.
+A detector record with no known finding index produces no link rather than an
+invented target. Links are emitted per cluster, capped at 400 per report, and
+only reference ids that exist in the same report. Ordering is deterministic:
+clusters sort by priority, then confidence, then anchor; ids are slugs with a
+numeric suffix on collision.
 
 ## Measured impact
 
@@ -132,7 +187,9 @@ Without `--test` every `measured_impact` list is empty.
 - **No score or exit change.** `leakage.score()` and the default exit gate are
   untouched and intelligence output is not part of either.
 - **Deterministic.** No RNG, no wall clock, no network; repeated runs produce
-  identical JSON.
+  identical JSON and identical Mermaid/DOT text.
+- **Portable exports.** Mermaid, DOT and JSON use only stable node ids and
+  escaped labels; empty graphs and unknown ids are handled without crashing.
 - **Bounded.** Links are capped at 400; evidence length comes from the existing
   per-finding cap; cluster ids are short slugs.
 - **Offline.** No model, no service, no credential.
@@ -144,6 +201,13 @@ Without `--test` every `measured_impact` list is empty.
 - Cluster confidence rewards corroboration, not ground truth. Two correlated
   detectors on the same column raise it even if both share the same blind spot.
 - Same-kind findings in different files never link; only their own anchors do.
+- Exports are a view of the graph, not a proof: an edge means two existing
+  records share an anchor or one explains another. It does not establish
+  causality or confirm leakage.
+- Mermaid and DOT are emitted as text; LeakLens does not bundle a renderer. Use
+  any Mermaid or Graphviz viewer to display the file.
+- The graph is one statement/report wide. It does not merge evidence across
+  separate scans or baseline runs.
 - Measured impact is descriptive. A 100% duplicate rate is a fact about the two
   frames supplied, not proof that a model leaked.
 - Unknown detector kinds get a coarse `finding:<kind>` anchor until their

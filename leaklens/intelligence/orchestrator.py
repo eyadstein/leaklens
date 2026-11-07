@@ -10,7 +10,7 @@ from leaklens.leakage import Finding
 from .confidence import assess_confidence
 from .context import AnalysisContext, build_context
 from .impact import DatasetImpact
-from .provenance import build_evidence_graph
+from .provenance import EvidenceGraph, build_evidence_graph
 from .schemas import (
     ConfidenceAssessment,
     Evidence,
@@ -38,6 +38,12 @@ class IntelligenceReport:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def to_graph(self) -> EvidenceGraph:
+        """Return the inspectable graph built from this report."""
+        return EvidenceGraph(
+            evidence=self.evidence, clusters=self.clusters, links=self.links
+        )
 
 
 _ROOT_CAUSES = {
