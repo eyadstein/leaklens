@@ -12,7 +12,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
+from .drift import DriftSettings
 from .missingness import DEFAULT_SETTINGS, MissingnessSettings
+from .sqlscan import DEFAULT_SETTINGS as DEFAULT_SQL_SETTINGS
+from .sqlscan import SUPPORTED_DIALECTS, SqlSettings
 from .suppression import SuppressionError, SuppressionRule, parse_rules
 
 CONFIG_NAME = ".leaklens.toml"
@@ -33,8 +37,19 @@ _TOP_LEVEL = {
     "baseline",
     "suppressions",
     "missingness",
+    "sql",
+    "drift",
 }
 _BASELINE_KEYS = {"path", "fail_on_new"}
+_SQL_KEYS = {"enabled", "dialect", "split_column", "schema"}
+_DRIFT_KEYS = {
+    "enabled",
+    "min_rows",
+    "min_effect",
+    "max_rows",
+    "max_columns",
+    "max_categories",
+}
 _MISSINGNESS_KEYS = {
     "enabled",
     "min_rows",
@@ -72,6 +87,8 @@ class Config:
     fail_on_new: bool | None = None
     suppressions: tuple[SuppressionRule, ...] = ()
     missingness: MissingnessSettings = DEFAULT_SETTINGS
+    sql: SqlSettings = DEFAULT_SQL_SETTINGS
+    drift: DriftSettings = DEFAULT_DRIFT_SETTINGS
 
 
 DEFAULT_CONFIG = Config()
@@ -190,6 +207,90 @@ def _parse_missingness(data: Any, path: Path) -> MissingnessSettings:
     return replace(DEFAULT_SETTINGS, **values)
 
 
+def _name(value: Any, what: str, path: Path) -> str:
+    if not isinstance(value, str):
+        raise ConfigError(f"{path}: sql.schema {what} must be a string")
+    text = value.strip()
+    if (
+        not text
+        or len(text) > 200
+        or any(ord(ch) < 32 or ord(ch) == 127 for ch in text)
+    ):
+        raise ConfigError(f"{path}: sql.schema {what} is not a valid identifier")
+    return text
+
+
+def _parse_sql(data: Any, path: Path) -> SqlSettings:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: sql must be a table")
+    unknown = sorted(set(data) - _SQL_KEYS)
+    if unknown:
+        raise ConfigError(f"{path}: unsupported sql keys: {', '.join(unknown)}")
+    values: dict[str, Any] = {}
+    if "enabled" in data:
+        values["enabled"] = _boolean(data, "enabled", path)
+    if "dialect" in data:
+        dialect = _string(data, "dialect", path)
+        if dialect not in SUPPORTED_DIALECTS:
+            raise ConfigError(
+                f"{path}: sql.dialect must be one of {', '.join(SUPPORTED_DIALECTS)}"
+            )
+        values["dialect"] = dialect
+    if "split_column" in data:
+        values["split_column"] = _string(data, "split_column", path)
+    if "schema" in data:
+        raw = data["schema"]
+        if not isinstance(raw, dict) or not raw:
+            raise ConfigError(f"{path}: sql.schema must be a non-empty table")
+        if len(raw) > 200:
+            raise ConfigError(f"{path}: sql.schema has too many tables (max 200)")
+        schema: dict[str, dict[str, str]] = {}
+        for table, columns in raw.items():
+            name = _name(table, "table", path)
+            if not isinstance(columns, dict) or not columns:
+                raise ConfigError(f"{path}: sql.schema.{name} must be a column table")
+            if len(columns) > 1000:
+                raise ConfigError(f"{path}: sql.schema.{name} has too many columns")
+            schema[name] = {
+                _name(column, f"column in {name}", path): _string_value(
+                    kind, f"sql.schema.{name}.{column}", path
+                )
+                for column, kind in columns.items()
+            }
+        values["schema"] = schema
+    return replace(DEFAULT_SQL_SETTINGS, **values)
+
+
+def _string_value(value: Any, what: str, path: Path) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{path}: {what} must be a non-empty string")
+    if len(value) > 100 or any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
+        raise ConfigError(f"{path}: {what} is not a valid type name")
+    return value.strip()
+
+
+def _parse_drift(data: Any, path: Path) -> DriftSettings:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: drift must be a table")
+    unknown = sorted(set(data) - _DRIFT_KEYS)
+    if unknown:
+        raise ConfigError(f"{path}: unsupported drift keys: {', '.join(unknown)}")
+    values: dict[str, Any] = {}
+    if "enabled" in data:
+        values["enabled"] = _boolean(data, "enabled", path)
+    if "min_rows" in data:
+        values["min_rows"] = _integer(data, "min_rows", path, low=20)
+    if "max_rows" in data:
+        values["max_rows"] = _integer(data, "max_rows", path, low=1000)
+    if "max_columns" in data:
+        values["max_columns"] = _integer(data, "max_columns", path, low=1)
+    if "max_categories" in data:
+        values["max_categories"] = _integer(data, "max_categories", path, low=2)
+    if "min_effect" in data:
+        values["min_effect"] = _number(data, "min_effect", path, low=0.01, high=1.0)
+    return replace(DEFAULT_DRIFT_SETTINGS, **values)
+
+
 def _parse(data: Any, path: Path) -> Config:
     if not isinstance(data, dict):
         raise ConfigError(f"{path}: configuration must be a table")
@@ -249,6 +350,10 @@ def _parse(data: Any, path: Path) -> Config:
             raise ConfigError(f"{path}: {exc}") from None
     if "missingness" in data:
         values["missingness"] = _parse_missingness(data["missingness"], path)
+    if "sql" in data:
+        values["sql"] = _parse_sql(data["sql"], path)
+    if "drift" in data:
+        values["drift"] = _parse_drift(data["drift"], path)
     return Config(**values)
 
 

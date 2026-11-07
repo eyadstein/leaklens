@@ -41,6 +41,8 @@ def to_sarif(findings, default_uri: str = ".", *, outcome=None) -> dict:
             region = {"startLine": 1}
             msg = f"{f.column}: {f.detail}"
         properties = {"evidence": [item.to_dict() for item in f.evidence]}
+        if getattr(f, "diagnostic", False):
+            properties["diagnostic"] = True
         if fingerprint in status:
             properties["status"] = status[fingerprint]
         rule = suppression.rule_for(fingerprint) if suppression is not None else None

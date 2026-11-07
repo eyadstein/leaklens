@@ -20,9 +20,12 @@ class Finding:
     detail: str
     evidence: tuple[Evidence, ...] = ()
     stable_key: str | None = None
+    diagnostic: bool = False
 
     def __post_init__(self) -> None:
         self.evidence = coerce_evidence(self.evidence)
+        if type(self.diagnostic) is not bool:
+            raise TypeError("diagnostic must be a bool")
         if self.stable_key is not None:
             if not isinstance(self.stable_key, str):
                 raise TypeError("stable_key must be a string or None")
@@ -38,7 +41,7 @@ class Finding:
 
     def to_dict(self, root: str | Path | None = None) -> dict:
         """Backward-compatible JSON payload; evidence and fingerprint are additive."""
-        return {
+        payload = {
             "severity": self.severity,
             "kind": self.kind,
             "column": self.column,
@@ -46,6 +49,9 @@ class Finding:
             "evidence": [item.to_dict() for item in self.evidence],
             "fingerprint": fingerprint_for(self, root=root),
         }
+        if self.diagnostic:
+            payload["diagnostic"] = True
+        return payload
 
 
 def _encode(s: pd.Series) -> np.ndarray:
@@ -262,8 +268,17 @@ def scan(df, target, threshold=0.95):
 
 
 def score(findings) -> int:
+    """Trust score; opt-in diagnostics never count against it."""
     pen = {"high": 35, "medium": 15, "low": 5}
-    return max(0, 100 - sum(pen.get(f.severity, 0) for f in findings))
+    return max(
+        0,
+        100
+        - sum(
+            pen.get(f.severity, 0)
+            for f in findings
+            if not getattr(f, "diagnostic", False)
+        ),
+    )
 
 
 def group_risk(df, group_col):

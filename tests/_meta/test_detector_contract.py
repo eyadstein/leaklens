@@ -39,7 +39,7 @@ def emitted_kinds() -> set[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = node.func.id if isinstance(node.func, ast.Name) else None
-                if name != "Finding":
+                if name not in {"Finding", "_sql_finding"}:
                     continue
                 if (
                     len(node.args) > 1
@@ -68,7 +68,15 @@ def emitted_kinds() -> set[str]:
 
 
 def benchmark_case_names() -> set[str]:
-    from leaklens import bench, bench_advanced, bench_cases, bench_data, bench_missing
+    from leaklens import (
+        bench,
+        bench_advanced,
+        bench_cases,
+        bench_data,
+        bench_drift,
+        bench_missing,
+        bench_sql,
+    )
 
     names = {name for name, _, _ in bench.CASES}
     names |= {name for name, _, _ in bench.LOW_CASES}
@@ -76,6 +84,8 @@ def benchmark_case_names() -> set[str]:
     names |= {case.name for case in bench_advanced.ADVANCED_CASES}
     names |= {case.name for case in bench_data._build_cases()}
     names |= {case.name for case in bench_missing._build_cases()}
+    names |= {case.name for case in bench_sql._build_cases()}
+    names |= {case.name for case in bench_drift._build_cases()}
     return names
 
 

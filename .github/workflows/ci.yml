@@ -20,8 +20,21 @@ jobs:
       - run: python -m leaklens.bench
       - run: python -m leaklens.bench_data
       - run: python -m leaklens.bench_missing
+      - run: python -m leaklens.bench_drift
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
+  sql:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # SQLGlot is optional: the default matrix must stay green without it,
+      # so the SQL tests and benchmark get their own extra-enabled job.
+      - run: pip install -e ".[dev,app,sql]"
+      - run: pytest tests/test_sqlscan.py tests/test_wave3_integration.py -q
+      - run: python -m leaklens.bench_sql
   security:
     runs-on: ubuntu-latest
     steps:

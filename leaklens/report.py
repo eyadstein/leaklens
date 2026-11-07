@@ -421,6 +421,25 @@ def _policy_section(data: dict) -> str:
     return "".join(sections)
 
 
+def _drift_section(data: dict) -> str:
+    """Render the opt-in drift summary; diagnostics never change the score."""
+    if not data:
+        return ""
+    skipped = data.get("skipped") or {}
+    shown = ", ".join(f"{key}: {value}" for key, value in sorted(skipped.items()))
+    return (
+        "<h2>Distribution drift (diagnostic)</h2>"
+        '<div class="card">'
+        f"<p><b>Status:</b> {html.escape(str(data.get('status', 'unknown')))}</p>"
+        f"<p><b>Columns checked:</b> "
+        f"{html.escape(str(data.get('checked_columns', 0)))}</p>"
+        f"<p><b>Skipped:</b> {html.escape(shown or 'none')}</p>"
+        "<p>Drift is a reason to investigate, not a leakage finding. It is "
+        "ignored by the trust score and the default exit code.</p>"
+        "</div>"
+    )
+
+
 def render(rep: dict, title: str = "LeakLens report") -> str:
     s = int(rep["trust_score"])
     color = "#2ea043" if s >= 85 else "#d29922" if s >= 60 else "#f85149"
@@ -438,11 +457,23 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         rows = [
             {
                 key: row.get(key)
-                for key in ("severity", "kind", "column", "detail", "status")
+                for key in (
+                    "severity",
+                    "kind",
+                    "column",
+                    "detail",
+                    "status",
+                    "diagnostic",
+                )
             }
             for row in rows
         ]
     fnd = _table(rows) or '<div class="card">No leakage found.</div>'
+    if any(row.get("diagnostic") for row in rows):
+        fnd = (
+            '<div class="card">Diagnostic findings are shown below but are '
+            "ignored by the trust score and the default exit code.</div>" + fnd
+        )
     policy = _policy_section(rep.get("policy"))
     arena = ""
     if rep.get("arena"):
@@ -452,6 +483,7 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
     )
     impact = _impact_section(rep.get("impact"))
     ai = _ai_section(rep.get("ai")) if rep.get("ai") else ""
+    drift = _drift_section(rep.get("drift"))
     return (
         PAGE.replace("@@TITLE@@", html.escape(title))
         .replace("@@COLOR@@", color)
@@ -459,5 +491,5 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         .replace("@@AUDIT@@", audit)
         .replace("@@FINDINGS@@", policy + fnd)
         .replace("@@ARENA@@", arena)
-        .replace("</body>", impact + intelligence + ai + "</body>")
+        .replace("</body>", impact + intelligence + ai + drift + "</body>")
     )

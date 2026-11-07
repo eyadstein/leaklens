@@ -133,6 +133,13 @@ DETECTORS: tuple[Detector, ...] = (
         "missingness_split_shift",
         "train and test missingness differ",
     ),
+    _entry(
+        "distribution_shift",
+        "split",
+        "low",
+        "distribution_shift",
+        "numeric shift",
+    ),
     _entry("group_overlap", "split", "high", "group_overlap", "entity in both splits"),
     _entry(
         "feature_overlap",
@@ -168,6 +175,34 @@ DETECTORS: tuple[Detector, ...] = (
             "Syntax errors are an input error rather than a leakage class; covered by "
             "scanner and notebook tests."
         ),
+    ),
+    _entry(
+        "sql_target_as_feature",
+        "code",
+        "high",
+        "sql_target_as_feature",
+        "target expression in projection",
+    ),
+    _entry(
+        "sql_split_predicate_missing",
+        "code",
+        "low",
+        "sql_split_predicate_missing",
+        "split predicate missing",
+    ),
+    _entry(
+        "sql_unresolved_column",
+        "code",
+        "low",
+        "sql_unresolved_column",
+        "ambiguous join is a diagnostic",
+    ),
+    _entry(
+        "sql_future_window",
+        "code",
+        "medium",
+        "sql_future_window",
+        "window reads following rows",
     ),
     _entry(
         "notebook_out_of_order_execution",

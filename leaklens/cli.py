@@ -4,12 +4,14 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__, llm
 from .audit import audit
 from .baseline import Baseline, BaselineError
 from .config import ConfigError, load_config
+from .drift import audit_drift
 from .fixes import advice
 from .leakage import (
     feature_overlap,
@@ -84,6 +86,25 @@ STARTER_CONFIG = """# LeakLens settings for this project.
 # min_rate_delta = 0.15
 # min_group_delta = 0.25
 # min_correlation = 0.30
+#
+# [sql]
+# enabled = false           # --sql: also scan .sql files (needs the sql extra)
+# dialect = "ansi"          # --sql-dialect: ansi, postgres, bigquery, snowflake
+# split_column = "split"    # optional: flag queries without a split predicate
+#
+# [sql.schema.orders]       # optional column types for lineage resolution
+# id = "INT"
+# amount = "DOUBLE"
+# label = "INT"
+# split = "TEXT"
+#
+# [drift]
+# enabled = false           # --drift: opt-in train/test drift diagnostics
+# min_rows = 200
+# min_effect = 0.20
+# max_rows = 100000
+# max_columns = 50
+# max_categories = 20
 """
 
 PRE_COMMIT_SNIPPET = """repos:
@@ -322,7 +343,25 @@ def main(argv=None) -> int:
     p.add_argument(
         "--scan",
         nargs="+",
-        help="file or folder of .py/.ipynb to scan for pipeline leaks",
+        help="file or folder of .py/.ipynb (and .sql with --sql) to scan",
+    )
+    p.add_argument(
+        "--sql",
+        action="store_true",
+        default=None,
+        help="include .sql files in --scan folders (needs the sql extra)",
+    )
+    p.add_argument(
+        "--sql-dialect",
+        choices=("ansi", "postgres", "bigquery", "snowflake"),
+        default=None,
+        help="declared dialect for SQL lineage (default: ansi)",
+    )
+    p.add_argument(
+        "--drift",
+        action="store_true",
+        default=None,
+        help="opt-in train/test distribution-drift diagnostics",
     )
     p.add_argument(
         "--arena",
@@ -435,6 +474,14 @@ def main(argv=None) -> int:
     use_ai_llm = choose(a.ai_llm, cfg.ai_llm, False)
     if use_ai_llm:
         use_ai = True
+    sql_settings = replace(
+        cfg.sql,
+        enabled=choose(a.sql, cfg.sql.enabled, False),
+        dialect=choose(a.sql_dialect, cfg.sql.dialect, "ansi"),
+    )
+    drift_settings = replace(
+        cfg.drift, enabled=choose(a.drift, cfg.drift.enabled, False)
+    )
     scan_targets = a.scan if a.scan is not None else [str(path) for path in cfg.scan]
     baseline_path = (
         a.baseline
@@ -495,6 +542,10 @@ def main(argv=None) -> int:
         )
         fs += missing_report.findings
         rep["missingness"] = missing_report.to_dict()
+        if drift_settings.enabled:
+            drift_report = audit_drift(tr, te, target=target, settings=drift_settings)
+            fs += drift_report.findings
+            rep["drift"] = drift_report.to_dict()
         rep["audit"] = audit(tr, target)
         if a.arena:
             try:
@@ -504,7 +555,13 @@ def main(argv=None) -> int:
             res = run(tr, target, time_col, a.out, a.tracking_uri)
             rep["arena"] = res.round(4).to_dict("records")
     for source in scan_targets:
-        fs += scan_path(source)
+        try:
+            if sql_settings.enabled or str(source).lower().endswith(".sql"):
+                fs += scan_path(source, sql=sql_settings, target=target)
+            else:
+                fs += scan_path(source)
+        except ImportError as exc:
+            p.error(str(exc))
 
     outcome = apply_policy(fs, baseline=baseline, rules=cfg.suppressions)
     fs = list(outcome.findings)
@@ -651,6 +708,11 @@ def main(argv=None) -> int:
             )
         if outcome.suppression is not None:
             print(f"Suppressions: {len(outcome.suppressed)} finding(s) suppressed")
+        if drift_settings.enabled and "drift" in rep:
+            print(
+                "Drift (diagnostic, ignored by the score): "
+                f"{rep['drift']['findings']} column(s) shifted"
+            )
         if intelligence_report is not None:
             confidence = intelligence_report["confidence"]
             print(
@@ -690,6 +752,8 @@ def main(argv=None) -> int:
                 suffix = f" [suppressed: {rule.reason}]"
             elif outcome.diff is not None:
                 suffix = f" [{outcome.status.get(f.fingerprint, 'unchanged')}]"
+            if getattr(f, "diagnostic", False):
+                suffix += " [diagnostic]"
             print(
                 f"{_severity_label(f.severity)} {f.kind} :: {f.column} :: "
                 f"{f.detail}{suffix}"

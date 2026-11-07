@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import joblib
@@ -13,11 +14,14 @@ from pydantic import BaseModel
 from . import __version__
 from .audit import audit
 from .baseline import BaselineError
+from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
+from .drift import audit_drift
 from .leakage import scan, score
 from .missingness import audit_missingness
 from .policy import apply_policy, parse_baseline, parse_suppressions
 from .readers import DatasetLimitError, read_dataset
 from .scanner import scan_source
+from .sqlscan import SqlDialectError, SqlUnavailable, scan_sql
 from .suppression import SuppressionError
 
 app = FastAPI(title="LeakLens", version=__version__)
@@ -28,6 +32,10 @@ class ScanReq(BaseModel):
     name: str = "snippet.py"
     baseline: dict | None = None
     suppressions: list[dict] | None = None
+    dialect: str = "ansi"
+    target: str | None = None
+    split_column: str | None = None
+    schema_map: dict[str, dict[str, str]] | None = None
 
 
 class PredictReq(BaseModel):
@@ -103,11 +111,22 @@ async def audit_csv(
     threshold: float = Form(0.95),
     baseline: str | None = Form(None),
     suppressions: str | None = Form(None),
+    test: UploadFile | None = File(None),  # noqa: B008
+    drift: bool = Form(False),
 ):
     try:
         data = io.BytesIO(await file.read())
         _check_upload(file.filename or "upload", data.getvalue())
         df = read_dataset(data, file.filename or "", max_rows=UploadLimits.MAX_ROWS)
+        test_df = None
+        if test is not None:
+            raw = await test.read()
+            _check_upload(test.filename or "test", raw)
+            test_df = read_dataset(
+                io.BytesIO(raw),
+                test.filename or "",
+                max_rows=UploadLimits.MAX_ROWS,
+            )
     except DatasetLimitError as e:
         raise HTTPException(413, str(e)) from None
     except HTTPException:
@@ -119,25 +138,52 @@ async def audit_csv(
     fs = scan(df, target, threshold)
     missing = audit_missingness(df, target)
     fs += missing.findings
+    drift_report = None
+    if drift:
+        drift_report = audit_drift(
+            df,
+            test_df,
+            target=target,
+            settings=replace(DEFAULT_DRIFT_SETTINGS, enabled=True),
+        )
+        fs += drift_report.findings
     outcome = _apply_policy(
         fs,
         baseline=_json_form(baseline, "baseline"),
         suppressions=_json_form(suppressions, "suppressions"),
     )
-    return {
+    payload = {
         "trust_score": score(outcome.active),
         "audit": audit(df, target),
         "missingness": missing.to_dict(),
         "findings": _finding_payloads(outcome),
         **_policy_payload(outcome),
     }
+    if drift_report is not None:
+        payload["drift"] = drift_report.to_dict()
+    return payload
 
 
 @app.post("/scan")
 def scan_code(req: ScanReq):
     if len(req.source) > UploadLimits.MAX_BYTES:
         raise HTTPException(413, f"scan source too large (>8 MiB): {req.name}")
-    fs = scan_source(req.source, req.name)
+    if req.name.lower().endswith(".sql"):
+        try:
+            fs = scan_sql(
+                req.source,
+                req.name,
+                dialect=req.dialect,
+                target=req.target,
+                schema=req.schema_map,
+                split_column=req.split_column,
+            )
+        except SqlUnavailable as exc:
+            raise HTTPException(422, str(exc)) from None
+        except (SqlDialectError, TypeError, ValueError) as exc:
+            raise HTTPException(422, f"invalid SQL scan options: {exc}") from None
+    else:
+        fs = scan_source(req.source, req.name)
     outcome = _apply_policy(fs, baseline=req.baseline, suppressions=req.suppressions)
     return {
         "trust_score": score(outcome.active),

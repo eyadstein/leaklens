@@ -86,6 +86,54 @@ expires = "2027-01-01"   # optional
 
 All thresholds are deterministic. Lowering them increases sensitivity and false positives; the documented defaults favor silence over noise. See [MISSINGNESS_BENCHMARK.md](MISSINGNESS_BENCHMARK.md) for measured behavior on labeled synthetic cases.
 
+## `[sql]`
+
+Opt-in SQL lineage analysis. It needs the optional `sql` extra; without SQLGlot, enabling it raises an actionable error instead of silently skipping SQL.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | boolean | `false` | also scan `.sql` files in folders (`--sql`); an explicit `.sql` file is always analyzed |
+| `dialect` | string | `"ansi"` | one of `ansi`, `postgres`, `bigquery`, `snowflake` (`--sql-dialect`) |
+| `split_column` | string | — | flag queries that read a table with this column but never filter on it |
+| `schema` | table of tables | — | `[sql.schema.<table>]` maps column names to type names for lineage resolution |
+
+```toml
+[sql]
+enabled = true
+dialect = "postgres"
+split_column = "split"
+
+[sql.schema.orders]
+id = "INT"
+amount = "DOUBLE"
+label = "INT"
+split = "TEXT"
+```
+
+There is no silent dialect fallback. Unknown keys, unsupported dialects, an empty `schema` and non-string identifiers are configuration errors (exit 2). The schema map is bounded (200 tables, 1,000 columns per table) and never contacted over the network. See [SQL_LINEAGE.md](SQL_LINEAGE.md).
+
+## `[drift]`
+
+Opt-in train/test distribution-drift diagnostics. Findings are low severity and marked `diagnostic`, so they never change `leakage.score()` or the default exit gate.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `enabled` | boolean | `false` | run the audit (`--drift`) |
+| `min_rows` | integer >= 20 | `200` | minimum rows in each split |
+| `min_effect` | number 0.01–1 | `0.20` | minimum KS/TVD/missingness effect to report |
+| `max_rows` | integer >= 1000 | `100000` | deterministic subsample cap per column |
+| `max_columns` | integer >= 1 | `50` | columns checked per audit |
+| `max_categories` | integer >= 2 | `20` | top-k categories before the "other" bucket |
+
+```toml
+[drift]
+enabled = true
+min_rows = 200
+min_effect = 0.20
+```
+
+Lowering `min_effect` or `min_rows` increases sensitivity and false positives. The target column is never compared, constant and fully missing columns are skipped, and no data or split is modified. See [DRIFT.md](DRIFT.md).
+
 ## Starter file
 
 ```sh

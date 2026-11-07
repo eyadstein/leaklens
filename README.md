@@ -122,6 +122,7 @@ Every optional extra declared in `pyproject.toml`:
 | `images` | Near-duplicate image check (`leaklens images`) with Pillow | `pip install "leaklens-ml[images]"` |
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
 | `api` | Hardened public live-scan API (FastAPI + uvicorn, no Streamlit) | `pip install "leaklens-ml[api]"` |
+| `sql` | Optional SQL lineage analysis (`--sql`) with SQLGlot | `pip install "leaklens-ml[sql]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
 | `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
@@ -147,6 +148,8 @@ leaklens train.json --target label   # JSON input, no extra needed
 leaklens train.xlsx --target label   # Excel input (pip install "leaklens-ml[excel]")
 leaklens train.feather --target label   # Feather input (pip install "leaklens-ml[feather]")
 leaklens images data/train data/test   # near-duplicate images across splits (pip install "leaklens-ml[images]")
+leaklens train.csv --target label --test test.csv --drift   # opt-in, diagnostic-only drift
+leaklens --scan query.sql --target label --sql-dialect postgres   # needs [sql]
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -191,6 +194,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
+| `--drift` | Opt-in train/test distribution-drift diagnostics (needs `--test`; diagnostic-only) |
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
@@ -213,7 +217,10 @@ leaklens --scan leaklens
 leaklens --scan . --sarif leaklens.sarif || true
 leaklens --scan src tests --llm
 leaklens --scan notebooks/ --ai          # experimental AI hypotheses (offline)
+leaklens --scan warehouse/sql --sql --target label --sql-dialect bigquery   # needs [sql]
 ```
+
+SQL: an explicit `.sql` file is analyzed when named on the command line; folders include `.sql` only with `--sql`. Dialects are explicit (`ansi`, `postgres`, `bigquery`, `snowflake`) and there is no silent fallback. See [SQL lineage analysis](#sql-lineage-analysis-optional).
 
 A deliberately leaky demo covering tuning, target encoding, feature selection, group CV, and time ordering is in [`examples/advanced_leaks.py`](examples/advanced_leaks.py); run `leaklens --scan examples/advanced_leaks.py --explain` to see each finding and its fix.
 
@@ -249,9 +256,47 @@ Missing values are not automatically a leak, so the audit only reports patterns 
 
 Every check needs a minimum number of rows, missing values and present values, plus a minimum effect size. Insufficient samples, constant columns, entirely missing columns and missing split metadata are reported as skips rather than findings. Evidence contains only aggregate rates and counts, never raw rows or group identifiers. Statistics are deterministic, use pandas/numpy only (no SciPy), and are linear-time per column. Findings are a reason to investigate, not proof of leakage; severity never exceeds `medium`, the data and splits are never modified, and the default exit behavior is unchanged. See [`docs/MISSINGNESS_BENCHMARK.md`](docs/MISSINGNESS_BENCHMARK.md) for the labeled regression benchmark and its limits.
 
+## SQL lineage analysis (optional)
+
+With the optional `sql` extra (`pip install "leaklens-ml[sql]"`), LeakLens parses `.sql` files with SQLGlot and resolves column lineage through CTEs, derived tables, joins, unions and aggregate aliases. It never executes SQL, opens a database connection or reads credentials.
+
+- `sql_target_as_feature` (high): a non-bare projection whose expression references the target **and** whose confirmed lineage includes the target column.
+- `sql_future_window` (medium): a window frame ends with `FOLLOWING`, so it can read rows that are not available at prediction time.
+- `sql_split_predicate_missing` (low): a configured `split_column` exists on a referenced table and no split predicate filters the query.
+- `sql_unresolved_column` (low, diagnostic): lineage was ambiguous or unavailable (`SELECT *` without a schema, an unqualified column over several tables, a non-SELECT statement).
+- `parse_error` (low): the declared dialect cannot parse the input.
+
+Bare target projections, renames (`label AS outcome`) and target filters (`WHERE label = 1`) are deliberately clean. Unresolved lineage never produces a target finding; it produces the low diagnostic instead, so the analysis fails safe. Dialects are explicit (`ansi`, `postgres`, `bigquery`, `snowflake`) with no silent fallback. Source locations are `path:line`; fingerprints use structural keys, so moving a query keeps its baseline identity. Without the `sql` extra, SQL scanning raises an actionable error naming the install command.
+
+```sh
+leaklens --scan query.sql --target label --sql-dialect postgres
+leaklens --scan warehouse/sql --sql --target label --sql-dialect bigquery
+```
+
+Full rules, the feasibility gate and limitations: [`docs/SQL_LINEAGE.md`](docs/SQL_LINEAGE.md). Measured synthetic corpus: [`docs/SQL_BENCHMARK.md`](docs/SQL_BENCHMARK.md).
+
+## Distribution drift (opt-in)
+
+`--drift` compares the training frame with `--test` and reports columns whose distribution changed. It is **off by default**, **low severity**, marked `diagnostic: true`, and **ignored by the trust score and the default exit code**. It never modifies data or splits and needs no SciPy.
+
+| Signal | Method |
+|---|---|
+| Numeric columns | Two-sample Kolmogorov-Smirnov statistic |
+| Categorical columns | Total-variation distance over the top-k categories |
+| Every column | Absolute missingness-rate difference |
+
+Defaults: at least 200 rows per split, a 0.20 effect floor, at most 50 columns and 20 top categories, with deterministic evenly spaced subsampling above 100,000 rows. Constant, fully missing, unsupported and target columns are skipped; no test frame gives `skipped`, a small sample gives `insufficient_data`. Evidence contains only aggregate statistics (`ks=0.62`, `tvd=0.55`, `missingness=0.41`), never raw values or categories. Drift is a reason to investigate, not proof of leakage.
+
+```sh
+leaklens train.csv --target label --test test.csv --drift
+leaklens train.csv --target label --test test.csv --drift --json
+```
+
+Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls: [`docs/DRIFT_BENCHMARK.md`](docs/DRIFT_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
-`leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]` and `[missingness]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
+`leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
 
 The CLI reads `./.leaklens.toml` automatically when it exists (or the file passed with `--config`). Precedence is deterministic: built-in defaults, then the configuration file, then explicit CLI flags. Unknown keys, wrong types, unsafe output paths and invalid suppression rules fail closed with exit code 2 and the file location in the message; none of them silently change a scan. Output paths (`sarif`, `html`, `badge`, `[baseline].path`) must stay inside the configuration directory. The file cannot execute code, load plugins or access the network.
 
@@ -273,6 +318,22 @@ expires = "2027-01-01"
 [missingness]
 enabled = true
 min_rows = 200
+
+[sql]
+enabled = false            # --sql: also scan .sql files (needs the sql extra)
+dialect = "ansi"           # ansi, postgres, bigquery, snowflake
+split_column = "split"     # optional: flag queries without a split predicate
+
+[sql.schema.orders]        # optional column types for lineage resolution
+id = "INT"
+amount = "DOUBLE"
+label = "INT"
+split = "TEXT"
+
+[drift]
+enabled = false            # --drift: opt-in train/test drift diagnostics
+min_rows = 200
+min_effect = 0.20
 ```
 
 Full schema, defaults and error behavior: [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md). Baseline and suppression workflow: [`docs/BASELINES.md`](docs/BASELINES.md).

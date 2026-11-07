@@ -929,17 +929,30 @@ def scan_file(path) -> list[Finding]:
     ]
 
 
-def scan_path(path) -> list[Finding]:
+def scan_path(path, *, sql=None, target=None) -> list[Finding]:
+    """Scan Python/notebook files, plus ``.sql`` files when enabled or explicit.
+
+    Directories include ``.sql`` only when SQL settings are enabled; an explicit
+    ``.sql`` file is always analyzed because the caller named it.
+    """
     p = Path(path)
+    suffixes = {".py", ".ipynb"}
+    if sql is not None and sql.enabled:
+        suffixes.add(".sql")
     if p.is_file():
         files = [p]
     else:
         files = [
             f
             for f in sorted(p.rglob("*"))
-            if f.suffix in (".py", ".ipynb") and not (SKIP & set(f.parts))
+            if f.suffix in suffixes and not (SKIP & set(f.parts))
         ]
     out = []
     for f in files:
-        out += scan_file(f)
+        if f.suffix == ".sql":
+            from .sqlscan import scan_sql_file
+
+            out += scan_sql_file(f, settings=sql, target=target)
+        else:
+            out += scan_file(f)
     return out

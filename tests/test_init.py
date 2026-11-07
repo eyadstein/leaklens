@@ -60,7 +60,7 @@ def test_starter_config_is_valid_toml(tmp_path):
     )
     assert len(tomllib.loads(uncommented)) == len(_keys(text))
     policy = tomllib.loads(_policy_toml(text))
-    assert set(policy) == {"baseline", "suppressions", "missingness"}
+    assert set(policy) == {"baseline", "suppressions", "missingness", "sql", "drift"}
     assert set(policy["baseline"]) == {"path", "fail_on_new"}
     assert set(policy["missingness"]) == {
         "enabled",
