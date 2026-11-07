@@ -48,7 +48,7 @@ LeakLens emits 37 deterministic finding kinds. Each entry records the detector s
 
 Finding fingerprints are `SHA-256` over a domain-separated, versioned canonical form (`schema=1`) containing the detector kind, surface, repository-relative POSIX path, affected feature and an optional detector-supplied stable key.
 
-Line numbers, notebook cells, explanatory detail, timestamps and observed counts are excluded, so moving a finding to another line or rewording its message keeps the same identity. Moving the file, changing the detector kind, changing the affected feature or changing the stable key changes the fingerprint. Detectors that split one kind into semantically different issues must supply distinct stable keys.
+Line numbers, notebook cells, explanatory detail, timestamps and observed counts are excluded, so moving a finding to another line or rewording its message keeps the same identity. Moving the file, changing the detector kind, changing the affected feature or changing the stable key changes the fingerprint. Dataset and split columns are always treated as features, even when they contain `/` or `:1`. The bundled code scanners derive the stable key from the offending construct's structural AST shape and enclosing function/class (with a deterministic suffix for identical repeats), so repeated findings of one kind in a file stay distinct and the key contains no line number, message text or machine path.
 
 ## Finding kinds
 

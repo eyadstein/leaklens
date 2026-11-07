@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 import warnings
@@ -132,6 +133,66 @@ def _tnames(t) -> set:
     return set()
 
 
+def _ast_digest(value, memo: dict[int, str]) -> str:
+    """Structural digest of an AST node, stable across Python versions.
+
+    ``ast.dump`` omits empty optional fields on newer versions, so it produces
+    different text for the same code on 3.10 and 3.14. This walker hashes every
+    declared field explicitly, never includes source positions, and hashes each
+    subtree once (memoized by node identity).
+    """
+    if isinstance(value, ast.AST):
+        known = memo.get(id(value))
+        if known is not None:
+            return known
+        parts = [type(value).__name__]
+        for name in value._fields:
+            parts.append(name)
+            parts.append(_ast_digest(getattr(value, name, None), memo))
+        digest = hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
+        memo[id(value)] = digest
+        return digest
+    if isinstance(value, (list, tuple)):
+        items = "\x1e".join(_ast_digest(item, memo) for item in value)
+        return hashlib.sha256(items.encode("utf-8")).hexdigest()
+    return repr(value)
+
+
+def _finding_keys(tree: ast.AST) -> dict[int, str]:
+    """Line-independent stable keys for findings attached to an AST node.
+
+    The key is a structural digest of the node (no source positions) plus the
+    enclosing function/class name. Repeated identical statements in one scope
+    get a deterministic ``#n`` suffix. Keys never contain line numbers,
+    messages, timestamps or machine paths.
+    """
+    scopes: dict[int, str] = {}
+
+    def scoped(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                name = f"{prefix}{child.name}"
+                for inner in ast.walk(child):
+                    scopes[id(inner)] = name
+                scoped(child, name + ".")
+            else:
+                scoped(child, prefix)
+
+    scoped(tree, "")
+    nodes = [n for n in ast.walk(tree) if isinstance(n, (ast.Call, ast.BinOp))]
+    nodes.sort(key=lambda n: (n.lineno, n.col_offset, type(n).__name__))
+    memo: dict[int, str] = {}
+    keys: dict[int, str] = {}
+    seen: dict[str, int] = {}
+    for node in nodes:
+        digest = _ast_digest(node, memo)[:16]
+        scope = scopes.get(id(node), "")[:120]
+        base = f"{scope}:{digest}" if scope else digest
+        seen[base] = seen.get(base, 0) + 1
+        keys[id(node)] = base if seen[base] == 1 else f"{base}#{seen[base]}"
+    return keys
+
+
 def _is_tts(v) -> bool:
     return isinstance(v, ast.Call) and _name(v) == "train_test_split"
 
@@ -176,6 +237,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             tree = ast.parse(src)
     except SyntaxError as e:
         return [Finding("low", "parse_error", label, str(e))]
+    keys = _finding_keys(tree)
     ctor, calls, funcs, assigns = {}, [], set(), []
     # Estimators imported under a local name (`from ... import KBinsDiscretizer as KBD`).
     # Matching a class on its local name only hides it from the hint lists (issue #333).
@@ -351,6 +413,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(c.lineno),
                         f"{ast.unparse(c)} creates a future-looking target feature before "
                         f"the split at {loc(first)}: {reason}",
+                        stable_key=keys[id(c)],
                     )
                 )
 
@@ -386,6 +449,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(c.lineno),
                         f"{ast.unparse(c)} encodes the full dataset before the split "
                         f"at {loc(first)}; category columns are learned using held-out rows",
+                        stable_key=keys[id(c)],
                     )
                 )
 
@@ -415,6 +479,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(c.lineno),
                         f"pandas.get_dummies() runs before the split at {loc(first)}, "
                         "so held-out categories can shape the encoded columns",
+                        stable_key=keys[id(c)],
                     )
                 )
 
@@ -430,6 +495,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     "no_random_state",
                     loc(c.lineno),
                     "train_test_split() without random_state: a different split on every run, so results are not reproducible",
+                    stable_key=keys[id(c)],
                 )
             )
         elif nm in SHUFFLED_SPLITS and not _has_seed(c) and _kw_true(c, "shuffle"):
@@ -439,6 +505,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     "no_random_state",
                     loc(c.lineno),
                     f"{nm}(shuffle=True) without random_state: folds differ on every run, so results are not reproducible",
+                    stable_key=keys[id(c)],
                 )
             )
         elif nm in ALWAYS_SHUFFLED and not _has_seed(c):
@@ -448,6 +515,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     "no_random_state",
                     loc(c.lineno),
                     f"{nm}() without random_state: it always shuffles, so folds differ on every run, so results are not reproducible",
+                    stable_key=keys[id(c)],
                 )
             )
         if isinstance(f, ast.Name) and f.id in funcs:
@@ -474,6 +542,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     "fit_on_eval_data",
                     loc(c.lineno),
                     f"{call}({args}) learns from evaluation data",
+                    stable_key=keys[id(c)],
                 )
             )
         elif first is not None and c.lineno < first:
@@ -495,6 +564,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     kind,
                     loc(c.lineno),
                     f"{call}() runs before the split at {loc(first)}",
+                    stable_key=keys[id(c)],
                 )
             )
         elif (
@@ -509,6 +579,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{call}({args}) fits on the full dataset after the split at {loc(tts_line)}; "
                     "fine only for a final refit",
+                    stable_key=keys[id(c)],
                 )
             )
 
@@ -543,10 +614,10 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         if base is None:
             continue
         used = (_all_names(sel) | _strings(sel)) if sel is not None else set()
-        keys = set()
+        group_keys = set()
         for a in base.args:
-            keys |= _all_names(a) | _strings(a)
-        if used & target or keys & target:
+            group_keys |= _all_names(a) | _strings(a)
+        if used & target or group_keys & target:
             out.append(
                 Finding(
                     "high",
@@ -554,6 +625,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{ast.unparse(c)} builds a feature from the target across all rows "
                     f"before the split at {loc(first)}",
+                    stable_key=keys[id(c)],
                 )
             )
         else:
@@ -564,6 +636,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{ast.unparse(c)} uses group statistics from all rows before the "
                     f"split at {loc(first)}; held-out rows help build the feature",
+                    stable_key=keys[id(c)],
                 )
             )
     # issue #77: hand-rolled scaling with full-data statistics before the split,
@@ -619,6 +692,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(b.lineno),
                         f"{ast.unparse(b)} scales with statistics from all rows "
                         f"before the split at {loc(first)}",
+                        stable_key=keys[id(b)],
                     )
                 )
 
@@ -649,6 +723,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{ast.unparse(c)} imputes with a statistic from all rows "
                     f"before the split at {loc(first)}",
+                    stable_key=keys[id(c)],
                 )
             )
 
@@ -719,6 +794,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(c.lineno),
                         f"{ast.unparse(c)} turns a target-derived statistic into a feature "
                         f"before the split at {loc(first)}; held-out labels shape the encoding",
+                        stable_key=keys[id(c)],
                     )
                 )
             elif expr_names & freq_stats or direct_freq:
@@ -729,6 +805,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         loc(c.lineno),
                         f"{ast.unparse(c)} encodes category frequency using every row before "
                         f"the split at {loc(first)}; held-out rows help set the values",
+                        stable_key=keys[id(c)],
                     )
                 )
 
@@ -780,6 +857,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         "train_test_split() shuffles data that was sorted by a time "
                         "column; use shuffle=False or a time-based split so future rows "
                         "cannot land in the training set",
+                        stable_key=keys[id(c)],
                     )
                 )
     return out

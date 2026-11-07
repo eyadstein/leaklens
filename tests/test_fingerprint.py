@@ -14,8 +14,19 @@ from leaklens.fingerprint import (
 )
 from leaklens.leakage import Finding
 from leaklens.sarif import to_sarif
+from leaklens.scanner import scan_source
 
 ROOT = Path(__file__).resolve().parents[1]
+
+REPEATED_SPLITS = (
+    "import pandas as pd\n"
+    "from sklearn.model_selection import train_test_split\n"
+    "df = pd.read_csv('data.csv')\n"
+    "X = df.drop(columns=['target'])\n"
+    "y = df['target']\n"
+    "Xa, Xb, ya, yb = train_test_split(X, y)\n"
+    "Xc, Xd, yc, yd = train_test_split(X, y)\n"
+)
 
 
 def _finding(**overrides):
@@ -125,3 +136,57 @@ def test_json_round_trip_keeps_the_fingerprint():
     finding = _finding()
     payload = json.loads(json.dumps(finding.to_dict()))
     assert payload["fingerprint"] == finding.fingerprint
+
+
+def _fingerprints(source, kind):
+    return [f.fingerprint for f in scan_source(source, "train.py") if f.kind == kind]
+
+
+def test_repeated_findings_of_one_kind_stay_distinct():
+    prints = _fingerprints(REPEATED_SPLITS, "no_random_state")
+    assert len(prints) == 2
+    assert len(set(prints)) == 2
+
+
+def test_repeated_findings_keep_identity_when_lines_move():
+    moved = "\n\n# a comment\n" + REPEATED_SPLITS.replace(
+        "df = pd.read_csv", "\ndf = pd.read_csv"
+    )
+    assert sorted(_fingerprints(REPEATED_SPLITS, "no_random_state")) == sorted(
+        _fingerprints(moved, "no_random_state")
+    )
+
+
+def test_identical_calls_in_different_scopes_stay_distinct():
+    source = (
+        "from sklearn.model_selection import train_test_split\n"
+        "def first():\n"
+        "    return train_test_split(X, y)\n"
+        "def second():\n"
+        "    return train_test_split(X, y)\n"
+    )
+    prints = _fingerprints(source, "no_random_state")
+    assert len(prints) == 2
+    assert len(set(prints)) == 2
+
+
+def test_repeated_cv_findings_stay_distinct():
+    source = (
+        "from sklearn.model_selection import cross_val_score\n"
+        "from sklearn.linear_model import LogisticRegression\n"
+        "m = LogisticRegression()\n"
+        "cross_val_score(m, X_test, y_test)\n"
+        "cross_val_score(m, X_test, y_test)\n"
+    )
+    prints = _fingerprints(source, "cv_on_test_data")
+    assert len(prints) == 2
+    assert len(set(prints)) == 2
+
+
+def test_dataset_columns_that_look_like_locations_stay_distinct():
+    first = _finding(kind="target_leakage", column="ratio:1")
+    second = _finding(kind="target_leakage", column="ratio:2")
+    assert first.fingerprint != second.fingerprint
+    fields = dict(line.split("=", 1) for line in canonical_form(first).splitlines())
+    assert fields["path"] == ""
+    assert fields["feature"] == "ratio:1"

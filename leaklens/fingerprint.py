@@ -15,11 +15,17 @@ values are deliberately excluded: moving a finding or changing a message must
 not change its identity. The path is relative to the repository root when one
 is supplied (or discoverable from a ``.git`` ancestor); absolute paths without
 a discoverable root are flattened to a stable separator-normalized form.
+Dataset and split detectors put a column name in ``column``, so it is always
+treated as a feature there and never parsed as a file location (``*`` means
+"no single column"); this keeps columns that contain ``/`` or ``:1`` distinct.
 
 The hash is ``SHA-256(domain || canonical_form)``. Moving a file, changing the
 detector kind, changing the affected feature/path, or changing the optional
 stable key changes the fingerprint. Detectors that split one kind into
-semantically different issues must supply distinct stable keys.
+semantically different issues must supply distinct stable keys. The bundled
+code scanners derive that key from the offending construct's AST shape and
+enclosing function/class, so repeated findings of one kind in a file stay
+distinct and the key never contains a line number or message text.
 """
 
 from __future__ import annotations
@@ -98,9 +104,20 @@ def _looks_like_path(value: str) -> bool:
     )
 
 
-def normalize_location(column: str, root: str | Path | None = None) -> tuple[str, str]:
+_FEATURE_SURFACES = frozenset({"dataset", "split"})
+
+
+def normalize_location(
+    column: str,
+    root: str | Path | None = None,
+    *,
+    surface: str | None = None,
+) -> tuple[str, str]:
     """Return ``(path, feature)`` for a finding's location column."""
     text = str(column)
+    if surface in _FEATURE_SURFACES:
+        text = text.strip()
+        return "", "" if text in {"", "*"} else _safe(text, limit=300)
     match = LOCATION.match(text)
     if match:
         return normalize_path(match.group("path"), root=root), ""
@@ -122,11 +139,12 @@ def normalize_stable_key(value: Any) -> str:
 
 def canonical_form(finding: Finding, root: str | Path | None = None) -> str:
     """Versioned canonical representation that the digest is computed over."""
-    path, feature = normalize_location(str(finding.column), root=root)
+    surface = surface_for(finding.kind)
+    path, feature = normalize_location(str(finding.column), root=root, surface=surface)
     fields = (
         f"schema={SCHEMA_VERSION}",
         f"kind={_safe(finding.kind, limit=120)}",
-        f"surface={_safe(surface_for(finding.kind), limit=40)}",
+        f"surface={_safe(surface, limit=40)}",
         f"path={_safe(path)}",
         f"feature={_safe(feature, limit=300)}",
         f"key={normalize_stable_key(getattr(finding, 'stable_key', None))}",

@@ -416,8 +416,12 @@ def render_docs() -> str:
         "counts are excluded, so moving a finding to another line or rewording its "
         "message keeps the same identity. Moving the file, changing the detector "
         "kind, changing the affected feature or changing the stable key changes the "
-        "fingerprint. Detectors that split one kind into semantically different "
-        "issues must supply distinct stable keys.",
+        "fingerprint. Dataset and split columns are always treated as features, even "
+        "when they contain `/` or `:1`. The bundled code scanners derive the stable "
+        "key from the offending construct's structural AST shape and enclosing "
+        "function/class (with a deterministic suffix for identical repeats), so "
+        "repeated findings of one kind in a file stay distinct and the key contains "
+        "no line number, message text or machine path.",
         "",
         "## Finding kinds",
         "",

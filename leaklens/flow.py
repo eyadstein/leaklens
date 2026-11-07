@@ -12,6 +12,7 @@ from .scanner import (
     RESAMPLE,
     TARGET_ENCODERS,
     _all_names,
+    _finding_keys,
     _name,
     _sev,
 )
@@ -114,6 +115,7 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     splits = sorted((c for c in calls if is_split(c)), key=lambda c: c.lineno)
     if not splits:
         return []
+    keys = _finding_keys(tree)
 
     def loc(line):
         if cells:
@@ -180,6 +182,7 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     kd,
                     loc(c.lineno),
                     f"{call}() output feeds the split at {loc(hit.lineno)}, so the split rows already shaped it",
+                    stable_key=keys[id(c)],
                 )
             )
     return out

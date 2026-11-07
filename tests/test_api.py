@@ -47,6 +47,44 @@ def test_scan():
     assert c.post("/scan", json={"source": src}).json()["findings"]
 
 
+def _assert_additive_finding(finding):
+    assert set(finding) == {
+        "severity",
+        "kind",
+        "column",
+        "detail",
+        "evidence",
+        "fingerprint",
+    }
+    for field in ("severity", "kind", "column", "detail", "fingerprint"):
+        assert isinstance(finding[field], str)
+    assert isinstance(finding["evidence"], list)
+    assert len(finding["fingerprint"]) == 64
+
+
+def test_scan_payload_keeps_legacy_fields_and_adds_optional_ones():
+    src = (
+        "from sklearn.preprocessing import StandardScaler\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "sc = StandardScaler()\nX = sc.fit_transform(X)\na = train_test_split(X)\n"
+    )
+    body = c.post("/scan", json={"source": src}).json()
+    assert set(body) == {"trust_score", "findings"}
+    assert body["findings"]
+    for finding in body["findings"]:
+        _assert_additive_finding(finding)
+
+
+def test_audit_payload_keeps_legacy_fields_and_adds_optional_ones():
+    body = c.post(
+        "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}
+    ).json()
+    assert set(body) == {"trust_score", "audit", "findings"}
+    assert body["findings"]
+    for finding in body["findings"]:
+        _assert_additive_finding(finding)
+
+
 def test_predict_missing_model(tmp_path, monkeypatch):
     # Isolated sandbox: the API only accepts models under ./models/ relative to
     # CWD, so chdir there and request a nonexistent file inside models/.
