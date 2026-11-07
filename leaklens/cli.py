@@ -419,6 +419,26 @@ def main(argv=None) -> int:
         help="override the evidence-graph format inferred from --graph-out",
     )
     p.add_argument(
+        "--graph-baseline",
+        help="compare the current evidence graph with this snapshot; "
+        "implies --intelligence",
+    )
+    p.add_argument(
+        "--graph-snapshot",
+        help="write a validated evidence-graph snapshot for future comparisons; "
+        "implies --intelligence",
+    )
+    p.add_argument(
+        "--update-graph-snapshot",
+        action="store_true",
+        help="explicitly replace an existing --graph-snapshot file",
+    )
+    p.add_argument(
+        "--fail-on-graph-new",
+        action="store_true",
+        help="opt in: exit 1 when the graph comparison finds new evidence",
+    )
+    p.add_argument(
         "--llm",
         action="store_true",
         help="ask the configured provider to explain findings",
@@ -530,6 +550,10 @@ def main(argv=None) -> int:
         baseline_path = "leaklens-baseline.json"
     if a.fail_on_new and not baseline_path:
         p.error("--fail-on-new needs --baseline PATH or [baseline].path in config")
+    if a.update_graph_snapshot and not a.graph_snapshot:
+        p.error("--update-graph-snapshot needs --graph-snapshot PATH")
+    if a.fail_on_graph_new and not a.graph_baseline:
+        p.error("--fail-on-graph-new needs --graph-baseline PATH")
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
     if not a.train and not scan_targets:
@@ -544,6 +568,16 @@ def main(argv=None) -> int:
         try:
             baseline = Baseline.load(baseline_path)
         except BaselineError as exc:
+            print(f"leaklens: {exc}", file=sys.stderr)
+            return 2
+
+    graph_baseline = None
+    if a.graph_baseline:
+        from .intelligence import GraphBaselineError, GraphSnapshot
+
+        try:
+            graph_baseline = GraphSnapshot.load(a.graph_baseline)
+        except GraphBaselineError as exc:
             print(f"leaklens: {exc}", file=sys.stderr)
             return 2
 
@@ -673,7 +707,9 @@ def main(argv=None) -> int:
             )
     intelligence_report = None
     evidence_graph = None
-    if a.intelligence or a.graph_out:
+    graph_snapshot = None
+    graph_diff = None
+    if a.intelligence or a.graph_out or a.graph_baseline or a.graph_snapshot:
         from .intelligence import analyze_dataset_impact, analyze_findings
 
         impact = None
@@ -696,6 +732,52 @@ def main(argv=None) -> int:
         evidence_graph = report.to_graph()
         intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
+    if a.graph_baseline or a.graph_snapshot:
+        from .intelligence import GraphSnapshot, compare_graph_snapshots
+
+        mode = (
+            "mixed"
+            if a.train and scan_targets
+            else "dataset"
+            if a.train
+            else "code"
+            if scan_targets
+            else "empty"
+        )
+        graph_snapshot = GraphSnapshot.from_findings(
+            fs,
+            graph=evidence_graph,
+            complete=not any(f.kind == "parse_error" for f in fs),
+            context={
+                "mode": mode,
+                "target": target or "",
+                "test": "yes" if test_path else "no",
+                "group": group_col or "",
+                "time": time_col or "",
+                "split": sql_settings.split_column or "",
+                "dialect": sql_settings.dialect if sql_settings.enabled else "",
+                "threshold": f"{threshold:g}",
+                "drift": "yes" if drift_settings.enabled else "no",
+            },
+        )
+        if graph_baseline is not None:
+            graph_diff = compare_graph_snapshots(graph_baseline, graph_snapshot)
+            rep["graph_baseline"] = graph_diff.to_dict()
+    if a.graph_snapshot and graph_snapshot is not None:
+        from .intelligence import GraphBaselineError
+
+        try:
+            written = graph_snapshot.write(
+                a.graph_snapshot, update=bool(a.update_graph_snapshot)
+            )
+        except GraphBaselineError as exc:
+            print(f"leaklens: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"Wrote graph snapshot {written} "
+            f"({len(graph_snapshot.evidence)} evidence records)",
+            file=sys.stderr,
+        )
     if explanations is not None:
         for finding_report, explanation in zip(rep["findings"], explanations):
             if explanation is not None:
@@ -715,7 +797,17 @@ def main(argv=None) -> int:
         from .sarif import to_sarif
 
         with open(sarif_path, "w", encoding="utf-8") as fh:
-            json.dump(to_sarif(fs, a.train or ".", outcome=outcome), fh, indent=2)
+            json.dump(
+                to_sarif(
+                    fs,
+                    a.train or ".",
+                    outcome=outcome,
+                    graph_snapshot=graph_snapshot,
+                    graph_diff=graph_diff,
+                ),
+                fh,
+                indent=2,
+            )
     if html_path:
         from .report import render
 
@@ -751,6 +843,28 @@ def main(argv=None) -> int:
                 f"{counts['changed']} changed, {counts['resolved']} resolved"
                 + (f" ({baseline_path})" if baseline_path else "")
             )
+        if graph_diff is not None:
+            counts = graph_diff.counts
+            print(
+                f"Graph baseline: {counts['new']} new, "
+                f"{counts['unchanged']} unchanged, {counts['changed']} changed, "
+                f"{counts['resolved']} resolved, "
+                f"{counts['uncertain']} uncertain"
+            )
+            relations = graph_diff.relationship_counts
+            if relations["added"] or relations["removed"]:
+                print(
+                    f"Graph relationships: {relations['added']} added, "
+                    f"{relations['removed']} removed"
+                )
+            for item in graph_diff.evidence:
+                if item.state == "unchanged":
+                    continue
+                print(
+                    f"    Graph evidence [{item.state}] {item.kind} :: {item.identity}"
+                )
+            for warning in graph_diff.warnings:
+                print(f"    Graph baseline warning: {warning}")
         if outcome.suppression is not None:
             print(f"Suppressions: {len(outcome.suppressed)} finding(s) suppressed")
         if drift_settings.enabled and "drift" in rep:
@@ -865,5 +979,7 @@ def main(argv=None) -> int:
         fail_under is not None and rep["trust_score"] < fail_under
     )
     if fail_on_new and outcome.diff is not None and outcome.diff.new:
+        gate = True
+    if a.fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
         gate = True
     return 1 if gate else 0

@@ -176,6 +176,8 @@ leaklens train.csv --target label --html report.html
 leaklens train.csv --target label --intelligence   # deterministic confidence + evidence clusters
 leaklens train.csv --target label --intelligence --graph-out evidence.mmd
 leaklens --scan src/ --graph-out evidence.json      # graph export implies intelligence
+leaklens --scan src/ --graph-snapshot graph-baseline.json   # save a comparable snapshot
+leaklens --scan src/ --graph-baseline graph-baseline.json   # new/unchanged/changed/resolved
 leaklens train.csv --target label --ai             # experimental, offline AI hypotheses
 ```
 
@@ -195,6 +197,10 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--intelligence` | Deterministic confidence, evidence clusters, root-cause and remediation analysis |
 | `--graph-out` | Write the evidence graph to a file (implies `--intelligence`); Mermaid, DOT or JSON by extension |
 | `--graph-format` | Override the graph format inferred from `--graph-out` (`mermaid`, `dot`, `json`) |
+| `--graph-snapshot` | Write a validated evidence-graph snapshot for future comparisons (implies `--intelligence`) |
+| `--graph-baseline` | Compare the current graph with a saved snapshot and report new/changed/resolved evidence |
+| `--update-graph-snapshot` | Explicitly replace an existing `--graph-snapshot` file |
+| `--fail-on-graph-new` | Opt in to exit 1 when the graph comparison finds new evidence |
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
@@ -212,6 +218,8 @@ With `--test`, LeakLens runs three bounded duplicate checks in order and reports
 JSON findings also carry an additive `evidence` list (bounded, privacy-safe provenance for the highest-value detectors) and a stable `fingerprint`. SARIF writes the same evidence under `properties.leaklens.evidence` and the fingerprint under `partialFingerprints["leaklensFinding/v1"]`, so tracked findings keep their identity when only line numbers or messages change. Moving a file, changing the detector kind, changing the affected feature or changing a detector-supplied stable key changes the fingerprint. See [`docs/DETECTORS.md`](docs/DETECTORS.md) for the full detector contract. Existing fields, severities and the trust score are unchanged.
 
 `--intelligence` additionally builds a deterministic evidence graph: existing findings are grouped by an inspectable anchor (feature, split or file), detector evidence is preserved and linked, and each cluster gets its own corroboration-aware confidence plus any measured impact from `--test`. The graph adds no findings and never changes the trust score or exit code. `--graph-out evidence.mmd|.dot|.json` exports the same graph for review; see [`docs/INTELLIGENCE.md`](docs/INTELLIGENCE.md) for traversal APIs, export formats, and the API opt-in (`intelligence=true` / `include_intelligence=true`).
+
+`--graph-snapshot baseline.json` saves a versioned snapshot of the current graph, and `--graph-baseline baseline.json` compares a later scan against it. Evidence is matched by stable fingerprint, so reordering or rebuilt ids do not create false changes. The comparison reports `new`, `unchanged`, `changed`, `resolved` and `uncertain`; missing evidence is only `resolved` when both scans are complete and use the same analysis context. Snapshots are validated and written atomically, and are never overwritten without `--update-graph-snapshot`. Graph comparison is opt-in, does not change findings/scores/exit codes, and `--fail-on-graph-new` is the only new (opt-in) gate. JSON gains `graph_baseline`; SARIF gains compact per-result and run-level graph metadata; HTML gains a comparison section. A comparison describes evidence movement, not proof of leakage or remediation.
 
 ### `leaklens --scan PATH...`
 

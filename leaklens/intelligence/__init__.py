@@ -2,6 +2,12 @@
 
 from .confidence import assess_cluster_confidence, assess_confidence
 from .context import AnalysisContext, build_context
+from .graph_baseline import (
+    GraphBaselineError,
+    GraphDiff,
+    GraphSnapshot,
+    compare_graph_snapshots,
+)
 from .impact import DatasetImpact, analyze_dataset_impact
 from .orchestrator import IntelligenceReport, analyze_findings
 from .provenance import EvidenceGraph, anchor_for, build_evidence_graph
@@ -22,6 +28,9 @@ __all__ = [
     "EvidenceCluster",
     "EvidenceGraph",
     "EvidenceLink",
+    "GraphBaselineError",
+    "GraphDiff",
+    "GraphSnapshot",
     "IntelligenceReport",
     "Recommendation",
     "RootCause",
@@ -32,4 +41,5 @@ __all__ = [
     "assess_confidence",
     "build_context",
     "build_evidence_graph",
+    "compare_graph_snapshots",
 ]

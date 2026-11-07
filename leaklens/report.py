@@ -150,6 +150,99 @@ def _intelligence_section(data: dict) -> str:
     return "".join(sections)
 
 
+def _graph_baseline_section(data: dict) -> str:
+    """Render the optional evidence-graph comparison with escaping."""
+    if not data:
+        return ""
+    counts = data.get("counts", {})
+    sections = [
+        "<h2>Evidence-graph baseline comparison</h2>",
+        '<div class="card">',
+        f"<p><b>New:</b> {html.escape(str(counts.get('new', 0)))} · "
+        f"<b>Unchanged:</b> {html.escape(str(counts.get('unchanged', 0)))} · "
+        f"<b>Changed:</b> {html.escape(str(counts.get('changed', 0)))} · "
+        f"<b>Resolved:</b> {html.escape(str(counts.get('resolved', 0)))} · "
+        f"<b>Uncertain:</b> {html.escape(str(counts.get('uncertain', 0)))}</p>",
+    ]
+    if not data.get("resolution_complete", True):
+        sections.append(
+            '<p class="sub">One or both scans were incomplete or used a different '
+            "analysis context, so missing evidence is shown as uncertain instead "
+            "of resolved.</p>"
+        )
+    if data.get("duplicates"):
+        sections.append(
+            f"<p><b>Collapsed duplicate records:</b> "
+            f"{html.escape(str(data.get('duplicates')))}</p>"
+        )
+    evidence = [
+        item for item in data.get("evidence", []) if item.get("state") != "unchanged"
+    ]
+    if evidence:
+        rows = [
+            {
+                "State": item.get("state", ""),
+                "Kind": item.get("kind", ""),
+                "Fingerprint": str(item.get("fingerprint") or "")[:12],
+                "Evidence": item.get("current_id") or item.get("baseline_id") or "",
+                "Changed": ", ".join(item.get("changes", [])),
+            }
+            for item in evidence
+        ]
+        sections.append(
+            "<h3>Evidence changes</h3>"
+            '<p class="sub">Evidence is matched by finding fingerprint, not by '
+            "display order or evidence id.</p>" + _table(rows)
+        )
+    clusters = [
+        item
+        for item in data.get("cluster_changes", [])
+        if item.get("state") != "unchanged"
+    ]
+    if clusters:
+        sections.append(
+            "<h3>Cluster changes</h3>"
+            + _table(
+                [
+                    {
+                        "State": item.get("state", ""),
+                        "Anchor": item.get("anchor", ""),
+                        "Changed": ", ".join(item.get("changes", [])),
+                    }
+                    for item in clusters
+                ]
+            )
+        )
+    relationships = data.get("relationship_changes", [])
+    if relationships:
+        sections.append(
+            "<h3>Relationship changes</h3>"
+            + _table(
+                [
+                    {
+                        "State": item.get("state", ""),
+                        "Source": item.get("source", ""),
+                        "Relation": item.get("relation", ""),
+                        "Target": item.get("target", ""),
+                    }
+                    for item in relationships
+                ]
+            )
+        )
+    warnings = data.get("warnings", [])
+    if warnings:
+        sections.append(
+            "<h3>Comparison warnings</h3><ul>"
+            + "".join(f"<li>{html.escape(str(item))}</li>" for item in warnings)
+            + "</ul>"
+        )
+    sections.append(
+        '<p class="sub">Graph comparison describes changes between two evidence '
+        "snapshots. It is not proof of leakage, remediation or causality.</p></div>"
+    )
+    return "".join(sections)
+
+
 def _impact_section(data: dict) -> str:
     """Render measured dataset impact, escaping all dataset-derived values."""
     if not data:
@@ -527,6 +620,7 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
     intelligence = (
         _intelligence_section(rep["intelligence"]) if rep.get("intelligence") else ""
     )
+    graph_baseline = _graph_baseline_section(rep.get("graph_baseline"))
     impact = _impact_section(rep.get("impact"))
     ai = _ai_section(rep.get("ai")) if rep.get("ai") else ""
     drift = _drift_section(rep.get("drift"))
@@ -537,5 +631,7 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
         .replace("@@AUDIT@@", audit)
         .replace("@@FINDINGS@@", policy + fnd)
         .replace("@@ARENA@@", arena)
-        .replace("</body>", impact + intelligence + ai + drift + "</body>")
+        .replace(
+            "</body>", impact + intelligence + graph_baseline + ai + drift + "</body>"
+        )
     )

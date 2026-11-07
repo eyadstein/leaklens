@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Baseline-aware evidence graph comparisons (0.14.0 phase 10 wave 6)
+
+- Added `leaklens/intelligence/graph_baseline.py`: validated, deterministic evidence-graph snapshots (`schema: "leaklens-evidence-graph"`, version 1, separate from the existing `--graph-out` JSON) and `compare_graph_snapshots()`. Snapshots record evidence, clusters, links, finding fingerprints, completeness, tool version, fingerprint schema and the analysis context.
+- Comparison matches evidence by stable finding fingerprint and role/kind, never by list position or display id. It classifies evidence as `new`, `unchanged`, `changed`, `resolved` or `uncertain`, reports content and relationship changes, tracks cluster changes, keeps duplicates with deterministic ordinals, and tolerates reordered findings, rebuilt evidence ids, reordered links and identical re-runs without false changes.
+- Missing baseline evidence is reported as `uncertain` instead of `resolved` when either scan was incomplete (for example a `parse_error`), the analysis context differs (target, test, group, time, split column, dialect, threshold or drift mode), or a dangling link was skipped. Tool-version drift is a warning; fingerprint-schema and snapshot-version mismatches are refused.
+- Snapshot persistence is strict and local: unknown keys, wrong types, malformed JSON, non-UTF-8 input, oversized files, unknown evidence references and unsupported versions exit 2 with a clear message. Writes are atomic and refuse directories, symlinks and missing parents; an existing snapshot is never replaced without `--update-graph-snapshot`.
+- CLI: new `--graph-baseline PATH`, `--graph-snapshot PATH`, `--update-graph-snapshot` and `--fail-on-graph-new`. Baseline and snapshot flags imply `--intelligence`; human output prints counts and only non-unchanged evidence, `--json` adds a `graph_baseline` object, and `--html` renders a comparison section. The only new gate is opt-in `--fail-on-graph-new` (new evidence only); default findings, scores, severities and exit codes are unchanged.
+- SARIF gains compact, opt-in graph metadata: per-result `properties.leaklens.graph` with `evidence_ids`, `evidence_count` and optional comparison `state`, plus a run-level summary/comparison under `properties.leaklens.graph`. Evidence bodies, rationales and the full graph are not duplicated; output without graph options keeps its previous shape and stays deterministic.
+- Added regression tests for snapshot round-trip/determinism, atomic writes and overwrite refusal, all five states, reordering and id changes, duplicate fingerprints, relationship-only and cluster changes, incomplete/context incompatibility, empty graphs, malformed/oversized/non-UTF-8/schema-mismatched snapshots, CLI comparison and error paths, the opt-in gate, exit neutrality, HTML escaping and SARIF graph metadata.
+- Updated `docs/INTELLIGENCE.md` and the README with the snapshot workflow, state meanings, uncertainty rules, SARIF/CI usage and interpretation limits.
+
 ### Inspectable evidence graphs and SQL lineage fixes (0.14.0 phase 10 wave 5)
 
 - Added deterministic graph exploration to `EvidenceGraph`: `evidence_by_id`, `cluster_for(finding_index)`, `neighbors(evidence_id)` (relation, direction, record), `relation_counts()` and `summary()`. Unknown ids return empty results, neighbours are ordered by evidence id then relation, and no operation mutates the graph. `IntelligenceReport.to_graph()` returns the same graph without recomputing it.

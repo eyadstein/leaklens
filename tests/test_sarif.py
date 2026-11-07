@@ -72,6 +72,48 @@ def test_sarif_adds_policy_metadata_only_when_requested():
     assert result["suppressions"] == [{"kind": "external", "justification": "reviewed"}]
 
 
+def test_sarif_graph_metadata_is_compact_and_opt_in():
+    from leaklens.intelligence import GraphSnapshot, compare_graph_snapshots
+
+    findings = [
+        Finding("high", "target_leakage", "leak", "predicts target"),
+        Finding("medium", "id_like", "uid", "98% unique values"),
+    ]
+    baseline = GraphSnapshot.from_findings([])
+    snapshot = GraphSnapshot.from_findings(findings)
+    diff = compare_graph_snapshots(baseline, snapshot)
+
+    plain = to_sarif(findings, "dataset.csv")
+    assert "properties" not in plain["runs"][0]
+
+    doc = to_sarif(findings, "dataset.csv", graph_snapshot=snapshot, graph_diff=diff)
+    run = doc["runs"][0]
+    graph = run["properties"]["leaklens"]["graph"]
+
+    assert graph["schema"] == "leaklens-evidence-graph"
+    assert graph["version"] == snapshot.version
+    assert graph["complete"] is True
+    assert graph["summary"]["evidence"] == len(snapshot.evidence)
+    assert graph["comparison"]["new"] == len(diff.evidence)
+    assert graph["comparison"]["resolution_complete"] is True
+    assert "evidence" not in graph["comparison"]
+
+    for finding, result in zip(findings, run["results"], strict=True):
+        metadata = result["properties"]["leaklens"]["graph"]
+        assert metadata["evidence_count"] == len(metadata["evidence_ids"])
+        assert metadata["evidence_count"] >= 1
+        assert metadata["state"] == "new"
+        assert finding.fingerprint in snapshot.fingerprints.values()
+
+    encoded = json.dumps(doc, sort_keys=True)
+    assert encoded == json.dumps(
+        to_sarif(findings, "dataset.csv", graph_snapshot=snapshot, graph_diff=diff),
+        sort_keys=True,
+    )
+    # No duplicated evidence bodies or link payloads inside the run summary.
+    assert "rationale" not in json.dumps(graph)
+
+
 def test_sarif_handles_empty_and_unusual_findings():
     empty = to_sarif([])
     assert empty["version"] == "2.1.0"

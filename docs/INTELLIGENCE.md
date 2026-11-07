@@ -3,7 +3,9 @@
 `--intelligence` turns the existing scanner findings into a deterministic
 evidence graph: confidence, root-cause explanations, remediation steps and -
 since Wave 5 - **inspectable traversal and portable Mermaid/DOT/JSON exports**
-of the clusters and links. It is opt-in, offline and CPU-only, and it is
+of the clusters and links. Wave 6 adds **baseline-aware snapshots** that
+compare two scans by stable fingerprint and report new, unchanged, changed,
+resolved or uncertain evidence. It is opt-in, offline and CPU-only, and it is
 available in the base install with no new dependency.
 
 ```sh
@@ -82,6 +84,79 @@ and `/audit` accept `intelligence=true`; the hardened public API accepts
 unchanged, the response adds an `intelligence` object, and `GET /capabilities`
 advertises the opt-in. The public HTML report gains the cluster and link tables
 only when requested.
+
+## Baseline-aware graph comparison
+
+A single graph shows one scan. **Snapshots** let you compare two scans
+deterministically and review what changed. A snapshot is a separate, validated
+JSON file (`schema: "leaklens-evidence-graph"`, version 1); it does not change
+the `--graph-out` JSON payload.
+
+```sh
+# Save a snapshot from the current graph
+leaklens --scan src/ --graph-snapshot evidence-baseline.json
+
+# Compare a later scan against it
+leaklens --scan src/ --graph-baseline evidence-baseline.json
+leaklens --scan src/ --graph-baseline evidence-baseline.json --json
+leaklens --scan src/ --graph-baseline evidence-baseline.json \
+  --graph-snapshot evidence-baseline.json --update-graph-snapshot
+```
+
+`--graph-snapshot` and `--graph-baseline` imply `--intelligence`. They are
+opt-in: without them the findings, trust score, JSON/SARIF payload and exit code
+are exactly as before.
+
+### Change states
+
+Evidence is matched by **stable finding fingerprint**, never by list position,
+display label or evidence id. Reordering findings, rebuilding evidence ids or
+re-running the same scan therefore compares as unchanged.
+
+| State | Meaning |
+|---|---|
+| `new` | Current evidence has no baseline counterpart. |
+| `unchanged` | Same identity and same relevant content and relationships. |
+| `changed` | Same identity, but evidence content or an incident relationship changed. |
+| `resolved` | Baseline evidence has no current counterpart, and the comparison is complete enough to say so. |
+| `uncertain` | Baseline evidence is absent, but the scan was incomplete, the analysis context differs, or dangling links were found. |
+
+`changed` records name the fields that moved (`description`, `location`,
+`metadata`, `relationships`, ...). Relationship changes are also listed
+separately as `added` / `removed`, and relationship-only movement marks the
+incident evidence `changed`. Cluster changes use the same states with their
+own anchor and membership details. Duplicate evidence is kept with a
+deterministic `#0`, `#1`, ... ordinal and counted in `duplicates`.
+
+### Safety and interpretation
+
+- Snapshots are validated strictly before use: unknown keys, wrong types,
+  malformed JSON, non-UTF-8 input, oversized files, unknown evidence references
+  and unsupported schemas/versions are rejected with a clear message (exit 2).
+- Writes are atomic and refuse directories, symlinks and missing parents. An
+  existing snapshot is never replaced unless `--update-graph-snapshot` is given.
+- Missing baseline evidence becomes `uncertain`, not `resolved`, when either
+  scan reported a parse error, the tool context changed (target, split, group,
+  time, dialect, threshold, drift mode) or a dangling link was skipped.
+- `tool_version` differences are a warning, not a hard failure; fingerprints
+  still come from the schema recorded in the snapshot.
+- `--fail-on-graph-new` is the only new gate. It exits 1 when new evidence is
+  found and never fails on `changed`, `resolved` or `uncertain`. It requires
+  `--graph-baseline`.
+
+A graph comparison describes how evidence moved between two runs. It is **not**
+proof that leakage was introduced or fixed, and a `resolved` record is not a
+confirmation that the underlying issue was remediated.
+
+### SARIF
+
+With `--graph-snapshot` / `--graph-baseline`, SARIF gains compact per-result
+`properties.leaklens.graph` metadata (`evidence_ids`, `evidence_count` and,
+when comparing, `state`) and a run-level
+`properties.leaklens.graph` summary (schema, version, completeness, counts and
+the optional comparison). Evidence bodies, link rationales and the full graph
+are never duplicated into every result. SARIF is unchanged when graph options
+are not used.
 
 ## Anchors
 
@@ -206,8 +281,9 @@ Without `--test` every `measured_impact` list is empty.
   causality or confirm leakage.
 - Mermaid and DOT are emitted as text; LeakLens does not bundle a renderer. Use
   any Mermaid or Graphviz viewer to display the file.
-- The graph is one statement/report wide. It does not merge evidence across
-  separate scans or baseline runs.
+- The graph is one statement/report wide. Snapshots compare separate scans but
+  never merge their evidence into one graph, and a comparison is only as good as
+  the two runs being complete and context-compatible.
 - Measured impact is descriptive. A 100% duplicate rate is a fact about the two
   frames supplied, not proof that a model leaked.
 - Unknown detector kinds get a coarse `finding:<kind>` anchor until their

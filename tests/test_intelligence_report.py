@@ -189,3 +189,82 @@ def test_report_renders_evidence_links_and_escapes_them():
     assert "&lt;img src=x" in report
     assert "<script>target</script>" not in report
     assert "<img src=x onerror" not in report
+
+
+def test_report_renders_graph_baseline_and_escapes_it():
+    report = render(
+        {
+            "trust_score": 80,
+            "findings": [],
+            "graph_baseline": {
+                "counts": {
+                    "new": 1,
+                    "unchanged": 2,
+                    "changed": 1,
+                    "resolved": 0,
+                    "uncertain": 1,
+                },
+                "clusters": {
+                    "new": 0,
+                    "unchanged": 1,
+                    "changed": 0,
+                    "resolved": 0,
+                    "uncertain": 0,
+                },
+                "relationships": {"added": 1, "removed": 0},
+                "duplicates": 2,
+                "resolution_complete": False,
+                "warnings": ["<script>bad()</script>"],
+                "evidence": [
+                    {
+                        "state": "new",
+                        "identity": "primary:abc#0",
+                        "kind": "<img src=x onerror=alert(1)>",
+                        "fingerprint": "a" * 64,
+                        "current_id": "scanner-000000",
+                        "changes": [],
+                    },
+                    {
+                        "state": "changed",
+                        "identity": "primary:def#0",
+                        "kind": "target_leakage",
+                        "fingerprint": "b" * 64,
+                        "evidence": "scanner-000001",
+                        "changes": ["description", "relationships"],
+                    },
+                ],
+                "cluster_changes": [
+                    {
+                        "state": "changed",
+                        "anchor": "<script>anchor</script>",
+                        "changes": ["membership"],
+                    }
+                ],
+                "relationship_changes": [
+                    {
+                        "state": "added",
+                        "source": "primary:abc#0",
+                        "relation": "supports",
+                        "target": "primary:def#0",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert "Evidence-graph baseline comparison" in report
+    assert "New:" in report and "Uncertain:" in report
+    assert "One or both scans were incomplete" in report
+    assert "Collapsed duplicate records" in report
+    assert "Cluster changes" in report
+    assert "Relationship changes" in report
+    assert "not proof of leakage" in report
+    assert "&lt;script&gt;bad()&lt;/script&gt;" in report
+    assert "&lt;img src=x" in report
+    assert "<script>" not in report
+    assert "<img src=x onerror" not in report
+
+
+def test_report_omits_graph_baseline_section_by_default():
+    report = render({"trust_score": 100, "findings": []})
+    assert "Evidence-graph baseline comparison" not in report
