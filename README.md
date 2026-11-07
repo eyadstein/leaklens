@@ -1,6 +1,6 @@
 # LeakLens
 
-[العربية](docs/README.ar.md)
+[العربية](docs/README.ar.md) | [日本語](docs/README.ja.md)
 
 [![CI](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml/badge.svg)](https://github.com/eyadstein/leaklens/actions/workflows/ci.yml)
 [![Leakage trust](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eyadstein/leaklens/main/badge.json)](#trust-score-badge)
