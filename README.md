@@ -173,7 +173,7 @@ leaklens train.csv --target label --threshold 0.95
 leaklens train.csv --target label --fail-under 80   # exit 1 if trust score < 80
 leaklens train.csv --target label --arena    # needs [arena]
 leaklens train.csv --target label --html report.html
-leaklens train.csv --target label --intelligence   # deterministic confidence + root cause
+leaklens train.csv --target label --intelligence   # deterministic confidence + evidence clusters
 leaklens train.csv --target label --ai             # experimental, offline AI hypotheses
 ```
 
@@ -190,7 +190,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--tracking-uri` | MLflow tracking URI (default `sqlite:///mlflow.db`) |
 | `--json` | Emit JSON |
 | `--explain` | Print a suggested fix under each finding |
-| `--intelligence` | Deterministic confidence, root-cause, and remediation analysis |
+| `--intelligence` | Deterministic confidence, evidence clusters, root-cause and remediation analysis |
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
@@ -206,6 +206,8 @@ Unknown or extensionless input falls back to CSV. Optional formats (Parquet/Feat
 With `--test`, LeakLens runs three bounded duplicate checks in order and reports at most one: exact row overlap (all shared columns, including the label), identical feature vectors with a different label (label excluded), then normalised near-duplicates (text lower-cased/stripped, numbers rounded to 4 decimals). The checks sample at most 50,000 rows for feature overlap and 20,000 for near-duplicates, so large files stay fast. They are heuristics: they report the observed counts and whether labels conflict, and in low-cardinality tabular data an identical feature vector can occur naturally, so treat a medium finding as a prompt to inspect rather than proof of leakage.
 
 JSON findings also carry an additive `evidence` list (bounded, privacy-safe provenance for the highest-value detectors) and a stable `fingerprint`. SARIF writes the same evidence under `properties.leaklens.evidence` and the fingerprint under `partialFingerprints["leaklensFinding/v1"]`, so tracked findings keep their identity when only line numbers or messages change. Moving a file, changing the detector kind, changing the affected feature or changing a detector-supplied stable key changes the fingerprint. See [`docs/DETECTORS.md`](docs/DETECTORS.md) for the full detector contract. Existing fields, severities and the trust score are unchanged.
+
+`--intelligence` additionally builds a deterministic evidence graph: existing findings are grouped by an inspectable anchor (feature, split or file), detector evidence is preserved and linked, and each cluster gets its own corroboration-aware confidence plus any measured impact from `--test`. The graph adds no findings and never changes the trust score or exit code. See [`docs/INTELLIGENCE.md`](docs/INTELLIGENCE.md).
 
 ### `leaklens --scan PATH...`
 

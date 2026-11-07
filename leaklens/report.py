@@ -67,6 +67,32 @@ def _intelligence_section(data: dict) -> str:
         "</div>",
     ]
 
+    clusters = data.get("clusters", [])
+    if clusters:
+        rows = []
+        for cluster in clusters:
+            local = cluster.get("confidence", {})
+            try:
+                local_score = f"{float(local.get('score', 0)):.2f}"
+            except (TypeError, ValueError):
+                local_score = "unavailable"
+            rows.append(
+                {
+                    "Anchor": cluster.get("anchor", ""),
+                    "Kind": cluster.get("anchor_kind", ""),
+                    "Findings": ", ".join(cluster.get("finding_kinds", [])),
+                    "Confidence": f"{local.get('level', 'unknown')} ({local_score})",
+                    "Priority": cluster.get("priority", ""),
+                    "Measured impact": "; ".join(cluster.get("measured_impact", [])),
+                }
+            )
+        sections.append(
+            "<h2>Evidence clusters</h2>"
+            '<div class="card"><p class="sub">Existing evidence grouped by '
+            "feature, split or file. Clusters add no findings and keep every "
+            "member traceable.</p>" + _table(rows) + "</div>"
+        )
+
     root_causes = data.get("root_causes", [])
     if root_causes:
         sections.append("<h2>Root-cause analysis</h2>")

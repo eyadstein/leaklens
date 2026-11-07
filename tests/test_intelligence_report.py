@@ -111,3 +111,46 @@ def test_report_without_intelligence_remains_compatible():
 
     assert "100/100" in report
     assert "Intelligence analysis" not in report
+
+
+def test_report_renders_evidence_clusters_and_escapes_measurements():
+    report = render(
+        {
+            "trust_score": 80,
+            "findings": [],
+            "intelligence": {
+                "confidence": {
+                    "score": 0.6,
+                    "level": "moderate",
+                    "reasons": ["Evidence present"],
+                },
+                "clusters": [
+                    {
+                        "cluster_id": "cluster-split",
+                        "anchor": "<script>bad()</script>",
+                        "anchor_kind": "split",
+                        "finding_kinds": ["split_overlap", "feature_overlap"],
+                        "finding_indices": [0, 1],
+                        "evidence_ids": ["scanner-000000", "scanner-000001"],
+                        "sources": ["scanner"],
+                        "severity": "high",
+                        "priority": "high",
+                        "confidence": {
+                            "score": 0.74,
+                            "level": "high",
+                            "reasons": ["Two findings"],
+                        },
+                        "measured_impact": ["2 of 5 test rows duplicate training rows"],
+                    }
+                ],
+                "root_causes": [],
+                "recommendations": [],
+            },
+        }
+    )
+
+    assert "Evidence clusters" in report
+    assert "split_overlap, feature_overlap" in report
+    assert "2 of 5 test rows duplicate training rows" in report
+    assert "&lt;script&gt;bad()&lt;/script&gt;" in report
+    assert "<script>bad()</script>" not in report

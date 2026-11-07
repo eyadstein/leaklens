@@ -1,3 +1,4 @@
+from leaklens.evidence import Evidence as DetectorEvidence
 from leaklens.intelligence import DatasetImpact, analyze_findings
 from leaklens.leakage import Finding
 
@@ -85,3 +86,70 @@ def test_report_serializes_to_dictionary():
     assert data["ai_enriched"] is False
     assert data["finding_count"] == 1
     assert data["recommendations"][0]["priority"] == "high"
+
+
+def test_report_exposes_clusters_and_links_additively():
+    findings = [
+        Finding(
+            "high",
+            "split_overlap",
+            "*",
+            "duplicates",
+            evidence=(
+                DetectorEvidence(
+                    source="split",
+                    kind="overlap",
+                    description="test rows duplicate train rows",
+                ),
+            ),
+        ),
+        Finding("medium", "near_duplicate_overlap", "*", "near duplicates"),
+    ]
+
+    report = analyze_findings(findings)
+    data = report.to_dict()
+
+    assert len(report.clusters) == 1
+    assert report.clusters[0].anchor == "split"
+    assert report.clusters[0].finding_kinds == (
+        "split_overlap",
+        "near_duplicate_overlap",
+    )
+    assert len(report.links) == 2
+    assert data["clusters"][0]["cluster_id"] == "cluster-split"
+    assert data["links"][0]["relation"] in {"supports", "corroborates"}
+
+
+def test_report_confidence_ignores_detector_records():
+    plain = analyze_findings(
+        [Finding("high", "target_leakage", "amount", "predicts target")]
+    )
+    detailed = analyze_findings(
+        [
+            Finding(
+                "high",
+                "target_leakage",
+                "amount",
+                "predicts target",
+                evidence=(
+                    DetectorEvidence(
+                        source="data",
+                        kind="statistic",
+                        description="one feature predicts the target",
+                    ),
+                ),
+            )
+        ]
+    )
+
+    assert detailed.evidence != plain.evidence
+    assert detailed.confidence == plain.confidence
+    assert detailed.clusters[0].confidence.score > plain.clusters[0].confidence.score
+
+
+def test_empty_report_has_no_clusters_or_links():
+    report = analyze_findings([])
+
+    assert report.clusters == ()
+    assert report.links == ()
+    assert report.to_dict()["clusters"] == ()

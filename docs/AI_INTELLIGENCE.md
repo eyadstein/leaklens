@@ -53,6 +53,10 @@ The orchestration (`leaklens/ai/analysis.py`) accepts code, a dataset or both. D
 analysis receives **metadata only** — no rows, no values — so row contents cannot leak into
 AI output.
 
+The deterministic counterpart is documented separately in
+[INTELLIGENCE.md](INTELLIGENCE.md): `--intelligence` groups existing findings into an
+evidence graph. The AI layer can cite that evidence but never changes it.
+
 ## Use it
 
 ### CLI

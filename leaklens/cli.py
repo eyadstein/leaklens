@@ -718,6 +718,30 @@ def main(argv=None) -> int:
             print(
                 f"Intelligence confidence: {confidence['level']} ({confidence['score']:.2f})"
             )
+            clusters = intelligence_report.get("clusters", [])
+            if clusters:
+                print(f"Evidence clusters: {len(clusters)}")
+                for cluster in clusters[:3]:
+                    kinds = ", ".join(cluster["finding_kinds"])
+                    local = cluster["confidence"]
+                    print(
+                        f"    Cluster [{cluster['priority']}] {cluster['anchor']}: "
+                        f"{kinds} ({local['level']} {local['score']:.2f})"
+                    )
+                    for note in cluster.get("measured_impact", [])[:2]:
+                        print(f"        Measured: {note}")
+                top_kinds = set(clusters[0]["finding_kinds"])
+                next_step = next(
+                    (
+                        item
+                        for item in intelligence_report["recommendations"]
+                        if top_kinds & set(item["related_finding_kinds"])
+                    ),
+                    None,
+                )
+                if next_step is not None:
+                    print(f"    Next step: {next_step['actions'][0]}")
+                    print(f"    Verify: {next_step['validation_steps'][0]}")
             for cause in intelligence_report["root_causes"]:
                 print(f"    Root cause: {cause['title']}")
             for recommendation in intelligence_report["recommendations"]:

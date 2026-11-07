@@ -1,4 +1,7 @@
-from leaklens.intelligence.confidence import assess_confidence
+from leaklens.intelligence.confidence import (
+    assess_cluster_confidence,
+    assess_confidence,
+)
 from leaklens.intelligence.schemas import Evidence
 
 
@@ -57,3 +60,31 @@ def test_confidence_is_deterministic_and_bounded():
 
     assert first == second
     assert 0.0 <= first.score <= 1.0
+
+
+def test_cluster_confidence_rewards_corroboration_without_certainty():
+    single = assess_cluster_confidence([make_evidence("one", "target_leakage")])
+    corroborated = assess_cluster_confidence(
+        [
+            make_evidence("one", "target_leakage"),
+            make_evidence("two", "id_like"),
+            Evidence(
+                "one-detail",
+                "dataset",
+                "target_leakage",
+                "detector detail",
+                metadata=(("role", "detector"),),
+            ),
+        ]
+    )
+
+    assert corroborated.score > single.score
+    assert corroborated.score <= 0.95
+    assert any("independent finding kinds" in reason for reason in corroborated.reasons)
+
+
+def test_cluster_confidence_empty_is_very_low():
+    result = assess_cluster_confidence([])
+
+    assert result.score == 0.0
+    assert result.level == "very_low"

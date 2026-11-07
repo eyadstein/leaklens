@@ -10,7 +10,15 @@ from leaklens.leakage import Finding
 from .confidence import assess_confidence
 from .context import AnalysisContext, build_context
 from .impact import DatasetImpact
-from .schemas import ConfidenceAssessment, Evidence, Recommendation, RootCause
+from .provenance import build_evidence_graph
+from .schemas import (
+    ConfidenceAssessment,
+    Evidence,
+    EvidenceCluster,
+    EvidenceLink,
+    Recommendation,
+    RootCause,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +33,8 @@ class IntelligenceReport:
     impact: DatasetImpact | None = None
     engine: str = "deterministic"
     ai_enriched: bool = False
+    clusters: tuple[EvidenceCluster, ...] = ()
+    links: tuple[EvidenceLink, ...] = ()
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -245,8 +255,10 @@ def analyze_findings(
 ) -> IntelligenceReport:
     """Produce deterministic intelligence, optionally including measured dataset impact."""
 
+    findings = tuple(findings)
     context: AnalysisContext = build_context(findings)
-    confidence = assess_confidence(context.evidence)
+    confidence = assess_confidence(context.primary_evidence)
+    graph = build_evidence_graph(findings, impact=impact, context=context)
 
     root_causes = []
     recommendations = []
@@ -296,4 +308,6 @@ def analyze_findings(
         recommendations=tuple(recommendations),
         finding_count=context.finding_count,
         impact=impact,
+        clusters=graph.clusters,
+        links=graph.links,
     )
