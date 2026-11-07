@@ -40,6 +40,11 @@ def validate_upload_size(name: str, byte_count: int) -> None:
         raise HTTPException(413, f"upload too large (>8 MiB): {name}")
 
 
+def _finding_payload(finding) -> dict:
+    """Additive payload: existing fields plus privacy-safe evidence/fingerprint."""
+    return finding.to_dict()
+
+
 def _check_upload(name: str, data: bytes) -> None:
     validate_upload_size(name, len(data))
     # Text formats are row-counted here. Binary containers (xlsx, parquet,
@@ -79,7 +84,7 @@ async def audit_csv(
     return {
         "trust_score": score(fs),
         "audit": audit(df, target),
-        "findings": [f.to_dict() for f in fs],
+        "findings": [_finding_payload(f) for f in fs],
     }
 
 
@@ -88,7 +93,7 @@ def scan_code(req: ScanReq):
     if len(req.source) > UploadLimits.MAX_BYTES:
         raise HTTPException(413, f"scan source too large (>8 MiB): {req.name}")
     fs = scan_source(req.source, req.name)
-    return {"trust_score": score(fs), "findings": [f.to_dict() for f in fs]}
+    return {"trust_score": score(fs), "findings": [_finding_payload(f) for f in fs]}
 
 
 @app.post("/predict")

@@ -33,6 +33,9 @@ FIXES = {
     "notebook_out_of_order_execution": "Re-run the notebook top to bottom or use 'Restart Kernel and Run All' before trusting the scan; stale runtime state can hide or create leakage.",
     "feature_overlap": "Deduplicate feature vectors before splitting, or split by entity. Identical features with conflicting labels let the model memorise a held-out row.",
     "near_duplicate_overlap": "Deduplicate or group near-identical rows before splitting; normalised duplicates inflate held-out scores and hide distribution shift.",
+    "group_missing": "Pass an existing --group column, or drop the group check; a missing entity column hides group leakage.",
+    "image_overlap": "Deduplicate images across the split, or split by capture/scene group so near-identical images never sit on both sides.",
+    "parse_error": "Fix the syntax error (or the notebook cell that cannot be parsed) before relying on this scan.",
 }
 
 

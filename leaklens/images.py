@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .evidence import Evidence
 from .leakage import Finding
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
@@ -100,6 +101,20 @@ def image_overlap(train_dir, test_dir, max_distance=6):
                 "image_overlap",
                 "*",
                 f"{n} test images ({n / len(te):.1%}) near-duplicate a train image (dHash distance <= {max_distance})",
+                evidence=(
+                    Evidence(
+                        source="image",
+                        kind="duplicate",
+                        description=(
+                            "near-identical image pairs appear in both the train and "
+                            "test splits"
+                        ),
+                        observed=(
+                            f"{n} test images within dHash distance {max_distance}"
+                        ),
+                        expected="0 image pairs within the distance threshold",
+                    ),
+                ),
             )
         )
     return fs, pairs, stats

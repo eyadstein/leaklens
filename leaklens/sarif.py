@@ -48,6 +48,12 @@ def to_sarif(findings, default_uri: str = ".") -> dict:
                         }
                     }
                 ],
+                "partialFingerprints": {"leaklensFinding/v1": f.fingerprint},
+                "properties": {
+                    "leaklens": {
+                        "evidence": [item.to_dict() for item in f.evidence],
+                    }
+                },
             }
         )
     return {

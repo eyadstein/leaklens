@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Reliable CI findings (0.14.0 phase 10 wave 1)
+
+- Added `leaklens/evidence.py`: immutable, bounded, JSON-safe `Evidence` records (`source`, `kind`, `description`, optional `location`/`observed`/`expected`) with control-character rejection and a hard cap of 16 records per finding. Evidence explains why a detector fired; it never carries raw dataset values, credentials, image bytes or full source.
+- Added `leaklens/fingerprint.py`: deterministic, domain-separated SHA-256 over a versioned canonical form (`schema=1`, detector kind, surface, repo-relative POSIX path, affected feature, optional detector-supplied stable key). Line numbers, notebook cells, detail text, timestamps and observed counts are excluded, so moved lines keep their identity while a moved file, changed kind or changed feature does not.
+- Migrated `target_leakage`, `split_overlap`, `temporal_leakage`, `group_overlap`, `near_duplicate_overlap` and `image_overlap` to emit evidence. Their counts, ratios and bounds are reported without copying rows, identifiers, timestamps or image data.
+- Added `leaklens/manifest.py` and generated `docs/DETECTORS.md`: every one of the 37 emitted finding kinds now records its surface, default severity, advice key, benchmark case or explicit `no_bench_reason`, documentation anchor and introduced version. `tests/_meta/test_detector_contract.py` scans the production emitters, validates the manifest, checks every benchmark name and fails on a deliberately unknown kind.
+- JSON findings gain additive `evidence` and `fingerprint` fields; SARIF gains `properties.leaklens.evidence` and `partialFingerprints["leaklensFinding/v1"]`; the FastAPI `/audit` and `/scan` payloads expose the same fields. Existing fields, finding kinds, severities, `leakage.score()`, CLI exit codes and benchmark expectations are unchanged, and evidence remains optional for third-party callers.
+- Added tests for evidence validation/bounds/privacy, fingerprint determinism across processes and working directories, Windows/POSIX path normalization, line movement, stable keys, manifest contracts, JSON/SARIF determinism and backward-compatible `Finding(...)` construction.
+
 ### AI reliability and false-positive reduction (0.14.0 phase 7)
 
 - Added an independently authored Phase 7 development corpus (`leaklens/ai/corpus_phase7.py`): **40 hard-positive/hard-negative cases in 20 template pairs** that contain the same surface constructs (scaler, `KFold`, `sort_values`, `groupby`, `shift(-1)`, `get_dummies`) but wire them correctly or incorrectly. Every case records provenance, label rationale and limitations; no example is copied from the Phase 5 locked test or the Phase 6 real-world holdout. Development is now **259 cases (136 leaky / 123 legitimate), 174 groups, 19 sources**; training is 219 cases from 15 sources.

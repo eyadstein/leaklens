@@ -201,6 +201,8 @@ Unknown or extensionless input falls back to CSV. Optional formats (Parquet/Feat
 
 With `--test`, LeakLens runs three bounded duplicate checks in order and reports at most one: exact row overlap (all shared columns, including the label), identical feature vectors with a different label (label excluded), then normalised near-duplicates (text lower-cased/stripped, numbers rounded to 4 decimals). The checks sample at most 50,000 rows for feature overlap and 20,000 for near-duplicates, so large files stay fast. They are heuristics: they report the observed counts and whether labels conflict, and in low-cardinality tabular data an identical feature vector can occur naturally, so treat a medium finding as a prompt to inspect rather than proof of leakage.
 
+JSON findings also carry an additive `evidence` list (bounded, privacy-safe provenance for the highest-value detectors) and a stable `fingerprint`. SARIF writes the same evidence under `properties.leaklens.evidence` and the fingerprint under `partialFingerprints["leaklensFinding/v1"]`, so tracked findings keep their identity when only line numbers or messages change. Moving a file, changing the detector kind, changing the affected feature or changing a detector-supplied stable key changes the fingerprint. See [`docs/DETECTORS.md`](docs/DETECTORS.md) for the full detector contract. Existing fields, severities and the trust score are unchanged.
+
 ### `leaklens --scan PATH...`
 
 Statically scan `.py` / `.ipynb` files or folders for pipeline leaks (fit before split, fit on test data, tuning on test data, target/frequency encoding before the split, feature selection, group CV without `groups=`, shuffled time-series splits, and out-of-order notebook execution). Scanned code is **never executed**.
