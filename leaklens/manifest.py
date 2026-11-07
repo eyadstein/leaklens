@@ -101,6 +101,20 @@ DETECTORS: tuple[Detector, ...] = (
         "group_leakage_risk",
         "entity repeated across rows",
     ),
+    _entry(
+        "missingness_target_signal",
+        "dataset",
+        "medium",
+        "missingness_target_signal",
+        "binary target association",
+    ),
+    _entry(
+        "missingness_group_signal",
+        "dataset",
+        "low",
+        "missingness_group_signal",
+        "group-associated missingness",
+    ),
     # Split and duplicate detectors.
     _entry(
         "split_overlap", "split", "high", "split_overlap", "exact rows in both splits"
@@ -111,6 +125,13 @@ DETECTORS: tuple[Detector, ...] = (
         "high",
         "temporal_leakage",
         "future rows before earlier rows",
+    ),
+    _entry(
+        "missingness_split_shift",
+        "split",
+        "medium",
+        "missingness_split_shift",
+        "train and test missingness differ",
     ),
     _entry("group_overlap", "split", "high", "group_overlap", "entity in both splits"),
     _entry(

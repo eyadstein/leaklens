@@ -202,7 +202,8 @@ def test_json_and_sarif_serialization_are_deterministic():
 
 def test_api_payload_keeps_evidence_and_adds_no_raw_values():
     pytest.importorskip("fastapi")
-    from leaklens.api import _finding_payload
+    from leaklens.api import _finding_payloads
+    from leaklens.policy import apply_policy
 
     finding = Finding(
         "high",
@@ -219,6 +220,6 @@ def test_api_payload_keeps_evidence_and_adds_no_raw_values():
             ),
         ),
     )
-    payload = _finding_payload(finding)
+    payload = _finding_payloads(apply_policy([finding]))[0]
     assert payload["evidence"] == [finding.evidence[0].to_dict()]
     assert payload["fingerprint"] == finding.fingerprint

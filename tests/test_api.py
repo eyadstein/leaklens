@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -79,10 +81,108 @@ def test_audit_payload_keeps_legacy_fields_and_adds_optional_ones():
     body = c.post(
         "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}
     ).json()
-    assert set(body) == {"trust_score", "audit", "findings"}
+    assert {"trust_score", "audit", "findings"} <= set(body)
     assert body["findings"]
     for finding in body["findings"]:
         _assert_additive_finding(finding)
+    assert body["missingness"]["status"] in {"ok", "insufficient_data"}
+    assert body["missingness"]["findings"] == len(
+        [f for f in body["findings"] if f["kind"].startswith("missingness_")]
+    )
+
+
+def _baseline_from(findings):
+    return {
+        "schema": "leaklens-baseline",
+        "version": 1,
+        "fingerprint_schema": 1,
+        "tool_version": "0.13.0",
+        "findings": [
+            {
+                "fingerprint": f["fingerprint"],
+                "kind": f["kind"],
+                "severity": f["severity"],
+                "column": f["column"],
+            }
+            for f in findings
+        ],
+    }
+
+
+BAD_SOURCE = (
+    "from sklearn.preprocessing import StandardScaler\n"
+    "from sklearn.model_selection import train_test_split\n"
+    "sc = StandardScaler()\nX = sc.fit_transform(X)\na = train_test_split(X)\n"
+)
+
+
+def test_scan_policy_is_additive():
+    body = c.post("/scan", json={"source": BAD_SOURCE}).json()
+    baseline = _baseline_from(body["findings"])
+    baseline["findings"] = baseline["findings"][:1]
+    response = c.post("/scan", json={"source": BAD_SOURCE, "baseline": baseline}).json()
+    assert set(response) == {"trust_score", "findings", "policy"}
+    assert response["policy"]["baseline"]["new"] >= 1
+    assert response["policy"]["baseline"]["unchanged"] >= 1
+    statuses = {f.get("status") for f in response["findings"]}
+    assert statuses <= {"new", "unchanged"}
+
+
+def test_scan_suppression_is_reported_without_removing_the_finding():
+    body = c.post("/scan", json={"source": BAD_SOURCE}).json()
+    target = body["findings"][0]
+    response = c.post(
+        "/scan",
+        json={
+            "source": BAD_SOURCE,
+            "suppressions": [
+                {"fingerprint": target["fingerprint"], "reason": "reviewed"}
+            ],
+        },
+    ).json()
+    suppressed = [f for f in response["findings"] if f.get("status") == "suppressed"]
+    assert [f["fingerprint"] for f in suppressed] == [target["fingerprint"]]
+    assert suppressed[0]["severity"] == target["severity"]
+    assert suppressed[0]["suppression"]["reason"] == "reviewed"
+    assert response["trust_score"] > body["trust_score"]
+    assert response["policy"]["suppressions"]["suppressed"] == 1
+
+
+def test_scan_rejects_invalid_policy():
+    baseline = {"schema": "leaklens-baseline", "version": 99}
+    response = c.post("/scan", json={"source": BAD_SOURCE, "baseline": baseline})
+    assert response.status_code == 422
+    response = c.post(
+        "/scan",
+        json={
+            "source": BAD_SOURCE,
+            "suppressions": [{"fingerprint": "abc", "reason": "x"}],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_audit_accepts_policy_form_fields():
+    body = c.post(
+        "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}
+    ).json()
+    baseline = _baseline_from(body["findings"])
+    response = c.post(
+        "/audit",
+        files={"file": ("d.csv", _csv(), "text/csv")},
+        data={"target": "y", "baseline": json.dumps(baseline)},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["policy"]["baseline"]["resolved"] == 0
+    assert "missingness" in payload
+
+    bad = c.post(
+        "/audit",
+        files={"file": ("d.csv", _csv(), "text/csv")},
+        data={"target": "y", "baseline": "{not json"},
+    )
+    assert bad.status_code == 422
 
 
 def test_predict_missing_model(tmp_path, monkeypatch):

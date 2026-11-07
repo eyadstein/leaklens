@@ -68,13 +68,14 @@ def emitted_kinds() -> set[str]:
 
 
 def benchmark_case_names() -> set[str]:
-    from leaklens import bench, bench_advanced, bench_cases, bench_data
+    from leaklens import bench, bench_advanced, bench_cases, bench_data, bench_missing
 
     names = {name for name, _, _ in bench.CASES}
     names |= {name for name, _, _ in bench.LOW_CASES}
     names |= {case.name for case in bench_cases.EXTRA_CASES}
     names |= {case.name for case in bench_advanced.ADVANCED_CASES}
     names |= {case.name for case in bench_data._build_cases()}
+    names |= {case.name for case in bench_missing._build_cases()}
     return names
 
 

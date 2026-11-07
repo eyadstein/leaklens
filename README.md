@@ -15,7 +15,7 @@
 
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), target-, split- and group-associated missingness (`missingness_*`, `--test`/`--group`), near-duplicate images across split folders (`leaklens images`) |
 | Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, target/frequency encoding built from all rows, feature selection (SelectKBest, RFE, SelectFromModel) before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`), hyperparameter tuning on the test set (`tuning_on_test_data`), tuning before the split or on the full frame (`tuning_before_split`, `tuning_on_full_data`), cross-validation on test rows (`cv_on_test_data`), repeated test-set scoring, group CV without `groups=`, shuffled splits of time-sorted data, and notebooks run out of order |
 
 Confidence is explicit in each finding's wording: a confirmed rule (for example a search fitted on `X_test`) is reported as a high-severity leak, while a suspicious but legitimate-possible pattern (for example frequency encoding before the split) is low/medium and says what was observed. Every finding has a fix hint under `--explain`.
@@ -99,7 +99,7 @@ CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intellige
 
 ### `leaklens doctor`
 
-`leaklens doctor` checks the install without network access and without reading secrets: Python is >=3.10, the LeakLens version and install location, the `leaklens` entry point, core dependencies (pandas, numpy, scikit-learn), which optional extras are importable, and whether `.leaklens.toml` or `pyproject.toml` (whichever it finds first) is valid TOML.
+`leaklens doctor` checks the install without network access and without reading secrets: Python is >=3.10, the LeakLens version and install location, the `leaklens` entry point, core dependencies (pandas, numpy, scikit-learn), which optional extras are importable, and whether `.leaklens.toml` (validated against the configuration schema) or `pyproject.toml` (whichever it finds first) is valid TOML. Pass `leaklens doctor --config PATH` to validate a specific configuration file.
 
 ```sh
 leaklens doctor             # human-readable report; exit 1 on a failed check
@@ -239,11 +239,62 @@ leaklens init mydir --force   # overwrite an existing .leaklens.toml
 
 It prints the pre-commit hook snippet (below).
 
+## Missingness audit
+
+Missing values are not automatically a leak, so the audit only reports patterns where *why* a value is missing can carry information that is unavailable at prediction time:
+
+- `missingness_target_signal` (medium): missingness is associated with the target (a point-biserial correlation for numeric targets, or a missing-rate difference between target classes with `z >= 3`).
+- `missingness_split_shift` (medium): missingness differs substantially between the train and test splits, including a feature populated in one split and absent from the other.
+- `missingness_group_signal` (low): missingness differs across `--group` entities.
+
+Every check needs a minimum number of rows, missing values and present values, plus a minimum effect size. Insufficient samples, constant columns, entirely missing columns and missing split metadata are reported as skips rather than findings. Evidence contains only aggregate rates and counts, never raw rows or group identifiers. Statistics are deterministic, use pandas/numpy only (no SciPy), and are linear-time per column. Findings are a reason to investigate, not proof of leakage; severity never exceeds `medium`, the data and splits are never modified, and the default exit behavior is unchanged. See [`docs/MISSINGNESS_BENCHMARK.md`](docs/MISSINGNESS_BENCHMARK.md) for the labeled regression benchmark and its limits.
+
 ## Configuration (`.leaklens.toml`)
 
-`leaklens init` writes a commented starter `.leaklens.toml` (one key per CLI flag) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
+`leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]` and `[missingness]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
 
-> The CLI does not read `.leaklens.toml` yet — it is a documentation starter. Pass the same values as CLI flags until config is read.
+The CLI reads `./.leaklens.toml` automatically when it exists (or the file passed with `--config`). Precedence is deterministic: built-in defaults, then the configuration file, then explicit CLI flags. Unknown keys, wrong types, unsafe output paths and invalid suppression rules fail closed with exit code 2 and the file location in the message; none of them silently change a scan. Output paths (`sarif`, `html`, `badge`, `[baseline].path`) must stay inside the configuration directory. The file cannot execute code, load plugins or access the network.
+
+```toml
+target = "label"
+test = "test.csv"          # resolved relative to this file
+scan = ["notebooks", "src"]
+fail_under = 80
+
+[baseline]
+path = "leaklens-baseline.json"
+fail_on_new = true         # opt-in CI failure for new findings
+
+[[suppressions]]
+fingerprint = "64-lowercase-hex-characters"
+reason = "accepted: the column is recorded before prediction"
+expires = "2027-01-01"
+
+[missingness]
+enabled = true
+min_rows = 200
+```
+
+Full schema, defaults and error behavior: [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md). Baseline and suppression workflow: [`docs/BASELINES.md`](docs/BASELINES.md).
+
+## Baselines and suppressions
+
+A **baseline** records the stable fingerprints of findings you have already reviewed. Later runs report each finding as `new`, `unchanged`, `changed` (same identity, different severity) or `resolved` (recorded but no longer present), so CI only needs to look at what moved.
+
+```sh
+leaklens train.csv --target label --write-baseline --baseline leaklens-baseline.json
+leaklens train.csv --target label --baseline leaklens-baseline.json --fail-on-new
+leaklens train.csv --target label --baseline leaklens-baseline.json --update-baseline
+```
+
+A baseline is never overwritten implicitly: a second `--write-baseline` exits 2 and `--update-baseline` is the explicit replace. The file is written atomically and contains only fingerprints and finding metadata (no rows, feature values or source). A baseline written with a different fingerprint schema is refused rather than compared.
+
+A **suppression** accepts one exact fingerprint with a required reason and an optional ISO expiration date. There are no wildcards, so a rule cannot hide future unrelated findings. Suppressed findings stay in JSON/SARIF/HTML with `status: "suppressed"` and their original severity and evidence; they stop counting toward the trust score and the default exit gate. Expired rules and rules that match nothing are reported as diagnostics and are never applied. Malformed rules abort the run (exit 2).
+
+A **resolved** finding is the opposite of suppression: the baseline recorded it but the current scan no longer produces it. Resolved findings are listed separately (`resolved` in JSON) and are not suppressions.
+
+The default exit behavior is unchanged: exit 1 for a high-severity active finding or a trust score below `--fail-under`. Only `--fail-on-new` (or `[baseline].fail_on_new`) adds a new CI failure mode, and it is opt-in.
+
 
 ## Optional LLM explanations
 

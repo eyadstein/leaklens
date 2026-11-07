@@ -52,6 +52,26 @@ def test_sarif_keeps_the_existing_shape_and_adds_fingerprint_and_evidence():
     assert physical["region"] == {"startLine": 1}
 
 
+def test_sarif_adds_policy_metadata_only_when_requested():
+    from leaklens.baseline import Baseline
+    from leaklens.policy import apply_policy
+    from leaklens.suppression import parse_rules
+
+    finding = Finding("high", "target_leakage", "leak", "predicts target")
+    baseline = Baseline.from_findings([finding])
+    outcome = apply_policy(
+        [finding],
+        baseline=baseline,
+        rules=parse_rules([{"fingerprint": finding.fingerprint, "reason": "reviewed"}]),
+    )
+    run = to_sarif([finding], "dataset.csv", outcome=outcome)["runs"][0]
+    assert run["properties"]["leaklens"]["baseline"]["new"] == 0
+    result = run["results"][0]
+    assert result["properties"]["leaklens"]["status"] == "suppressed"
+    assert result["properties"]["leaklens"]["suppression"]["reason"] == "reviewed"
+    assert result["suppressions"] == [{"kind": "external", "justification": "reviewed"}]
+
+
 def test_sarif_handles_empty_and_unusual_findings():
     empty = to_sarif([])
     assert empty["version"] == "2.1.0"
