@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import cross_val_score
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+
+from .evidence import Evidence, coerce_evidence
+from .fingerprint import fingerprint_for
 
 
 @dataclass
@@ -14,9 +18,40 @@ class Finding:
     kind: str
     column: str
     detail: str
+    evidence: tuple[Evidence, ...] = ()
+    stable_key: str | None = None
+    diagnostic: bool = False
 
-    def to_dict(self) -> dict:
-        return asdict(self)
+    def __post_init__(self) -> None:
+        self.evidence = coerce_evidence(self.evidence)
+        if type(self.diagnostic) is not bool:
+            raise TypeError("diagnostic must be a bool")
+        if self.stable_key is not None:
+            if not isinstance(self.stable_key, str):
+                raise TypeError("stable_key must be a string or None")
+            if len(self.stable_key) > 200 or any(
+                ord(ch) < 32 or ord(ch) == 127 for ch in self.stable_key
+            ):
+                raise ValueError("stable_key is not a valid stable identifier")
+
+    @property
+    def fingerprint(self) -> str:
+        """Stable identity for the logical finding (versioned SHA-256)."""
+        return fingerprint_for(self)
+
+    def to_dict(self, root: str | Path | None = None) -> dict:
+        """Backward-compatible JSON payload; evidence and fingerprint are additive."""
+        payload = {
+            "severity": self.severity,
+            "kind": self.kind,
+            "column": self.column,
+            "detail": self.detail,
+            "evidence": [item.to_dict() for item in self.evidence],
+            "fingerprint": fingerprint_for(self, root=root),
+        }
+        if self.diagnostic:
+            payload["diagnostic"] = True
+        return payload
 
 
 def _encode(s: pd.Series) -> np.ndarray:
@@ -69,7 +104,23 @@ def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
             continue
         out.append(
             Finding(
-                sev, "target_leakage", c, f"alone predicts target ({scoring}={sc:.3f})"
+                sev,
+                "target_leakage",
+                c,
+                f"alone predicts target ({scoring}={sc:.3f})",
+                evidence=(
+                    Evidence(
+                        source="data",
+                        kind="statistic",
+                        description=(
+                            "one feature predicts the target at or above the "
+                            "leakage threshold"
+                        ),
+                        location=c,
+                        observed=f"{scoring}={sc:.3f}",
+                        expected=f"{scoring} < {threshold:.3f}",
+                    ),
+                ),
             )
         )
     return out
@@ -107,6 +158,15 @@ def split_overlap(train, test):
             "split_overlap",
             "*",
             f"{n} test rows ({n / len(test):.1%}) also appear in train",
+            evidence=(
+                Evidence(
+                    source="split",
+                    kind="overlap",
+                    description="test rows are exact duplicates of train rows",
+                    observed=f"{n} of {len(test)} test rows shared",
+                    expected="0 shared rows",
+                ),
+            ),
         )
     ]
 
@@ -121,6 +181,18 @@ def temporal_overlap(train, test, time_col):
                 "temporal_leakage",
                 time_col,
                 f"train extends to {a.max()} but test starts {b.min()}",
+                evidence=(
+                    Evidence(
+                        source="split",
+                        kind="ordering",
+                        description=(
+                            "the training window ends after the test window starts"
+                        ),
+                        location=time_col,
+                        observed="max(train time) > min(test time)",
+                        expected="max(train time) <= min(test time)",
+                    ),
+                ),
             )
         ]
     return []
@@ -196,8 +268,17 @@ def scan(df, target, threshold=0.95):
 
 
 def score(findings) -> int:
+    """Trust score; opt-in diagnostics never count against it."""
     pen = {"high": 35, "medium": 15, "low": 5}
-    return max(0, 100 - sum(pen.get(f.severity, 0) for f in findings))
+    return max(
+        0,
+        100
+        - sum(
+            pen.get(f.severity, 0)
+            for f in findings
+            if not getattr(f, "diagnostic", False)
+        ),
+    )
 
 
 def group_risk(df, group_col):
@@ -230,6 +311,19 @@ def group_overlap(train, test, group_col):
             "group_overlap",
             group_col,
             f"{len(shared)} {group_col} values in both splits ({n / len(test):.1%} of test rows)",
+            evidence=(
+                Evidence(
+                    source="split",
+                    kind="overlap",
+                    description=(
+                        "group identifiers occur in both splits, so a model can "
+                        "memorise the same entity"
+                    ),
+                    location=group_col,
+                    observed=f"{len(shared)} shared groups; {n} affected test rows",
+                    expected="0 shared groups",
+                ),
+            ),
         )
     ]
 
@@ -358,5 +452,17 @@ def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_column
             f"{n} test rows ({n / len(b):.1%}) match a train row after "
             f"case/whitespace normalisation and rounding numbers to 4 decimals; "
             f"check for near-duplicate samples before splitting",
+            evidence=(
+                Evidence(
+                    source="split",
+                    kind="duplicate",
+                    description=(
+                        "test rows match train rows after case/whitespace and "
+                        "numeric normalisation"
+                    ),
+                    observed=f"{n} of {len(b)} test rows matched",
+                    expected="0 matches after normalisation",
+                ),
+            ),
         )
     ]

@@ -367,6 +367,79 @@ def _ai_section(data: dict) -> str:
     return "".join(sections)
 
 
+def _policy_section(data: dict) -> str:
+    """Render optional baseline/suppression metadata with escaping."""
+    if not data:
+        return ""
+    sections = ["<h2>Baseline and suppression policy</h2>", '<div class="card">']
+    baseline = data.get("baseline")
+    if baseline:
+        sections.append(
+            f"<p><b>Baseline:</b> {html.escape(str(baseline.get('new', 0)))} new, "
+            f"{html.escape(str(baseline.get('unchanged', 0)))} unchanged, "
+            f"{html.escape(str(baseline.get('changed', 0)))} changed, "
+            f"{html.escape(str(baseline.get('resolved', 0)))} resolved"
+            + (
+                f" (<code>{html.escape(str(baseline.get('path')))}</code>)"
+                if baseline.get("path")
+                else ""
+            )
+            + "</p>"
+        )
+        if baseline.get("fail_on_new"):
+            sections.append(
+                "<p>The CI gate is configured to fail when new findings appear.</p>"
+            )
+    suppressions = data.get("suppressions") or {}
+    if suppressions:
+        rules = suppressions.get("rules", [])
+        sections.append(
+            f"<p><b>Suppressed findings:</b> "
+            f"{html.escape(str(suppressions.get('suppressed', len(rules))))}</p>"
+        )
+        items = []
+        for rule in rules:
+            expiry = rule.get("expires")
+            items.append(
+                "<li><code>"
+                + html.escape(str(rule.get("fingerprint", "")))
+                + "</code> - "
+                + html.escape(str(rule.get("reason", "")))
+                + (f" (expires {html.escape(str(expiry))})" if expiry else "")
+                + "</li>"
+            )
+        if items:
+            sections.append("<ul>" + "".join(items) + "</ul>")
+    diagnostics = data.get("diagnostics") or []
+    if diagnostics:
+        sections.append(
+            "<p><b>Policy diagnostics</b></p><ul>"
+            + "".join(f"<li>{html.escape(str(item))}</li>" for item in diagnostics)
+            + "</ul>"
+        )
+    sections.append("</div>")
+    return "".join(sections)
+
+
+def _drift_section(data: dict) -> str:
+    """Render the opt-in drift summary; diagnostics never change the score."""
+    if not data:
+        return ""
+    skipped = data.get("skipped") or {}
+    shown = ", ".join(f"{key}: {value}" for key, value in sorted(skipped.items()))
+    return (
+        "<h2>Distribution drift (diagnostic)</h2>"
+        '<div class="card">'
+        f"<p><b>Status:</b> {html.escape(str(data.get('status', 'unknown')))}</p>"
+        f"<p><b>Columns checked:</b> "
+        f"{html.escape(str(data.get('checked_columns', 0)))}</p>"
+        f"<p><b>Skipped:</b> {html.escape(shown or 'none')}</p>"
+        "<p>Drift is a reason to investigate, not a leakage finding. It is "
+        "ignored by the trust score and the default exit code.</p>"
+        "</div>"
+    )
+
+
 def render(rep: dict, title: str = "LeakLens report") -> str:
     s = int(rep["trust_score"])
     color = "#2ea043" if s >= 85 else "#d29922" if s >= 60 else "#f85149"
@@ -379,7 +452,29 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
             if k in a
         )
         audit = f'<div class="card kv">{kv}</div>'
-    fnd = _table(rep.get("findings", [])) or '<div class="card">No leakage found.</div>'
+    rows = rep.get("findings", [])
+    if rows and any("status" in row for row in rows):
+        rows = [
+            {
+                key: row.get(key)
+                for key in (
+                    "severity",
+                    "kind",
+                    "column",
+                    "detail",
+                    "status",
+                    "diagnostic",
+                )
+            }
+            for row in rows
+        ]
+    fnd = _table(rows) or '<div class="card">No leakage found.</div>'
+    if any(row.get("diagnostic") for row in rows):
+        fnd = (
+            '<div class="card">Diagnostic findings are shown below but are '
+            "ignored by the trust score and the default exit code.</div>" + fnd
+        )
+    policy = _policy_section(rep.get("policy"))
     arena = ""
     if rep.get("arena"):
         arena = "<h2>Model arena</h2>" + _table(rep["arena"])
@@ -388,12 +483,13 @@ def render(rep: dict, title: str = "LeakLens report") -> str:
     )
     impact = _impact_section(rep.get("impact"))
     ai = _ai_section(rep.get("ai")) if rep.get("ai") else ""
+    drift = _drift_section(rep.get("drift"))
     return (
         PAGE.replace("@@TITLE@@", html.escape(title))
         .replace("@@COLOR@@", color)
         .replace("@@SCORE@@", str(s))
         .replace("@@AUDIT@@", audit)
-        .replace("@@FINDINGS@@", fnd)
+        .replace("@@FINDINGS@@", policy + fnd)
         .replace("@@ARENA@@", arena)
-        .replace("</body>", impact + intelligence + ai + "</body>")
+        .replace("</body>", impact + intelligence + ai + drift + "</body>")
     )

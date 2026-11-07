@@ -46,6 +46,23 @@ def test_doctor_via_main_dispatch(capsys):
     assert "leaklens_version" in data
 
 
+def test_doctor_validates_an_explicit_config(tmp_path, capsys):
+    valid = tmp_path / "ok.toml"
+    valid.write_text('target = "y"\n[missingness]\nmin_rows = 100\n', encoding="utf-8")
+    assert doctor(["--config", str(valid), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["config_valid"] is True
+    assert data["toml_config_present"] == str(valid)
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text("unknown = true\n", encoding="utf-8")
+    assert doctor(["--config", str(bad)]) == 1
+    out = capsys.readouterr().out
+    assert "INVALID" in out and "unknown configuration keys" in out
+
+    assert doctor(["--config"]) == 1
+
+
 def test_doctor_no_secrets(monkeypatch, capsys):
     monkeypatch.setenv("LEAKLENS_LLM_API_KEY", "supersecretvalue")
     doctor([])

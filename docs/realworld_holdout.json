@@ -1,0 +1,826 @@
+{
+  "holdout_id": "phase6-realworld-holdout-v1",
+  "role": "single_pass_evaluation",
+  "retrieved": "2026-11-05",
+  "digest": "7fde39ce94d34ae7f05243163e2761d5410f4b3a01f9770eabc2a24ea45d5742",
+  "stats": {
+    "holdout_id": "phase6-realworld-holdout-v1",
+    "role": "single_pass_evaluation",
+    "cases": 48,
+    "leaky": 24,
+    "legitimate": 24,
+    "repositories": 12,
+    "families": 39,
+    "categories": 14,
+    "verbatim_excerpts": 4,
+    "reconstructed_excerpts": 44,
+    "per_category": {
+      "complex_transform": {
+        "cases": 2,
+        "leaky": 1
+      },
+      "cv_misuse": {
+        "cases": 5,
+        "leaky": 1
+      },
+      "duplicates": {
+        "cases": 3,
+        "leaky": 3
+      },
+      "eda_only": {
+        "cases": 1,
+        "leaky": 0
+      },
+      "feature_selection": {
+        "cases": 2,
+        "leaky": 1
+      },
+      "grouping": {
+        "cases": 4,
+        "leaky": 2
+      },
+      "imputation": {
+        "cases": 2,
+        "leaky": 1
+      },
+      "notebook_order": {
+        "cases": 2,
+        "leaky": 1
+      },
+      "preprocessing_order": {
+        "cases": 3,
+        "leaky": 0
+      },
+      "preprocessing_scaling": {
+        "cases": 6,
+        "leaky": 5
+      },
+      "resampling": {
+        "cases": 3,
+        "leaky": 1
+      },
+      "target_encoding": {
+        "cases": 6,
+        "leaky": 4
+      },
+      "temporal": {
+        "cases": 3,
+        "leaky": 1
+      },
+      "tuning": {
+        "cases": 6,
+        "leaky": 3
+      }
+    },
+    "per_repository": {
+      "ageron/handson-ml3": {
+        "cases": 4,
+        "families": 3,
+        "license": "Apache-2.0"
+      },
+      "aladdinpersson/Machine-Learning-Collection": {
+        "cases": 4,
+        "families": 3,
+        "license": "MIT"
+      },
+      "automl/auto-sklearn": {
+        "cases": 4,
+        "families": 4,
+        "license": "BSD-3-Clause"
+      },
+      "catboost/catboost": {
+        "cases": 4,
+        "families": 3,
+        "license": "Apache-2.0"
+      },
+      "dmlc/xgboost": {
+        "cases": 4,
+        "families": 4,
+        "license": "Apache-2.0"
+      },
+      "feature-engine/feature_engine": {
+        "cases": 4,
+        "families": 2,
+        "license": "BSD-3-Clause"
+      },
+      "microsoft/FLAML": {
+        "cases": 4,
+        "families": 4,
+        "license": "MIT"
+      },
+      "microsoft/LightGBM": {
+        "cases": 4,
+        "families": 3,
+        "license": "MIT"
+      },
+      "mlflow/mlflow": {
+        "cases": 4,
+        "families": 3,
+        "license": "Apache-2.0"
+      },
+      "optuna/optuna-examples": {
+        "cases": 4,
+        "families": 4,
+        "license": "MIT"
+      },
+      "scikit-learn-contrib/imbalanced-learn": {
+        "cases": 4,
+        "families": 3,
+        "license": "MIT"
+      },
+      "scikit-learn/scikit-learn": {
+        "cases": 4,
+        "families": 3,
+        "license": "BSD-3-Clause"
+      }
+    }
+  },
+  "repositories": [
+    {
+      "slug": "ageron/handson-ml3",
+      "title": "Hands-On Machine Learning notebooks (3rd edition)",
+      "url": "https://github.com/ageron/handson-ml3",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/ageron/handson-ml3/blob/main/LICENSE",
+      "commit": "ef1c9f5ab11083584635b9b3a7846f49c58a6084",
+      "branch": "main"
+    },
+    {
+      "slug": "aladdinpersson/Machine-Learning-Collection",
+      "title": "Machine Learning Collection tutorial notebooks",
+      "url": "https://github.com/aladdinpersson/Machine-Learning-Collection",
+      "license": "MIT",
+      "license_url": "https://github.com/aladdinpersson/Machine-Learning-Collection/blob/master/LICENSE.txt",
+      "commit": "558557c7989f0b10fee6e8d8f953d7269ae43d4f",
+      "branch": "master"
+    },
+    {
+      "slug": "automl/auto-sklearn",
+      "title": "auto-sklearn examples",
+      "url": "https://github.com/automl/auto-sklearn",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/automl/auto-sklearn/blob/development/LICENSE.txt",
+      "commit": "673211252ca508b6f5bb92cf5fa87c6455bbad99",
+      "branch": "development"
+    },
+    {
+      "slug": "catboost/catboost",
+      "title": "CatBoost tutorials and examples",
+      "url": "https://github.com/catboost/catboost",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/catboost/catboost/blob/master/LICENSE",
+      "commit": "ecf5e12040890db408ad73fda7b99da3dd394354",
+      "branch": "master"
+    },
+    {
+      "slug": "dmlc/xgboost",
+      "title": "XGBoost Python examples",
+      "url": "https://github.com/dmlc/xgboost",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/dmlc/xgboost/blob/master/LICENSE",
+      "commit": "f109cc0503aef1bcb21e7e0dc0b4e93a1ef9740a",
+      "branch": "master"
+    },
+    {
+      "slug": "feature-engine/feature_engine",
+      "title": "Feature-engine preprocessing transformers",
+      "url": "https://github.com/feature-engine/feature_engine",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/feature-engine/feature_engine/blob/main/LICENSE.md",
+      "commit": "d866312874a66364c6dee3c247e69476b478395c",
+      "branch": "main"
+    },
+    {
+      "slug": "microsoft/FLAML",
+      "title": "FLAML automated machine learning examples",
+      "url": "https://github.com/microsoft/FLAML",
+      "license": "MIT",
+      "license_url": "https://github.com/microsoft/FLAML/blob/main/LICENSE",
+      "commit": "798cacbd638c92fef35b8ba3113eec5564418952",
+      "branch": "main"
+    },
+    {
+      "slug": "microsoft/LightGBM",
+      "title": "LightGBM Python examples",
+      "url": "https://github.com/microsoft/LightGBM",
+      "license": "MIT",
+      "license_url": "https://github.com/lightgbm-org/LightGBM/blob/main/LICENSE",
+      "commit": "3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9",
+      "branch": "main"
+    },
+    {
+      "slug": "mlflow/mlflow",
+      "title": "MLflow tracking and model examples",
+      "url": "https://github.com/mlflow/mlflow",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/mlflow/mlflow/blob/master/LICENSE.txt",
+      "commit": "5c6af89333648b7e14ae726cc37cb2465f1917e1",
+      "branch": "master"
+    },
+    {
+      "slug": "optuna/optuna-examples",
+      "title": "Optuna integration examples",
+      "url": "https://github.com/optuna/optuna-examples",
+      "license": "MIT",
+      "license_url": "https://github.com/optuna/optuna-examples/blob/main/LICENSE",
+      "commit": "9450de9b8b042e396bb816fdbe7fb4b5227b3323",
+      "branch": "main"
+    },
+    {
+      "slug": "scikit-learn-contrib/imbalanced-learn",
+      "title": "imbalanced-learn resampling examples",
+      "url": "https://github.com/scikit-learn-contrib/imbalanced-learn",
+      "license": "MIT",
+      "license_url": "https://github.com/scikit-learn-contrib/imbalanced-learn/blob/master/LICENSE",
+      "commit": "8504e95f0160f61d1b617ca66f779646d2ee609e",
+      "branch": "master"
+    },
+    {
+      "slug": "scikit-learn/scikit-learn",
+      "title": "scikit-learn examples and documentation",
+      "url": "https://github.com/scikit-learn/scikit-learn",
+      "license": "BSD-3-Clause",
+      "license_url": "https://github.com/scikit-learn/scikit-learn/blob/main/COPYING",
+      "commit": "3c5e5effc5e11309209234507cb768c5fb38971b",
+      "branch": "main"
+    }
+  ],
+  "cases": [
+    {
+      "name": "aladdin_knn_imputer_train_only",
+      "repository": "aladdinpersson/Machine-Learning-Collection",
+      "family": "aladdin-impute",
+      "leaky": false,
+      "category": "imputation",
+      "provenance": "reconstructed_excerpt",
+      "path": "ML/Scikit_learn/KNN/knn.ipynb",
+      "source_url": "https://github.com/aladdinpersson/Machine-Learning-Collection/blob/558557c7989f0b10fee6e8d8f953d7269ae43d4f/ML/Scikit_learn/KNN/knn.ipynb",
+      "label_rationale": "The imputer's neighbour structure is learned on training rows and applied unchanged to the test partition.",
+      "notes": ""
+    },
+    {
+      "name": "aladdin_notebook_scale_cell_before_split",
+      "repository": "aladdinpersson/Machine-Learning-Collection",
+      "family": "aladdin-notebook",
+      "leaky": true,
+      "category": "notebook_order",
+      "provenance": "reconstructed_excerpt",
+      "path": "ML/Scikit_learn/KNN/knn.ipynb",
+      "source_url": "https://github.com/aladdinpersson/Machine-Learning-Collection/blob/558557c7989f0b10fee6e8d8f953d7269ae43d4f/ML/Scikit_learn/KNN/knn.ipynb",
+      "label_rationale": "Cell 1 fits the scaler on the whole matrix and cell 2 splits the already-scaled result, so execution order leaks test rows.",
+      "notes": ""
+    },
+    {
+      "name": "aladdin_notebook_split_cell_before_scale",
+      "repository": "aladdinpersson/Machine-Learning-Collection",
+      "family": "aladdin-notebook",
+      "leaky": false,
+      "category": "notebook_order",
+      "provenance": "reconstructed_excerpt",
+      "path": "ML/Scikit_learn/KNN/knn.ipynb",
+      "source_url": "https://github.com/aladdinpersson/Machine-Learning-Collection/blob/558557c7989f0b10fee6e8d8f953d7269ae43d4f/ML/Scikit_learn/KNN/knn.ipynb",
+      "label_rationale": "The split cell runs before the scaler cell, and the scaler is fitted on X_train only.",
+      "notes": ""
+    },
+    {
+      "name": "aladdin_svm_full_scale",
+      "repository": "aladdinpersson/Machine-Learning-Collection",
+      "family": "aladdin-svm",
+      "leaky": true,
+      "category": "preprocessing_scaling",
+      "provenance": "reconstructed_excerpt",
+      "path": "ML/Scikit_learn/SVM/svm.ipynb",
+      "source_url": "https://github.com/aladdinpersson/Machine-Learning-Collection/blob/558557c7989f0b10fee6e8d8f953d7269ae43d4f/ML/Scikit_learn/SVM/svm.ipynb",
+      "label_rationale": "sklearn.preprocessing.scale is a function, but it still computes the mean and variance of every row before the split.",
+      "notes": ""
+    },
+    {
+      "name": "autosklearn_cv_on_test_partition",
+      "repository": "automl/auto-sklearn",
+      "family": "autosklearn-cv",
+      "leaky": true,
+      "category": "cv_misuse",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "source_url": "https://github.com/automl/auto-sklearn/blob/673211252ca508b6f5bb92cf5fa87c6455bbad99/examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "label_rationale": "Cross-validation is run on the held-out partition, so every fold reuses the same test rows and the reported mean is not an out-of-sample estimate.",
+      "notes": ""
+    },
+    {
+      "name": "autosklearn_duplicates_across_split",
+      "repository": "automl/auto-sklearn",
+      "family": "autosklearn-duplicates",
+      "leaky": true,
+      "category": "duplicates",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "source_url": "https://github.com/automl/auto-sklearn/blob/673211252ca508b6f5bb92cf5fa87c6455bbad99/examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "label_rationale": "Fifty test rows are concatenated back into training, so those rows are both memorised and scored.",
+      "notes": ""
+    },
+    {
+      "name": "autosklearn_holdout_before_fit",
+      "repository": "automl/auto-sklearn",
+      "family": "autosklearn-holdout",
+      "leaky": false,
+      "category": "tuning",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "source_url": "https://github.com/automl/auto-sklearn/blob/673211252ca508b6f5bb92cf5fa87c6455bbad99/examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "label_rationale": "The holdout is created before the search starts and is used once for the final score.",
+      "notes": ""
+    },
+    {
+      "name": "autosklearn_preprocess_full_data",
+      "repository": "automl/auto-sklearn",
+      "family": "autosklearn-preprocess",
+      "leaky": true,
+      "category": "preprocessing_scaling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "source_url": "https://github.com/automl/auto-sklearn/blob/673211252ca508b6f5bb92cf5fa87c6455bbad99/examples/40_advanced/example_methods_to_load_and_export_models.py",
+      "label_rationale": "PCA is fitted on the full matrix before the holdout exists, so the projection is informed by test rows.",
+      "notes": ""
+    },
+    {
+      "name": "catboost_duplicate_rows_before_split",
+      "repository": "catboost/catboost",
+      "family": "catboost-duplicates",
+      "leaky": true,
+      "category": "duplicates",
+      "provenance": "reconstructed_excerpt",
+      "path": "catboost/tutorials/classification/classification_tutorial.ipynb",
+      "source_url": "https://github.com/catboost/catboost/blob/ecf5e12040890db408ad73fda7b99da3dd394354/catboost/tutorials/classification/classification_tutorial.ipynb",
+      "label_rationale": "Twenty percent of the rows are duplicated before splitting, so near copies of test rows are almost guaranteed to land in training.",
+      "notes": ""
+    },
+    {
+      "name": "catboost_ordered_time_split",
+      "repository": "catboost/catboost",
+      "family": "catboost-timeseries",
+      "leaky": false,
+      "category": "temporal",
+      "provenance": "reconstructed_excerpt",
+      "path": "catboost/tutorials/regression/regression_tutorial.ipynb",
+      "source_url": "https://github.com/catboost/catboost/blob/ecf5e12040890db408ad73fda7b99da3dd394354/catboost/tutorials/regression/regression_tutorial.ipynb",
+      "label_rationale": "The frame is ordered by timestamp and cut positionally, so training only contains earlier observations.",
+      "notes": ""
+    },
+    {
+      "name": "catboost_pool_after_split",
+      "repository": "catboost/catboost",
+      "family": "catboost-target",
+      "leaky": false,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "catboost/tutorials/classification/classification_tutorial.ipynb",
+      "source_url": "https://github.com/catboost/catboost/blob/ecf5e12040890db408ad73fda7b99da3dd394354/catboost/tutorials/classification/classification_tutorial.ipynb",
+      "label_rationale": "Target statistics are computed inside fit from the training pool only; the test pool is built after the split.",
+      "notes": ""
+    },
+    {
+      "name": "catboost_target_statistics_full_frame",
+      "repository": "catboost/catboost",
+      "family": "catboost-target",
+      "leaky": true,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "catboost/tutorials/classification/classification_tutorial.ipynb",
+      "source_url": "https://github.com/catboost/catboost/blob/ecf5e12040890db408ad73fda7b99da3dd394354/catboost/tutorials/classification/classification_tutorial.ipynb",
+      "label_rationale": "The full Pool is built before the split. CatBoost computes ordered target statistics internally on the frame it is given, so the unused pool still represents statistics taken from held-out rows.",
+      "notes": ""
+    },
+    {
+      "name": "feature_engine_drop_constant_before_split",
+      "repository": "feature-engine/feature_engine",
+      "family": "feature-engine-selection",
+      "leaky": true,
+      "category": "feature_selection",
+      "provenance": "reconstructed_excerpt",
+      "path": "docs/user_guide/selection/DropConstantFeatures.rst",
+      "source_url": "https://github.com/feature-engine/feature_engine/blob/d866312874a66364c6dee3c247e69476b478395c/docs/user_guide/selection/DropConstantFeatures.rst",
+      "label_rationale": "Feature filtering uses the full frame, so held-out rows decide which columns survive. The effect is small here but the ordering is wrong.",
+      "notes": ""
+    },
+    {
+      "name": "feature_engine_selector_after_split",
+      "repository": "feature-engine/feature_engine",
+      "family": "feature-engine-selection",
+      "leaky": false,
+      "category": "feature_selection",
+      "provenance": "reconstructed_excerpt",
+      "path": "docs/user_guide/selection/DropCorrelatedFeatures.rst",
+      "source_url": "https://github.com/feature-engine/feature_engine/blob/d866312874a66364c6dee3c247e69476b478395c/docs/user_guide/selection/DropCorrelatedFeatures.rst",
+      "label_rationale": "The correlation structure is learned on training rows only and then applied to the test partition.",
+      "notes": ""
+    },
+    {
+      "name": "feature_engine_target_encoder_full_fit",
+      "repository": "feature-engine/feature_engine",
+      "family": "feature-engine-target",
+      "leaky": true,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "docs/user_guide/encoding/MeanEncoder.rst",
+      "source_url": "https://github.com/feature-engine/feature_engine/blob/d866312874a66364c6dee3c247e69476b478395c/docs/user_guide/encoding/MeanEncoder.rst",
+      "label_rationale": "The encoder is fitted with the full target vector before the split, so test-row labels shape the category means used as features.",
+      "notes": ""
+    },
+    {
+      "name": "feature_engine_target_encoder_in_pipeline",
+      "repository": "feature-engine/feature_engine",
+      "family": "feature-engine-target",
+      "leaky": false,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "docs/user_guide/encoding/MeanEncoder.rst",
+      "source_url": "https://github.com/feature-engine/feature_engine/blob/d866312874a66364c6dee3c247e69476b478395c/docs/user_guide/encoding/MeanEncoder.rst",
+      "label_rationale": "MeanEncoder is fitted inside the pipeline, so each CV fold derives its encoding from training rows only.",
+      "notes": ""
+    },
+    {
+      "name": "flaml_imputer_full_data",
+      "repository": "microsoft/FLAML",
+      "family": "flaml-impute",
+      "leaky": true,
+      "category": "imputation",
+      "provenance": "reconstructed_excerpt",
+      "path": "test/automl/test_classification.py",
+      "source_url": "https://github.com/microsoft/FLAML/blob/798cacbd638c92fef35b8ba3113eec5564418952/test/automl/test_classification.py",
+      "label_rationale": "KNNImputer borrows values from every row, so test rows help fill training gaps and vice versa before the split.",
+      "notes": ""
+    },
+    {
+      "name": "flaml_random_split_with_customer_id",
+      "repository": "microsoft/FLAML",
+      "family": "flaml-group",
+      "leaky": true,
+      "category": "grouping",
+      "provenance": "reconstructed_excerpt",
+      "path": "test/automl/test_classification.py",
+      "source_url": "https://github.com/microsoft/FLAML/blob/798cacbd638c92fef35b8ba3113eec5564418952/test/automl/test_classification.py",
+      "label_rationale": "Rows are split randomly and customer_id is kept as a feature, so the same customer can appear in both partitions and be memorised by id.",
+      "notes": ""
+    },
+    {
+      "name": "flaml_split_before_automl",
+      "repository": "microsoft/FLAML",
+      "family": "flaml-automl",
+      "leaky": false,
+      "category": "tuning",
+      "provenance": "reconstructed_excerpt",
+      "path": "test/automl/test_classification.py",
+      "source_url": "https://github.com/microsoft/FLAML/blob/798cacbd638c92fef35b8ba3113eec5564418952/test/automl/test_classification.py",
+      "label_rationale": "AutoML searches and fits on the training partition only; the test partition is scored once at the end.",
+      "notes": ""
+    },
+    {
+      "name": "flaml_timeseries_random_split",
+      "repository": "microsoft/FLAML",
+      "family": "flaml-timeseries",
+      "leaky": true,
+      "category": "temporal",
+      "provenance": "reconstructed_excerpt",
+      "path": "test/automl/test_regression.py",
+      "source_url": "https://github.com/microsoft/FLAML/blob/798cacbd638c92fef35b8ba3113eec5564418952/test/automl/test_regression.py",
+      "label_rationale": "Sorting does nothing when train_test_split shuffles by default, so later timestamps can land in training while earlier ones are tested.",
+      "notes": ""
+    },
+    {
+      "name": "homl_pipeline_fit_on_train",
+      "repository": "ageron/handson-ml3",
+      "family": "homl-pipeline",
+      "leaky": false,
+      "category": "preprocessing_order",
+      "provenance": "reconstructed_excerpt",
+      "path": "02_end_to_end_machine_learning_project.ipynb",
+      "source_url": "https://github.com/ageron/handson-ml3/blob/ef1c9f5ab11083584635b9b3a7846f49c58a6084/02_end_to_end_machine_learning_project.ipynb",
+      "label_rationale": "In this notebook housing is already the training partition, so fitting the preprocessing pipeline on it does not touch the test set.",
+      "notes": ""
+    },
+    {
+      "name": "homl_pipeline_rebuilt_each_cv_fold",
+      "repository": "ageron/handson-ml3",
+      "family": "homl-pipeline",
+      "leaky": false,
+      "category": "cv_misuse",
+      "provenance": "reconstructed_excerpt",
+      "path": "02_end_to_end_machine_learning_project.ipynb",
+      "source_url": "https://github.com/ageron/handson-ml3/blob/ef1c9f5ab11083584635b9b3a7846f49c58a6084/02_end_to_end_machine_learning_project.ipynb",
+      "label_rationale": "The fitted preprocessing object is cloned inside the pipeline for each fold; cross_val_score refits it on the fold's training rows.",
+      "notes": ""
+    },
+    {
+      "name": "homl_scaler_before_split",
+      "repository": "ageron/handson-ml3",
+      "family": "homl-scaling",
+      "leaky": true,
+      "category": "preprocessing_scaling",
+      "provenance": "reconstructed_excerpt",
+      "path": "02_end_to_end_machine_learning_project.ipynb",
+      "source_url": "https://github.com/ageron/handson-ml3/blob/ef1c9f5ab11083584635b9b3a7846f49c58a6084/02_end_to_end_machine_learning_project.ipynb",
+      "label_rationale": "The scaler sees the held-out rows before the split, leaking their distribution into the training features.",
+      "notes": ""
+    },
+    {
+      "name": "homl_stratified_holdout",
+      "repository": "ageron/handson-ml3",
+      "family": "homl-stratified",
+      "leaky": false,
+      "category": "grouping",
+      "provenance": "reconstructed_excerpt",
+      "path": "02_end_to_end_machine_learning_project.ipynb",
+      "source_url": "https://github.com/ageron/handson-ml3/blob/ef1c9f5ab11083584635b9b3a7846f49c58a6084/02_end_to_end_machine_learning_project.ipynb",
+      "label_rationale": "Binning is target-independent and used only as a stratification key, then dropped. No target statistic is shared across the boundary.",
+      "notes": "Notebook cell sequence condensed into one unit."
+    },
+    {
+      "name": "imblearn_resample_inside_fold",
+      "repository": "scikit-learn-contrib/imbalanced-learn",
+      "family": "imblearn-cv",
+      "leaky": false,
+      "category": "resampling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/over_sampling/plot_random_over_sampling.py",
+      "source_url": "https://github.com/scikit-learn-contrib/imbalanced-learn/blob/8504e95f0160f61d1b617ca66f779646d2ee609e/examples/over_sampling/plot_random_over_sampling.py",
+      "label_rationale": "Oversampling runs inside the loop on training indices only; the validation fold is left untouched.",
+      "notes": ""
+    },
+    {
+      "name": "imblearn_smote_before_split",
+      "repository": "scikit-learn-contrib/imbalanced-learn",
+      "family": "imblearn-smote",
+      "leaky": true,
+      "category": "resampling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/over_sampling/plot_smote.py",
+      "source_url": "https://github.com/scikit-learn-contrib/imbalanced-learn/blob/8504e95f0160f61d1b617ca66f779646d2ee609e/examples/over_sampling/plot_smote.py",
+      "label_rationale": "SMOTE interpolates between rows before the split, so synthetic copies of what should be test rows appear in training.",
+      "notes": ""
+    },
+    {
+      "name": "imblearn_smote_pipeline_cv",
+      "repository": "scikit-learn-contrib/imbalanced-learn",
+      "family": "imblearn-smote",
+      "leaky": false,
+      "category": "resampling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/over_sampling/plot_smote.py",
+      "source_url": "https://github.com/scikit-learn-contrib/imbalanced-learn/blob/8504e95f0160f61d1b617ca66f779646d2ee609e/examples/over_sampling/plot_smote.py",
+      "label_rationale": "imblearn.pipeline applies SMOTE inside each training fold, so no synthetic test row exists.",
+      "notes": ""
+    },
+    {
+      "name": "imblearn_tomek_links_full_data",
+      "repository": "scikit-learn-contrib/imbalanced-learn",
+      "family": "imblearn-tomek",
+      "leaky": true,
+      "category": "duplicates",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/under_sampling/plot_tomek_links.py",
+      "source_url": "https://github.com/scikit-learn-contrib/imbalanced-learn/blob/8504e95f0160f61d1b617ca66f779646d2ee609e/examples/under_sampling/plot_tomek_links.py",
+      "label_rationale": "Under-sampling decisions are made with test rows present, so the surviving training set depends on held-out neighbours.",
+      "notes": ""
+    },
+    {
+      "name": "lightgbm_categorical_full_encode",
+      "repository": "microsoft/LightGBM",
+      "family": "lightgbm-categorical",
+      "leaky": true,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/python-guide/advanced_example.py",
+      "source_url": "https://github.com/microsoft/LightGBM/blob/3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9/examples/python-guide/advanced_example.py",
+      "label_rationale": "Categorical codes and frequencies are computed on every row, so the vocabulary and counts used for training include test rows.",
+      "notes": ""
+    },
+    {
+      "name": "lightgbm_early_stopping_on_test",
+      "repository": "microsoft/LightGBM",
+      "family": "lightgbm-simple",
+      "leaky": true,
+      "category": "tuning",
+      "provenance": "verbatim_excerpt",
+      "path": "examples/python-guide/simple_example.py",
+      "source_url": "https://github.com/microsoft/LightGBM/blob/3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9/examples/python-guide/simple_example.py",
+      "label_rationale": "This is the shipped simple example: early stopping watches the test set, so the reported test RMSE is selected using the test set itself.",
+      "notes": "Labelled leaky on review even though it is an upstream example; the pattern is test-set model selection, not a broken file."
+    },
+    {
+      "name": "lightgbm_group_split",
+      "repository": "microsoft/LightGBM",
+      "family": "lightgbm-group",
+      "leaky": false,
+      "category": "grouping",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/python-guide/advanced_example.py",
+      "source_url": "https://github.com/microsoft/LightGBM/blob/3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9/examples/python-guide/advanced_example.py",
+      "label_rationale": "The split is taken by store_id, so a store never appears on both sides of the evaluation.",
+      "notes": ""
+    },
+    {
+      "name": "lightgbm_train_valid_files",
+      "repository": "microsoft/LightGBM",
+      "family": "lightgbm-simple",
+      "leaky": false,
+      "category": "preprocessing_order",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/python-guide/simple_example.py",
+      "source_url": "https://github.com/microsoft/LightGBM/blob/3ee03c26ba8c9e8ddc05fa8687717cae8a7d61d9/examples/python-guide/simple_example.py",
+      "label_rationale": "Training and validation come from separate files and early stopping uses the validation file, keeping the final test file untouched.",
+      "notes": ""
+    },
+    {
+      "name": "mlflow_grid_search_on_test",
+      "repository": "mlflow/mlflow",
+      "family": "mlflow-tuning",
+      "leaky": true,
+      "category": "tuning",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/sklearn_elasticnet_wine/train.py",
+      "source_url": "https://github.com/mlflow/mlflow/blob/5c6af89333648b7e14ae726cc37cb2465f1917e1/examples/sklearn_elasticnet_wine/train.py",
+      "label_rationale": "Hyperparameters are selected by fitting the search on the test partition, so the reported best score is not held out at all.",
+      "notes": ""
+    },
+    {
+      "name": "mlflow_pipeline_logged",
+      "repository": "mlflow/mlflow",
+      "family": "mlflow-pipeline",
+      "leaky": false,
+      "category": "complex_transform",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/sklearn_logistic_regression/train.py",
+      "source_url": "https://github.com/mlflow/mlflow/blob/5c6af89333648b7e14ae726cc37cb2465f1917e1/examples/sklearn_logistic_regression/train.py",
+      "label_rationale": "Imputation and scaling are pipeline steps fitted on the training partition; the serialized model carries the same fitted state.",
+      "notes": ""
+    },
+    {
+      "name": "mlflow_wine_scaler_on_full_frame",
+      "repository": "mlflow/mlflow",
+      "family": "mlflow-wine",
+      "leaky": true,
+      "category": "preprocessing_scaling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/sklearn_elasticnet_wine/train.py",
+      "source_url": "https://github.com/mlflow/mlflow/blob/5c6af89333648b7e14ae726cc37cb2465f1917e1/examples/sklearn_elasticnet_wine/train.py",
+      "label_rationale": "StandardScaler is fitted on all rows before the split, so test rows contribute their mean and variance to the training features.",
+      "notes": "Leaky variant of the shipped MLflow example."
+    },
+    {
+      "name": "mlflow_wine_split_before_fit",
+      "repository": "mlflow/mlflow",
+      "family": "mlflow-wine",
+      "leaky": false,
+      "category": "preprocessing_order",
+      "provenance": "verbatim_excerpt",
+      "path": "examples/sklearn_elasticnet_wine/train.py",
+      "source_url": "https://github.com/mlflow/mlflow/blob/5c6af89333648b7e14ae726cc37cb2465f1917e1/examples/sklearn_elasticnet_wine/train.py",
+      "label_rationale": "Rows are split before any fitting; the model only sees training rows and the metric is computed on the untouched test partition.",
+      "notes": ""
+    },
+    {
+      "name": "optuna_cross_val_objective",
+      "repository": "optuna/optuna-examples",
+      "family": "optuna-cv",
+      "leaky": false,
+      "category": "tuning",
+      "provenance": "reconstructed_excerpt",
+      "path": "sklearn/sklearn_simple.py",
+      "source_url": "https://github.com/optuna/optuna-examples/blob/9450de9b8b042e396bb816fdbe7fb4b5227b3323/sklearn/sklearn_simple.py",
+      "label_rationale": "There is no separate test partition in this example, so nothing is held out and nothing is contaminated. Tuning on the same CV folds does bias the reported score, but that is selection bias, not leakage.",
+      "notes": "Structure preserved; the suggest call is named for readability."
+    },
+    {
+      "name": "optuna_group_kfold_without_groups",
+      "repository": "optuna/optuna-examples",
+      "family": "optuna-group",
+      "leaky": true,
+      "category": "grouping",
+      "provenance": "reconstructed_excerpt",
+      "path": "sklearn/sklearn_simple.py",
+      "source_url": "https://github.com/optuna/optuna-examples/blob/9450de9b8b042e396bb816fdbe7fb4b5227b3323/sklearn/sklearn_simple.py",
+      "label_rationale": "GroupKFold needs a groups array. Without groups= it raises or falls back to positional behaviour, so repeated entities can still cross the fold boundary.",
+      "notes": ""
+    },
+    {
+      "name": "optuna_pipeline_cv_objective",
+      "repository": "optuna/optuna-examples",
+      "family": "optuna-pipeline",
+      "leaky": false,
+      "category": "cv_misuse",
+      "provenance": "reconstructed_excerpt",
+      "path": "sklearn/sklearn_simple.py",
+      "source_url": "https://github.com/optuna/optuna-examples/blob/9450de9b8b042e396bb816fdbe7fb4b5227b3323/sklearn/sklearn_simple.py",
+      "label_rationale": "StandardScaler is part of the pipeline passed to cross_val_score, so every fold fits its own scaler on training rows only.",
+      "notes": ""
+    },
+    {
+      "name": "optuna_target_encoding_full_data",
+      "repository": "optuna/optuna-examples",
+      "family": "optuna-target",
+      "leaky": true,
+      "category": "target_encoding",
+      "provenance": "reconstructed_excerpt",
+      "path": "sklearn/sklearn_simple.py",
+      "source_url": "https://github.com/optuna/optuna-examples/blob/9450de9b8b042e396bb816fdbe7fb4b5227b3323/sklearn/sklearn_simple.py",
+      "label_rationale": "The target mean per city is computed on every row, then mapped onto training and test rows alike. Each test row's encoding contains its own label contribution.",
+      "notes": ""
+    },
+    {
+      "name": "sklearn_pca_fit_before_split",
+      "repository": "scikit-learn/scikit-learn",
+      "family": "sklearn-pca",
+      "leaky": true,
+      "category": "preprocessing_scaling",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/preprocessing/plot_scaling_importance.py",
+      "source_url": "https://github.com/scikit-learn/scikit-learn/blob/3c5e5effc5e11309209234507cb768c5fb38971b/examples/preprocessing/plot_scaling_importance.py",
+      "label_rationale": "PCA learns its components from every row, including rows that later become the test split. The reported score is therefore optimistic.",
+      "notes": "Condensed variant of the example's PCA section; upstream fits PCA on X_train, so this is a leaky mutation of a clean idiom."
+    },
+    {
+      "name": "sklearn_pipeline_inside_cross_val",
+      "repository": "scikit-learn/scikit-learn",
+      "family": "sklearn-cv",
+      "leaky": false,
+      "category": "cv_misuse",
+      "provenance": "reconstructed_excerpt",
+      "path": "examples/model_selection/plot_cv_predict.py",
+      "source_url": "https://github.com/scikit-learn/scikit-learn/blob/3c5e5effc5e11309209234507cb768c5fb38971b/examples/model_selection/plot_cv_predict.py",
+      "label_rationale": "The scaler lives inside the pipeline, so cross_val_predict refits it on each training fold and transforms the held-out fold with training statistics only.",
+      "notes": ""
+    },
+    {
+      "name": "sklearn_scaling_fit_after_split",
+      "repository": "scikit-learn/scikit-learn",
+      "family": "sklearn-scaling",
+      "leaky": false,
+      "category": "preprocessing_scaling",
+      "provenance": "verbatim_excerpt",
+      "path": "examples/preprocessing/plot_scaling_importance.py",
+      "source_url": "https://github.com/scikit-learn/scikit-learn/blob/3c5e5effc5e11309209234507cb768c5fb38971b/examples/preprocessing/plot_scaling_importance.py",
+      "label_rationale": "The scaler is fitted on X_train only, after the split. Test rows never influence the scaling statistics.",
+      "notes": ""
+    },
+    {
+      "name": "sklearn_scaling_for_plot_only",
+      "repository": "scikit-learn/scikit-learn",
+      "family": "sklearn-scaling",
+      "leaky": false,
+      "category": "eda_only",
+      "provenance": "verbatim_excerpt",
+      "path": "examples/preprocessing/plot_scaling_importance.py",
+      "source_url": "https://github.com/scikit-learn/scikit-learn/blob/3c5e5effc5e11309209234507cb768c5fb38971b/examples/preprocessing/plot_scaling_importance.py",
+      "label_rationale": "The full-frame fit is used only to draw a decision-boundary figure; no held-out score is computed from it, so there is no evaluation leak.",
+      "notes": "Illustrates why full-frame transforms are not automatically leaks."
+    },
+    {
+      "name": "xgboost_dmatrix_before_split",
+      "repository": "dmlc/xgboost",
+      "family": "xgboost-matrix",
+      "leaky": true,
+      "category": "complex_transform",
+      "provenance": "reconstructed_excerpt",
+      "path": "demo/guide-python/basic_walkthrough.py",
+      "source_url": "https://github.com/dmlc/xgboost/blob/f109cc0503aef1bcb21e7e0dc0b4e93a1ef9740a/demo/guide-python/basic_walkthrough.py",
+      "label_rationale": "The full DMatrix is built before the split. Building a matrix is usually harmless, but any binning or categorical vocabulary learned from it crosses the boundary; the dead full-frame object is a smell.",
+      "notes": ""
+    },
+    {
+      "name": "xgboost_early_stopping_on_test",
+      "repository": "dmlc/xgboost",
+      "family": "xgboost-earlystop",
+      "leaky": true,
+      "category": "tuning",
+      "provenance": "reconstructed_excerpt",
+      "path": "demo/guide-python/basic_walkthrough.py",
+      "source_url": "https://github.com/dmlc/xgboost/blob/f109cc0503aef1bcb21e7e0dc0b4e93a1ef9740a/demo/guide-python/basic_walkthrough.py",
+      "label_rationale": "The number of boosting rounds is selected by watching the test set, so the test set influences model selection and the final score is optimistic.",
+      "notes": ""
+    },
+    {
+      "name": "xgboost_kfold_cv",
+      "repository": "dmlc/xgboost",
+      "family": "xgboost-cv",
+      "leaky": false,
+      "category": "cv_misuse",
+      "provenance": "reconstructed_excerpt",
+      "path": "demo/guide-python/cross_validation.py",
+      "source_url": "https://github.com/dmlc/xgboost/blob/f109cc0503aef1bcb21e7e0dc0b4e93a1ef9740a/demo/guide-python/cross_validation.py",
+      "label_rationale": "No preprocessing is fitted outside the folds and no row appears in both training and validation within a fold.",
+      "notes": ""
+    },
+    {
+      "name": "xgboost_time_ordered_split",
+      "repository": "dmlc/xgboost",
+      "family": "xgboost-timeseries",
+      "leaky": false,
+      "category": "temporal",
+      "provenance": "reconstructed_excerpt",
+      "path": "demo/guide-python/cross_validation.py",
+      "source_url": "https://github.com/dmlc/xgboost/blob/f109cc0503aef1bcb21e7e0dc0b4e93a1ef9740a/demo/guide-python/cross_validation.py",
+      "label_rationale": "The split is positional on a time-sorted frame, so every test timestamp is later than every training timestamp.",
+      "notes": ""
+    }
+  ]
+}

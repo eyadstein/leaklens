@@ -8,11 +8,13 @@ import socket
 import numpy as np
 import pytest
 
+from leaklens.ai import features as feature_module
 from leaklens.ai import learned
 from leaklens.ai.corpus import (
     corpus_cases,
     corpus_stats,
     development_cases,
+    phase7_holdout_cases,
     training_cases,
     validation_cases,
 )
@@ -20,6 +22,7 @@ from leaklens.ai.corpus_test import LOCKED_TEST_CASES
 from leaklens.ai.features import (
     EXCLUDED_MODEL_FEATURES,
     FEATURE_NAMES,
+    MODEL_FEATURE_INDICES,
     MODEL_FEATURE_NAMES,
     extract_features,
     model_features,
@@ -56,30 +59,55 @@ def test_corpus_is_grouped_labeled_and_split_by_source():
     cases = corpus_cases()
 
     assert stats == {
-        "cases": 185,
-        "leaky": 99,
-        "legitimate": 86,
-        "groups": 137,
-        "leaky_groups": 70,
-        "legitimate_groups": 67,
-        "sources": 13,
-        "train_cases": 145,
-        "train_leaky": 78,
-        "train_legitimate": 67,
-        "train_groups": 97,
+        "cases": 259,
+        "leaky": 136,
+        "legitimate": 123,
+        "groups": 174,
+        "leaky_groups": 107,
+        "legitimate_groups": 104,
+        "sources": 19,
+        "train_cases": 219,
+        "train_leaky": 115,
+        "train_legitimate": 104,
+        "train_groups": 134,
         "validation_cases": 40,
         "validation_leaky": 21,
         "validation_legitimate": 19,
         "validation_groups": 40,
-        "train_sources": 9,
+        "train_sources": 15,
         "validation_sources": 4,
+        "holdout_cases": 12,
+        "holdout_leaky": 6,
+        "holdout_legitimate": 6,
+        "holdout_groups": 6,
+        "holdout_sources": 5,
     }
-    assert len(cases) == 185
+    assert len(cases) == 259
     assert all(case.name and case.code and case.category for case in cases)
     assert all(case.split in {"train", "validation"} for case in cases)
     assert {case.split for case in training_cases()} == {"train"}
     assert {case.split for case in validation_cases()} == {"validation"}
     assert {case.split for case in LOCKED_TEST_CASES} == {"test"}
+
+
+def test_phase7_holdout_is_frozen_and_disjoint_from_development():
+    development = development_cases()
+    holdout = phase7_holdout_cases()
+
+    assert len(holdout) == 12
+    assert {case.split for case in holdout} == {"holdout"}
+    assert {case.source for case in holdout}.isdisjoint(
+        {case.source for case in development}
+    )
+    assert {case.group for case in holdout}.isdisjoint(
+        {case.group for case in development}
+    )
+    # The holdout must not leak into the development corpus or its stats.
+    assert {case.code for case in holdout}.isdisjoint(
+        {case.code for case in development}
+    )
+    assert corpus_stats()["holdout_cases"] == 12
+    assert all(case.name and case.code and case.category for case in holdout)
 
 
 def test_locked_test_is_disjoint_from_development_by_source_and_group():
@@ -168,19 +196,117 @@ def test_grouped_folds_never_split_a_template_family():
 
 
 def test_model_features_exclude_shortcuts_but_keep_indicators():
-    assert len(FEATURE_NAMES) == 98
+    assert len(FEATURE_NAMES) == 112
     assert EXCLUDED_MODEL_FEATURES == {
         "log_lines",
         "log_bytes",
         "has_random_state",
         "target_column_passed",
     }
-    assert len(MODEL_FEATURE_NAMES) == 94
+    assert len(MODEL_FEATURE_NAMES) == 108
     assert not set(MODEL_FEATURE_NAMES) & EXCLUDED_MODEL_FEATURES
-    assert extract_features(LEAKY).shape == (98,)
-    assert model_features(LEAKY).shape == (94,)
+    assert extract_features(LEAKY).shape == (112,)
+    assert model_features(LEAKY).shape == (108,)
     values = model_features(LEAKY)
     assert np.isfinite(values).all()
+
+
+def test_feature_metadata_references_only_emitted_features():
+    """Every name in the explanation tables must exist in the emitted vector.
+
+    ``target_encoder_before_split`` was a local intermediate that never became an
+    emitted feature, yet both tables below treated it as one.  A key that cannot
+    be produced is dead metadata: it can never fire, and it hides the missing
+    evidence pattern for the indicator that replaced it.
+    """
+
+    emitted = set(FEATURE_NAMES)
+    model_eligible = set(MODEL_FEATURE_NAMES)
+
+    assert sorted(set(learned._FEATURE_EVIDENCE) - emitted) == []
+    assert sorted(set(learned._FEATURE_EVIDENCE) - model_eligible) == []
+    assert sorted(set(learned._SEMANTIC_RISK_FEATURES) - emitted) == []
+    assert sorted(set(learned._SEMANTIC_RISK_FEATURES) - model_eligible) == []
+    assert learned.feature_metadata_errors() == ()
+
+
+def test_feature_metadata_errors_are_reported_for_unknown_and_excluded_names(
+    monkeypatch,
+):
+    monkeypatch.setitem(learned._FEATURE_EVIDENCE, "mystery_indicator", re.compile("x"))
+    errors = learned.feature_metadata_errors()
+    assert any("mystery_indicator" in error for error in errors)
+
+    monkeypatch.undo()
+    monkeypatch.setattr(learned, "_SEMANTIC_RISK_FEATURES", frozenset({"log_lines"}))
+    errors = learned.feature_metadata_errors()
+    assert any("log_lines" in error for error in errors)
+
+    monkeypatch.undo()
+    monkeypatch.setitem(learned._FEATURE_EVIDENCE, "log_lines", re.compile("x"))
+    errors = learned.feature_metadata_errors()
+    assert any("model-excluded feature: log_lines" in error for error in errors)
+
+
+def test_feature_names_are_unique_and_model_indices_match_their_names():
+    assert len(set(FEATURE_NAMES)) == len(FEATURE_NAMES)
+    assert set(MODEL_FEATURE_NAMES) == set(FEATURE_NAMES) - EXCLUDED_MODEL_FEATURES
+    assert [FEATURE_NAMES[index] for index in MODEL_FEATURE_INDICES] == list(
+        MODEL_FEATURE_NAMES
+    )
+
+
+def test_extractor_rejects_a_feature_that_was_not_registered(monkeypatch):
+    """A produced-but-unregistered indicator must fail loudly, not vanish.
+
+    The vector is built by iterating ``FEATURE_NAMES``, so an extra key in the
+    extractor's dict used to be dropped without a trace and the model silently
+    trained on a narrower vector.
+    """
+
+    monkeypatch.setattr(feature_module, "FEATURE_NAMES", FEATURE_NAMES[:-1])
+    with pytest.raises(RuntimeError, match="not registered"):
+        extract_features(LEAKY)
+
+
+def test_extractor_rejects_a_registered_feature_it_never_produces(monkeypatch):
+    """A catalogue entry without a value must fail, not raise a bare KeyError."""
+
+    monkeypatch.setattr(
+        feature_module, "FEATURE_NAMES", (*FEATURE_NAMES, "phantom_indicator")
+    )
+    with pytest.raises(RuntimeError, match="did not produce"):
+        extract_features(LEAKY)
+
+
+def test_reordering_the_catalogue_reorders_the_vector(monkeypatch):
+    """Order is the contract: renaming must never silently follow a sort.
+
+    The model consumes position, not names, so a refactor that sorts or
+    re-inserts names would keep every set-based check green while feeding the
+    model different columns under the same weights.
+    """
+
+    baseline = extract_features(LEAKY)
+    reordered = (FEATURE_NAMES[1], FEATURE_NAMES[0], *FEATURE_NAMES[2:])
+    monkeypatch.setattr(feature_module, "FEATURE_NAMES", reordered)
+    moved = extract_features(LEAKY)
+    assert moved[0] == baseline[1]
+    assert moved[1] == baseline[0]
+    assert np.array_equal(np.delete(moved, [0, 1]), np.delete(baseline, [0, 1]))
+
+
+def test_local_contributions_name_the_value_stored_at_their_own_index():
+    """Pins positional integrity: a name must always describe its own value."""
+
+    reset_model_cache()
+    _evaluation, model = get_model(compare_candidates=False)
+    stored = dict(zip(FEATURE_NAMES, extract_features(LEAKY), strict=True))
+    contributions = model.local_contributions(LEAKY, limit=len(MODEL_FEATURE_NAMES))
+    assert contributions
+    for name, value, _contribution in contributions:
+        assert name in stored
+        assert value == pytest.approx(stored[name])
 
 
 def test_ordering_and_frame_identity_features_separate_common_confusions():
@@ -235,9 +361,9 @@ def test_measured_metrics_are_reported_with_a_model_card():
     _evaluation, model = get_model()
 
     assert evaluation.examples == 40
-    assert evaluation.train_examples == 145
+    assert evaluation.train_examples == 219
     assert evaluation.validation_examples == 40
-    assert evaluation.groups == 137
+    assert evaluation.groups == 174
     assert evaluation.folds == 5
     assert 0.05 <= evaluation.threshold <= 0.95
     assert evaluation.model_name in {row["name"]: row for row in evaluation.candidates}
@@ -257,16 +383,57 @@ def test_measured_metrics_are_reported_with_a_model_card():
     assert "validation" in evaluation.protocol
     assert "locked test" in evaluation.protocol
 
-    assert model.card.name == "leaklens-ai-p5"
+    assert model.card.name == "leaklens-ai-p7"
     assert model.card.version == learned.MODEL_VERSION
-    assert model.card.features == 94
-    assert model.card.training_examples == 185
+    assert model.card.features == 108
+    assert model.card.training_examples == 259
     assert model.card.validation_examples == 40
     assert model.card.calibration
     assert model.card.candidates
     assert model.card.protocol
     assert model.card.limitations
     assert "Grouped" in model.card.evaluation
+
+
+def test_runtime_path_fits_the_frozen_candidate_and_matches_the_benchmark():
+    reset_model_cache()
+    runtime_evaluation, runtime_model = get_model(compare_candidates=False)
+    reset_model_cache()
+    full_evaluation, full_model = get_model()
+
+    # Only the benchmark pays for the full comparison.
+    assert len(runtime_evaluation.candidates) == 1
+    assert runtime_evaluation.candidates[0]["name"] == learned._FROZEN_CANDIDATE
+    assert len(full_evaluation.candidates) == 11
+
+    cases = (
+        list(development_cases())
+        + list(LOCKED_TEST_CASES)
+        + list(learned._external_cases())
+    )
+    matrix = np.vstack(
+        [
+            model_features(case.code if hasattr(case, "code") else case[1])
+            for case in cases
+        ]
+    )
+    if full_evaluation.model_name == learned._FROZEN_CANDIDATE:
+        # On the reference scikit-learn release the frozen winner is also the
+        # validation winner, so both paths must be numerically identical.
+        np.testing.assert_array_equal(
+            runtime_model.predict_matrix(matrix), full_model.predict_matrix(matrix)
+        )
+        assert runtime_model.threshold == full_model.threshold
+        assert runtime_model.card.external == full_model.card.external
+
+    # The frozen model must be reproducible from a clean cache even when a
+    # scikit-learn release ranks a tied candidate differently.
+    reset_model_cache()
+    _second_evaluation, second_model = get_model(compare_candidates=False)
+    np.testing.assert_array_equal(
+        runtime_model.predict_matrix(matrix), second_model.predict_matrix(matrix)
+    )
+    assert second_model.threshold == runtime_model.threshold
 
 
 def test_locked_independent_test_meets_the_phase5_targets():
@@ -348,6 +515,14 @@ def test_learned_hypotheses_are_optional_evidence_bound_and_not_certain():
         learned.MODEL_VERSION in span.excerpt for span in item.evidence
     )
     assert "not a verified finding" in item.explanation
+    assert any(span.source == "code" for span in item.evidence)
+    for span in item.evidence:
+        if span.source != "code":
+            continue
+        line_number = int(span.location.rsplit(":", 1)[1])
+        assert LEAKY.splitlines()[line_number - 1].strip() == span.excerpt
+    assert "(" in item.title
+    assert item.title.endswith(")") or item.title.endswith("[needs review]")
 
 
 def test_learned_hypotheses_can_corroborate_a_deterministic_finding():
@@ -430,3 +605,148 @@ def test_training_never_serializes_the_model(tmp_path, monkeypatch):
     evaluate_model()
 
     assert not list(tmp_path.iterdir())
+
+
+def test_local_contributions_are_signed_and_only_cite_active_features():
+    _evaluation, model = get_model()
+    leaky_contributions = model.local_contributions(LEAKY, limit=8)
+    safe_contributions = model.local_contributions(SAFE, limit=8)
+
+    assert leaky_contributions
+    assert any(contribution > 0 for _name, _value, contribution in leaky_contributions)
+    assert any(contribution < 0 for _name, _value, contribution in safe_contributions)
+    # Local attribution skips features that are zero for this unit, so a
+    # globally important feature absent here is never cited.
+    assert all(value != 0.0 for _name, value, _contribution in leaky_contributions)
+    assert all(value != 0.0 for _name, value, _contribution in safe_contributions)
+
+    # The alias kept for callers returns the same local evidence.
+    assert model.top_contributions(LEAKY, limit=8) == leaky_contributions
+
+
+def test_hypotheses_cite_local_not_global_evidence():
+    hypotheses = learned_hypotheses((CodeSource(label="model.py", source=LEAKY),))
+    item = hypotheses[0]
+
+    feature_spans = [span for span in item.evidence if span.kind == "feature"]
+    assert feature_spans
+    assert any(
+        "local supports log-odds" in span.excerpt
+        or "local opposes log-odds" in span.excerpt
+        for span in feature_spans
+    )
+    assert all("global importance" not in span.excerpt for span in item.evidence)
+    assert any(span.kind == "indicator" for span in item.evidence)
+    assert "local log-odds" in item.explanation
+
+
+def test_uncertain_units_are_labelled_for_review_with_lower_confidence():
+    _evaluation, model = get_model()
+    probability = model.predict_proba(LEAKY)
+    item = learned_hypotheses(
+        (CodeSource(label="model.py", source=LEAKY),),
+        threshold=probability - 0.01,
+    )[0]
+
+    assert item.title.endswith("[needs review]")
+    assert "uncertain" in item.explanation
+    assert "margin" in item.explanation
+    assert item.confidence <= 0.70
+    assert item.severity_hint == "low"
+
+
+def test_runtime_gate_suppresses_shape_only_scores(monkeypatch):
+    class _HighScoreModel:
+        threshold = 0.5
+
+        def predict_proba(self, _source):
+            return 0.99
+
+        def local_contributions(self, _source, limit=5):
+            return ()
+
+    monkeypatch.setattr(
+        learned, "get_model", lambda **_kwargs: (None, _HighScoreModel())
+    )
+
+    shape_only = (
+        "from sklearn.preprocessing import StandardScaler\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "scaled = StandardScaler()\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+    )
+    assert learned._active_risk_features(shape_only) == ()
+    assert (
+        learned.learned_hypotheses((CodeSource(label="shape.py", source=shape_only),))
+        == ()
+    )
+
+    # A deterministic corroborating finding overrides the gate, because the
+    # deterministic scanner is authoritative.
+    from leaklens.leakage import Finding
+
+    finding = Finding(
+        "high", "preprocess_before_split", "shape.py:3", "fit before split"
+    )
+    hypotheses = learned.learned_hypotheses(
+        (CodeSource(label="shape.py", source=shape_only),), (finding,)
+    )
+    assert hypotheses
+    assert hypotheses[0].corroborates == "preprocess_before_split"
+
+
+def test_phase7_guards_recognise_lookalikes():
+    by_group: dict[str, dict[bool, object]] = {}
+    for case in development_cases():
+        if case.group.startswith("p7_"):
+            by_group.setdefault(case.group, {})[case.leaky] = case
+
+    def active(case) -> set[str]:
+        return {
+            FEATURE_NAMES[index]
+            for index, value in enumerate(extract_features(case.code))
+            if value
+        }
+
+    fold_safe = active(by_group["p7_scaler_fold_loop"][False])
+    assert "fold_local_fit" in fold_safe
+    assert "unsafe_preprocessing" not in fold_safe
+    assert "unsafe_preprocessing" in active(by_group["p7_scaler_fold_loop"][True])
+
+    target_safe = active(by_group["p7_label_encode_target"][False])
+    assert "target_relabel_safe" in target_safe
+    assert "encoder_before_split" not in target_safe
+    assert "encoder_before_split" in active(by_group["p7_label_encode_target"][True])
+
+    sort_safe = active(by_group["p7_sort_report"][False])
+    assert "temporal_order_risk" not in sort_safe
+    assert "default_shuffle_after_sort" not in sort_safe
+    sort_leaky = active(by_group["p7_sort_report"][True])
+    assert "default_shuffle_after_sort" in sort_leaky
+
+    lag_safe = active(by_group["p7_forward_lag"][False])
+    assert "future_feature_risk" not in lag_safe
+    assert "future_feature_risk" in active(by_group["p7_forward_lag"][True])
+
+
+def test_phase7_holdout_reports_a_frozen_protocol():
+    reset_model_cache()
+    data = learned.evaluate_phase7_holdout()
+
+    assert data["cases"] == 12
+    assert data["leaky"] == 6
+    assert data["legitimate"] == 6
+    assert data["per_family"]
+    assert "frozen before the final fit" in data["provenance"]
+    assert (
+        data["metrics"]["true_positives"]
+        + data["metrics"]["false_positives"]
+        + (data["metrics"]["false_negatives"] + data["metrics"]["true_negatives"])
+        == 12
+    )
+    assert all(
+        item["probability"] >= data["threshold"] for item in data["false_positives"]
+    )
+    assert all(
+        item["probability"] < data["threshold"] for item in data["false_negatives"]
+    )

@@ -18,6 +18,10 @@ class Finding:
             "detail": self.detail,
         }
 
+    @property
+    def fingerprint(self):
+        return f"{self.kind}:{self.column}:{self.detail}"
+
 
 def _run_scan(monkeypatch, capsys, severity="high"):
     monkeypatch.setattr(cli, "scan_path", lambda _path: [Finding(severity)])

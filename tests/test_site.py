@@ -201,6 +201,47 @@ def test_safe_pipeline_example_matches_the_recorded_fixture(fixtures):
     assert safe["trustScore"] == 100
 
 
+def test_recorded_ai_output_is_real_bounded_and_opt_in(fixtures):
+    code = [fixture for fixture in fixtures["code"] if fixture.get("ai")]
+    assert {fixture["id"] for fixture in code} == {"advanced", "unsafe", "safe"}
+
+    for fixture in code:
+        ai = fixture["ai"]
+        assert ai["engine"] == "leaklens.ai.experimental"
+        assert ai["changesDeterministicFindings"] is False
+        assert ai["model"]["name"] == "leaklens-ai-p7"
+        assert ai["model"]["version"].startswith("leaklens-ai-p7")
+        assert 0.05 <= ai["model"]["threshold"] <= 0.95
+        assert ai["limitations"]
+        for hypothesis in ai["hypotheses"]:
+            assert 0 <= hypothesis["confidence"] <= 0.95
+            assert hypothesis["severityHint"] in {"low", "medium"}
+            assert hypothesis["title"] and hypothesis["explanation"]
+            assert hypothesis["evidence"]
+            assert {span["source"] for span in hypothesis["evidence"]} <= {
+                "model",
+                "code",
+                "schema",
+                "relationship",
+                "statistic",
+                "finding",
+            }
+
+    advanced = next(fixture for fixture in code if fixture["id"] == "advanced")
+    assert advanced["ai"]["hypotheses"]
+    assert any(
+        hypothesis["concept"] == "target_derived_feature"
+        for hypothesis in advanced["ai"]["hypotheses"]
+    )
+    # The AI layer is additive: the deterministic findings are unchanged by it.
+    assert advanced["findings"]
+    assert advanced["ai"]["remediation"]
+
+    safe = next(fixture for fixture in code if fixture["id"] == "safe")
+    assert safe["ai"]["hypotheses"] == []
+    assert safe["ai"]["changesDeterministicFindings"] is False
+
+
 @pytest.mark.parametrize(
     "script",
     [
@@ -258,3 +299,69 @@ def test_live_page_has_an_explicit_opt_in_ai_panel():
     assert "AI intelligence" in text
     assert "innerHTML" not in script
     assert "insertAdjacentHTML" not in script
+
+
+def test_landing_page_integrity_and_accessibility_fixes():
+    text = (DOCS / "index.html").read_text(encoding="utf-8")
+    script = (DOCS / "assets" / "site.js").read_text(encoding="utf-8")
+    css = (DOCS / "assets" / "site.css").read_text(encoding="utf-8")
+
+    # The primary hero action works offline.
+    assert '<a class="button" href="demo.html">Open the interactive demo</a>' in text
+    assert 'href="live.html">Live scan API' in text
+    assert "Scan your data live" not in text
+
+    # The recorded audit card shows a proposed change, not a simulated fix.
+    assert "Apply the fix" not in text
+    assert "Preview the proposed change" in text
+    assert 'aria-labelledby="audit-heading"' in text
+    assert "data-audit-diff" in text
+    assert "data-audit-diff-state" not in text
+    assert 'aria-label="Trust score 50 out of 100"' in text
+    assert 'aria-label="Trust score 100 out of 100"' in text
+    assert "LeakLens reports the leak; you change the code." in text
+    assert "Clean audit" not in text + script
+    assert "ring.style.setProperty" not in script
+
+    # Interactive states survive clipboard denial and throttled reveal observers.
+    assert "showAllReveals" in script
+    assert "if (!sawIntersection) showAllReveals()" in script
+    # The label is captured before the await, or a second click snapshots "Copied".
+    assert script.index("button.dataset.original") < script.index(
+        "const ok = await copyText"
+    )
+    assert (
+        "catch {"
+        in script[
+            script.index("const copyText") : script.index(
+                'doc.addEventListener("click", async'
+            )
+        ]
+    )
+
+    # Empty filter state is announced and offers a way back.
+    assert "data-detect-empty" in text
+    assert "data-filter-reset" in text
+    assert 'role="status" aria-live="polite">14 shown' in text
+
+    # Benchmark evidence remains measured, caveated, and tied to its source.
+    assert "<strong>109 / 109</strong>" not in text
+    assert "<strong>32 / 32</strong>" not in text
+    assert "<strong>12 / 12</strong>" not in text
+    assert "docs/REALWORLD.md" in text
+    assert "only 8 labels" in text
+
+    # Small controls and focus states meet the web target-size guideline.
+    assert "min-height: 44px" in css
+    assert css.count("min-height: 44px") >= 3
+    assert "--faint: #7d92a9" in css
+    print_block = css[css.index("@media print") :]
+    assert "body * {" in print_block
+    assert "background: #fff !important" in print_block
+    assert "color: #111 !important" in print_block
+    assert ".detection-grid" in css
+    assert "overflow-x: auto" in css
+    assert "grid-template-columns: minmax(0, 1fr)" in css
+    assert "min-width: 0" in css
+    report = (DOCS / "report.html").read_text(encoding="utf-8")
+    assert report.count('<div class="table-wrap">') == 2

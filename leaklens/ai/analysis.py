@@ -154,7 +154,7 @@ def analyze(
     if llm_provider is not None:
         plan = enrich_plan(plan, llm_provider)
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     limitations = list(GLOBAL_LIMITATIONS)
     limitations.append(
         "Column names, comments and notebook text are treated as untrusted data."

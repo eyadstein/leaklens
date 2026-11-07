@@ -26,7 +26,9 @@ from .ai.learned import (
     _external_cases,
     _metrics,
     evaluate_locked_test,
+    evaluate_phase7_holdout,
     get_model,
+    learned_hypotheses,
 )
 from .ai.semantics import CodeSource, SchemaInfo, analyze_semantics
 
@@ -248,7 +250,7 @@ def evaluate_semantics() -> dict[str, object]:
 
 
 def _threshold_sweep() -> list[dict[str, float]]:
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     cases = _external_cases()
     matrix = np.vstack([model_features(code) for _n, code, _l in cases])
     labels = np.asarray([int(leaky) for _n, _code, leaky in cases], dtype=int)
@@ -310,8 +312,108 @@ def _split_integrity() -> dict[str, object]:
     }
 
 
+def evaluate_runtime_gate() -> dict[str, object]:
+    """Measure the *emitted hints*, not just the raw score.
+
+    The runtime gate only reports a hypothesis when at least one context-aware
+    semantic risk indicator is active (or the deterministic scanner already
+    corroborates the unit).  This section reports the precision and recall of
+    the hints a user actually sees on the development corpus.
+    """
+
+    cases = development_cases()
+    labels = np.array([1 if case.leaky else 0 for case in cases])
+    emitted = [
+        learned_hypotheses((CodeSource(label=case.name, source=case.code),))
+        for case in cases
+    ]
+    predicted = np.array([1 if hypotheses else 0 for hypotheses in emitted])
+    metrics = _metrics(labels, predicted)
+    false_positives = [
+        {
+            "case": case.name,
+            "group": case.group,
+            "source": case.source,
+            "confidence": round(hypotheses[0].confidence, 4),
+            "signals": [span.excerpt[:160] for span in hypotheses[0].evidence][:3],
+        }
+        for case, guess, hypotheses in zip(cases, predicted, emitted)
+        if guess == 1 and not case.leaky
+    ]
+    false_negatives = [
+        {"case": case.name, "group": case.group, "source": case.source}
+        for case, guess in zip(cases, predicted)
+        if guess == 0 and case.leaky
+    ]
+    return {
+        "cases": len(cases),
+        "gated_units": int(np.sum(predicted)),
+        "suppressed_units": int(len(cases) - np.sum(predicted)),
+        "metrics": metrics,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "note": (
+            "Hypothesis-level output. A leaky unit with no emitted hint is still "
+            "scored by the model; it is suppressed because no semantic risk "
+            "indicator was active."
+        ),
+    }
+
+
+def local_attribution_example() -> dict[str, object]:
+    """Show signed per-instance evidence for one leaky/legitimate pair."""
+
+    from .ai.corpus_phase7 import PHASE7_CASES
+
+    _evaluation, model = get_model(compare_candidates=False)
+    pair = [case for case in PHASE7_CASES if case.group == "p7_scaler_fold_loop"]
+    rows = []
+    for case in pair:
+        probability = model.predict_proba(case.code)
+        contributions = model.local_contributions(case.code, limit=5)
+        rows.append(
+            {
+                "case": case.name,
+                "label": "leaky" if case.leaky else "legitimate",
+                "probability": round(float(probability), 4),
+                "predicted": bool(probability >= model.threshold),
+                "supporting": [
+                    {
+                        "feature": name,
+                        "value": round(value, 3),
+                        "local_log_odds": round(contribution, 4),
+                    }
+                    for name, value, contribution in contributions
+                    if contribution > 0
+                ],
+                "opposing": [
+                    {
+                        "feature": name,
+                        "value": round(value, 3),
+                        "local_log_odds": round(contribution, 4),
+                    }
+                    for name, value, contribution in contributions
+                    if contribution < 0
+                ],
+            }
+        )
+    return {
+        "group": "p7_scaler_fold_loop",
+        "provenance": (
+            "Phase 7 authored development pair; identical transformer, only the "
+            "position relative to the fold boundary differs."
+        ),
+        "rows": rows,
+        "note": (
+            "Contributions are signed local log-odds for this unit, not global "
+            "feature importance and not a causal claim."
+        ),
+    }
+
+
 def evaluate() -> dict[str, object]:
-    evaluation, model = get_model()
+    comparison, _comparison_model = get_model()
+    evaluation, model = get_model(compare_candidates=False)
     external_cases = _external_cases()
     external_matrix = np.vstack(
         [model_features(code) for _n, code, _l in external_cases]
@@ -367,11 +469,14 @@ def evaluate() -> dict[str, object]:
             "validation_examples": evaluation.validation_examples,
         },
         "protocol": evaluation.protocol,
-        "candidates": list(evaluation.candidates),
+        "candidates": list(comparison.candidates),
         "train_out_of_fold": evaluation.train_metrics,
         "validation": evaluation.metrics,
         "calibration": evaluation.calibration,
         "locked_test": locked,
+        "phase7_holdout": evaluate_phase7_holdout(),
+        "runtime_gate": evaluate_runtime_gate(),
+        "local_attribution": local_attribution_example(),
         "external": evaluation.external,
         "external_cases": len(external_cases),
         "external_threshold_sweep": _threshold_sweep(),
@@ -447,9 +552,15 @@ def markdown(data: dict) -> str:
         "## Protocol and data provenance",
         "",
         f"- Model: `{model['name']}` ({model['version']}), {model['features']} features.",
-        f"- Training: {model['train_examples']} authored cases from 9 scenario sources.",
-        f"- Validation: {model['validation_examples']} authored cases from 4 disjoint sources.",
+        f"- Training: {model['train_examples']} authored cases from "
+        f"{corpus['train_sources']} scenario sources, including 40 Phase 7 "
+        "hard-positive/hard-negative development cases.",
+        f"- Validation: {model['validation_examples']} authored cases from "
+        f"{corpus['validation_sources']} disjoint sources.",
         f"- Locked test: {locked['cases']} authored cases from 4 further disjoint sources.",
+        f"- Phase 7 holdout: {corpus['holdout_cases']} authored cases from "
+        f"{corpus['holdout_sources']} further source families, frozen before the "
+        "final fit and scored once.",
         f"- Groups: {corpus['groups']} template groups across the development corpus; "
         "grouped folds never split a family.",
         f"- Threshold: {model['threshold']:.2f} (chosen on validation only).",
@@ -625,17 +736,172 @@ def markdown(data: dict) -> str:
     else:
         lines.append("- No missed leaks on the locked test.")
 
+    holdout = data["phase7_holdout"]
     lines.extend(
         [
             "",
-            "## External transfer to existing scanner cases",
+            "## Phase 7 frozen holdout (authored, evaluated once)",
+            "",
+            holdout["provenance"],
+            "",
+            f"Cases: {holdout['cases']} ({holdout['leaky']} leaky, "
+            f"{holdout['legitimate']} legitimate) from "
+            f"{len(holdout['per_family'])} source families. Threshold: "
+            f"{holdout['threshold']:.2f}, frozen before the final fit.",
+            "",
+            *_metric_table(holdout["metrics"]),
+            "",
+            "### Phase 7 holdout calibration",
+            "",
+            "| Metric | Value |",
+            "|---|---:|",
+        ]
+    )
+    for key, value in sorted(holdout["calibration"].items()):
+        lines.append(f"| `{key}` | {value:.4f} |")
+    lines.extend(
+        [
+            "",
+            "### Phase 7 holdout by source family",
+            "",
+            "| Family | Cases | Precision | Recall | F1 | FPR |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for family, metrics in holdout["per_family"].items():
+        cases = int(
+            metrics["true_positives"]
+            + metrics["false_positives"]
+            + metrics["false_negatives"]
+            + metrics["true_negatives"]
+        )
+        lines.append(
+            f"| `{family}` | {cases} | {metrics['precision']:.3f} | "
+            f"{metrics['recall']:.3f} | {metrics['f1']:.3f} | "
+            f"{metrics['false_positive_rate']:.3f} |"
+        )
+    lines.extend(["", "### Phase 7 holdout mistakes", ""])
+    if holdout["false_positives"]:
+        lines.extend(
+            f"- False positive: `{item['case']}` ({item['source']}, "
+            f"p={item['probability']:.3f}; local signals: "
+            f"{', '.join(item['signals'])})"
+            for item in holdout["false_positives"]
+        )
+    else:
+        lines.append("- No false positives on the Phase 7 holdout.")
+    if holdout["false_negatives"]:
+        lines.extend(
+            f"- Missed leak: `{item['case']}` ({item['source']}, "
+            f"p={item['probability']:.3f}; local signals: "
+            f"{', '.join(item['signals'])})"
+            for item in holdout["false_negatives"]
+        )
+    else:
+        lines.append("- No missed leaks on the Phase 7 holdout.")
+
+    gate = data["runtime_gate"]
+    lines.extend(
+        [
+            "",
+            "## Runtime hypothesis gate (development)",
+            "",
+            gate["note"],
+            "",
+            *_metric_table(gate["metrics"]),
+            "",
+            f"- Units with an emitted hint: {gate['gated_units']} of {gate['cases']}",
+            f"- Units scored but suppressed: {gate['suppressed_units']}",
+        ]
+    )
+    if gate["false_positives"]:
+        lines.append("")
+        lines.append("Hints emitted on legitimate development cases:")
+        lines.extend(
+            f"- `{item['case']}` ({item['source']}, confidence "
+            f"{item['confidence']:.2f})"
+            for item in gate["false_positives"]
+        )
+    else:
+        lines.append("")
+        lines.append("No hint was emitted on a legitimate development case.")
+
+    attribution = data["local_attribution"]
+    lines.extend(
+        [
+            "",
+            "## Local attribution example",
+            "",
+            attribution["provenance"],
+            "",
+            attribution["note"],
+            "",
+            "| Variant | Label | p | Predicted | Supporting local signals | "
+            "Opposing local signals |",
+            "|---|---|---:|---|---|---|",
+        ]
+    )
+    for row in attribution["rows"]:
+        supporting = ", ".join(
+            f"`{item['feature']}` ({item['local_log_odds']:+.2f})"
+            for item in row["supporting"]
+        )
+        opposing = ", ".join(
+            f"`{item['feature']}` ({item['local_log_odds']:+.2f})"
+            for item in row["opposing"]
+        )
+        lines.append(
+            f"| `{row['case']}` | {row['label']} | {row['probability']:.3f} | "
+            f"{row['predicted']} | {supporting or 'none'} | {opposing or 'none'} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## External transfer to existing scanner cases (development)",
             "",
             f"Cases: {data['external_cases']} (labels from the existing scanner "
-            "benchmark). These cases are not used for training, calibration or "
-            "threshold selection; they are a separate transfer check on different "
-            "code styles.",
+            "benchmark). These cases are not used for fitting, calibration or "
+            "threshold selection. **They were used for Phase 6 error analysis**, "
+            "so the current perfect score is a development result, not independent "
+            "evidence. The frozen real-world holdout, not this set, is the "
+            "generalization check.",
             "",
             *_metric_table(external),
+            "",
+            "### Phase 5 external errors and the Phase 6 response",
+            "",
+            "Phase 5 recorded 6 false positives and 10 named misses on this set "
+            "(the task summary counts 11 misses; only 10 were named in the "
+            "report). Phase 6 added paired authored cases and explicit indicators "
+            "for each family:",
+            "",
+            "| Phase 5 error family | Phase 6 response |",
+            "|---|---|",
+            "| FP: fit inside a KFold loop, scaler fitted per fold | "
+            "`fold_local_fit`, `train_only_transformer_fit` |",
+            "| FP: GridSearchCV over a pipeline with raw `X` | "
+            "`search_over_pipeline_safe` |",
+            "| FP: ColumnTransformer with only one-hot before split | "
+            "`onehot_only_full_data` |",
+            "| FP: KNN imputer fitted on train only | `train_only_transformer_fit` |",
+            "| FP: positive target lag before split | `target_lag_safe` |",
+            "| FN: `scale()` / `normalize()` / `power_transform()` before split | "
+            "`functional_scaling_before_split` |",
+            "| FN: hand-written divide-by-max / column min-max | "
+            "`manual_scaling_before_split` |",
+            "| FN: full-frame `fillna(mode/mean)` | "
+            "`full_data_imputation_before_split` |",
+            "| FN: `get_dummies` on the full frame | `get_dummies_before_split` |",
+            "| FN: CV or repeated scoring on the test partition | "
+            "`cv_on_test_partition`, `repeated_test_scoring` |",
+            "| FN: GroupKFold without `groups` | `group_kfold_without_groups` |",
+            "| FN: frequency encoding from all rows | "
+            "`frequency_encoding_before_split` |",
+            "",
+            "The response is evaluated on the set that motivated it, so it cannot "
+            "be read as an accuracy claim. The Phase 6 real-world holdout exposes "
+            "where the new indicators still over-fire.",
             "",
             "## Threshold sweep on external cases",
             "",
@@ -727,6 +993,7 @@ def markdown(data: dict) -> str:
     lines.extend(
         [
             "- The corpus is authored and small; it is a regression corpus, not production evidence.",
+            "- The Phase 7 holdout is 12 authored synthetic units frozen before the final fit; it is a regression check, not production evidence.",
             "- The semantic rules are name and control-flow heuristics, not a proof of safety.",
             "- External transfer is measured on a synthetic/scanner benchmark, not production data.",
             "- AI hypotheses never change deterministic findings, severity or the trust score.",

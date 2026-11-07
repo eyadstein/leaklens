@@ -33,6 +33,17 @@ FIXES = {
     "notebook_out_of_order_execution": "Re-run the notebook top to bottom or use 'Restart Kernel and Run All' before trusting the scan; stale runtime state can hide or create leakage.",
     "feature_overlap": "Deduplicate feature vectors before splitting, or split by entity. Identical features with conflicting labels let the model memorise a held-out row.",
     "near_duplicate_overlap": "Deduplicate or group near-identical rows before splitting; normalised duplicates inflate held-out scores and hide distribution shift.",
+    "group_missing": "Pass an existing --group column, or drop the group check; a missing entity column hides group leakage.",
+    "missingness_target_signal": "Investigate why the value is missing. If missingness is caused by the outcome, a labelling process or a post-outcome system, do not use the column or a missing-value indicator. Otherwise confirm the indicator is available before prediction and compare a model with and without it.",
+    "missingness_split_shift": "Check the collection, filtering and join pipeline for a train/test difference (time window, source system, query). Do not use a missing-value indicator unless it is computed identically in production.",
+    "missingness_group_signal": "Check whether groups differ in how values are recorded. If group membership is unavailable at prediction time, avoid features whose missingness depends on it; otherwise split by group and document the collection difference.",
+    "image_overlap": "Deduplicate images across the split, or split by capture/scene group so near-identical images never sit on both sides.",
+    "sql_target_as_feature": "Do not build features from the target. Project only columns available before the outcome, or move the aggregation after the label cutoff.",
+    "sql_split_predicate_missing": "Filter the query by the split column (or a time boundary) before exporting features so train and test rows cannot mix.",
+    "sql_unresolved_column": "Add a declared dialect and, for SELECT * or ambiguous joins, a schema map so lineage can be resolved. Treat this query as unscanned until then.",
+    "sql_future_window": "Restrict window frames to ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (or a trailing window) so features never read future rows.",
+    "distribution_shift": "Investigate why the train and test distributions differ (time window, sampling, filter, join). Drift does not prove leakage; fix the cause before trusting held-out metrics.",
+    "parse_error": "Fix the syntax error (or the notebook cell that cannot be parsed) before relying on this scan.",
 }
 
 

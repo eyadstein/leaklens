@@ -48,20 +48,31 @@ from .corpus import (
     training_cases,
     validation_cases,
 )
-from .features import MODEL_FEATURE_NAMES, model_features
+from .features import FEATURE_NAMES, MODEL_FEATURE_NAMES, model_features
 from .schemas import EvidenceSpan, Hypothesis, ModelCard
 from .semantics import CodeSource
 
 _RANDOM_STATE = 0
-MODEL_VERSION = "leaklens-ai-p5-2026.11"
+MODEL_VERSION = "leaklens-ai-p7-2026.11"
 _MAX_FALSE_POSITIVE_RATE = 0.05
 
+# Selection frozen after Phase 6 validation.  The runtime path fits only this
+# candidate so a cold API request never trains all eleven; the benchmark still
+# compares every candidate and reports when a scikit-learn release ranks a tied
+# variant differently.
+_FROZEN_CANDIDATE = "logistic_regression_balanced"
+
 MODEL_LIMITATIONS = (
-    "Trained on an authored synthetic corpus; it is not production-code evidence.",
-    "The locked test is a small authored corpus of 47 cases, not real repositories.",
+    "Trained on an authored synthetic corpus: Phase 5/6 families plus 40 Phase 7 "
+    "hard-positive/hard-negative cases and 34 Phase 6 idiom cases.",
+    "The Phase 5 locked test is a small authored corpus of 47 cases, not real repositories.",
+    "The Phase 7 holdout is 12 authored synthetic units frozen before the final "
+    "fit; it is a regression check, not production evidence.",
+    "The Phase 6 real-world holdout is 48 reviewed units from 12 public repositories; "
+    "44 of them are reconstructions, not verbatim upstream files.",
     "Probabilities are calibrated on 40 validation cases; treat them as approximate.",
     "English identifiers and Python control-flow cues may not transfer to other styles.",
-    "External scanner transfer is a separate check, not an improvement claim.",
+    "External scanner transfer and the real-world holdout are checks, not improvement claims.",
 )
 
 
@@ -120,12 +131,25 @@ class LearnedModel:
     def predict_matrix(self, matrix: np.ndarray) -> np.ndarray:
         return self.model.predict_proba(matrix)
 
-    def top_contributions(
+    def local_contributions(
         self, source: str, limit: int = 6
     ) -> tuple[tuple[str, float, float], ...]:
+        """Return the per-instance evidence behind this prediction.
+
+        Each item is ``(feature, value, contribution)`` where ``contribution``
+        is signed: positive values push the unit toward "leaky", negative values
+        push it toward "legitimate".  For the frozen linear model this is the
+        exact log-odds contribution (standardised value x coefficient).  For a
+        tree fallback it is an occlusion delta in calibrated probability.
+
+        This is deliberately *local*: a feature that is globally important but
+        absent from this unit is never cited.
+        """
+
         vector = model_features(source)
-        order = np.argsort(self.feature_importances)[::-1]
-        result = []
+        deltas = self._local_deltas(vector)
+        order = np.argsort(-np.abs(deltas))
+        result: list[tuple[str, float, float]] = []
         for index in order:
             if vector[int(index)] == 0.0:
                 continue
@@ -133,12 +157,52 @@ class LearnedModel:
                 (
                     MODEL_FEATURE_NAMES[int(index)],
                     float(vector[int(index)]),
-                    float(self.feature_importances[int(index)]),
+                    float(deltas[int(index)]),
                 )
             )
             if len(result) >= limit:
                 break
         return tuple(result)
+
+    def top_contributions(
+        self, source: str, limit: int = 6
+    ) -> tuple[tuple[str, float, float], ...]:
+        """Backwards-compatible alias for :meth:`local_contributions`."""
+
+        return self.local_contributions(source, limit=limit)
+
+    def _local_deltas(self, vector: np.ndarray) -> np.ndarray:
+        estimator = self.model.estimator
+        linear = None
+        scaled_vector = vector
+        if isinstance(estimator, Pipeline):
+            first = estimator.steps[0][1]
+            final = estimator.steps[-1][1]
+            if hasattr(first, "mean_") and hasattr(first, "scale_"):
+                scaled_vector = np.asarray(
+                    first.transform(vector.reshape(1, -1)), dtype=float
+                ).ravel()
+            if hasattr(final, "coef_"):
+                linear = np.asarray(final.coef_, dtype=float).ravel()
+        elif hasattr(estimator, "coef_"):
+            linear = np.asarray(estimator.coef_, dtype=float).ravel()
+        if linear is not None and linear.shape[0] == vector.shape[0]:
+            return linear * scaled_vector
+
+        # Generic fallback: zero each active feature and measure the change in
+        # the calibrated probability.  Slower, but it works for tree ensembles
+        # and keeps the explanation local rather than global.
+        base = float(self.model.predict_proba(vector.reshape(1, -1))[0])
+        deltas = np.zeros(vector.shape[0], dtype=float)
+        for index, value in enumerate(vector):
+            if value == 0.0:
+                continue
+            perturbed = vector.copy()
+            perturbed[index] = 0.0
+            deltas[index] = base - float(
+                self.model.predict_proba(perturbed.reshape(1, -1))[0]
+            )
+        return deltas
 
 
 @dataclass(frozen=True, slots=True)
@@ -300,6 +364,41 @@ def _candidate_specs() -> tuple[tuple[str, Any], ...]:
             make_pipeline(
                 StandardScaler(),
                 LogisticRegression(C=1.0, max_iter=500, random_state=_RANDOM_STATE),
+            ),
+        ),
+        (
+            "logistic_regression_l1",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    C=0.5,
+                    penalty="l1",
+                    solver="liblinear",
+                    max_iter=1000,
+                    random_state=_RANDOM_STATE,
+                ),
+            ),
+        ),
+        (
+            "logistic_regression_balanced",
+            make_pipeline(
+                StandardScaler(),
+                LogisticRegression(
+                    C=1.0,
+                    class_weight="balanced",
+                    max_iter=500,
+                    random_state=_RANDOM_STATE,
+                ),
+            ),
+        ),
+        (
+            "random_forest_depth4",
+            RandomForestClassifier(
+                n_estimators=250,
+                max_depth=4,
+                min_samples_leaf=2,
+                random_state=_RANDOM_STATE,
+                n_jobs=1,
             ),
         ),
     )
@@ -477,7 +576,9 @@ def _groups(cases: Sequence[CorpusCase]) -> np.ndarray:
     return np.asarray([case.group for case in cases], dtype=object)
 
 
-def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+def _evaluate(
+    *, include_external: bool = True, candidate: str | None = None
+) -> tuple[ModelEvaluation, LearnedModel]:
     train = training_cases()
     validation = validation_cases()
     development = development_cases()
@@ -490,13 +591,44 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
     development_labels = _labels(development)
 
     folds, splits = _grouped_folds(_groups(train), train_labels)
-    candidate_rows, selected_name, train_oof = _candidate_results(
-        train_matrix,
-        train_labels,
-        folds,
-        validation_matrix,
-        validation_labels,
-    )
+    if candidate is None:
+        candidate_rows, selected_name, train_oof = _candidate_results(
+            train_matrix,
+            train_labels,
+            folds,
+            validation_matrix,
+            validation_labels,
+        )
+    else:
+        # Runtime path: fit the frozen winner only.  The remaining candidates are
+        # still compared by the benchmark, never by a user-facing request.
+        specs = dict(_candidate_specs())
+        if candidate not in specs:
+            raise ValueError(f"unknown candidate {candidate!r}")
+        selected_name = candidate
+        oof = _oof_probabilities(specs[candidate], train_matrix, train_labels, folds)
+        train_oof = {candidate: oof}
+        cv = _metrics(train_labels, (oof >= 0.5).astype(int))
+        calibrated = _fit_calibrated(specs[candidate], train_matrix, train_labels, oof)
+        validation_row = _metrics(
+            validation_labels,
+            (calibrated.predict_proba(validation_matrix) >= 0.5).astype(int),
+        )
+        candidate_rows = [
+            {
+                "name": candidate,
+                "cv_accuracy": cv["accuracy"],
+                "cv_precision": cv["precision"],
+                "cv_recall": cv["recall"],
+                "cv_f1": cv["f1"],
+                "cv_false_positive_rate": cv["false_positive_rate"],
+                "validation_accuracy": validation_row["accuracy"],
+                "validation_precision": validation_row["precision"],
+                "validation_recall": validation_row["recall"],
+                "validation_f1": validation_row["f1"],
+                "validation_false_positive_rate": validation_row["false_positive_rate"],
+            }
+        ]
     selected = dict(_candidate_specs())[selected_name]
 
     calibrated_train = _fit_calibrated(
@@ -538,11 +670,17 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
             )
 
     stats = corpus_stats()
+    selection = (
+        "candidate selection frozen after validation"
+        if candidate is not None
+        else "candidate comparison repeated on grouped CV + validation"
+    )
     protocol = (
         f"train={stats['train_cases']} cases/{stats['train_sources']} sources; "
         f"validation={stats['validation_cases']} cases/{stats['validation_sources']} "
-        "sources; locked test imported only by the benchmark; threshold rule="
-        f"{threshold_rule}."
+        "sources; locked test imported only by the benchmark; "
+        f"{selection}; threshold rule={threshold_rule}; runtime hypotheses also "
+        "require at least one semantic risk indicator."
     )
     external_rates = {
         key: value
@@ -550,7 +688,7 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
         if key in {"precision", "recall", "f1", "false_positive_rate", "accuracy"}
     }
     card = ModelCard(
-        name="leaklens-ai-p5",
+        name="leaklens-ai-p7",
         kind="calibrated_ensemble"
         if "forest" in selected_name or "trees" in selected_name
         else selected_name,
@@ -601,22 +739,40 @@ def _evaluate(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
 
 _lock = threading.Lock()
 _cached: tuple[ModelEvaluation, LearnedModel] | None = None
+_runtime_cached: tuple[ModelEvaluation, LearnedModel] | None = None
 
 
 def evaluate_model(*, include_external: bool = True) -> ModelEvaluation:
     return get_model(include_external=include_external)[0]
 
 
-def get_model(*, include_external: bool = True) -> tuple[ModelEvaluation, LearnedModel]:
+def get_model(
+    *, include_external: bool = True, compare_candidates: bool = True
+) -> tuple[ModelEvaluation, LearnedModel]:
     """Train once, cache in memory, and return the evaluation plus the model.
+
+    ``compare_candidates=False`` is the runtime path used by the public API: it
+    fits only the candidate frozen after validation instead of retraining all
+    eleven, which keeps a cold opt-in AI request inside a small server's time
+    budget.  Both paths use the same corpus, grouped folds, calibration and
+    threshold rule; where the full comparison picks the same winner they are
+    numerically identical.  The benchmark always asks for the full comparison.
 
     Nothing is written to disk and no serialized model is loaded, so a tampered
     file cannot execute code.  The cache is guarded because the public API may
     serve concurrent requests.
     """
 
-    global _cached
+    global _cached, _runtime_cached
     with _lock:
+        if not compare_candidates:
+            if _runtime_cached is None or (
+                include_external and not _runtime_cached[0].external
+            ):
+                _runtime_cached = _evaluate(
+                    include_external=include_external, candidate=_FROZEN_CANDIDATE
+                )
+            return _runtime_cached
         if _cached is None or (include_external and not _cached[0].external):
             _cached = _evaluate(include_external=include_external)
         return _cached
@@ -625,9 +781,10 @@ def get_model(*, include_external: bool = True) -> tuple[ModelEvaluation, Learne
 def reset_model_cache() -> None:
     """Testing helper.  Never needed at runtime."""
 
-    global _cached
+    global _cached, _runtime_cached
     with _lock:
         _cached = None
+        _runtime_cached = None
 
 
 def evaluate_locked_test() -> dict[str, object]:
@@ -639,7 +796,7 @@ def evaluate_locked_test() -> dict[str, object]:
 
     from .corpus_test import LOCKED_TEST_CASES
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     matrix = _matrix(LOCKED_TEST_CASES)
     labels = _labels(LOCKED_TEST_CASES)
     probabilities = model.predict_matrix(matrix)
@@ -696,6 +853,70 @@ def evaluate_locked_test() -> dict[str, object]:
     }
 
 
+def evaluate_phase7_holdout() -> dict[str, object]:
+    """Score the frozen model on the independently authored Phase 7 holdout.
+
+    Only the benchmark and its regression test call this.  The holdout was
+    written and frozen before the final model fit; it is never imported by the
+    training path and no threshold, feature or candidate was selected on it.
+    """
+
+    from .corpus_phase7 import PHASE7_HOLDOUT_CASES
+
+    _evaluation, model = get_model(compare_candidates=False)
+    matrix = _matrix(PHASE7_HOLDOUT_CASES)
+    labels = _labels(PHASE7_HOLDOUT_CASES)
+    probabilities = model.predict_matrix(matrix)
+    predicted = (probabilities >= model.threshold).astype(int)
+    metrics = _metrics(labels, predicted)
+
+    per_family: dict[str, dict[str, float]] = {}
+    for family in sorted({case.source for case in PHASE7_HOLDOUT_CASES}):
+        indexes = [
+            index
+            for index, case in enumerate(PHASE7_HOLDOUT_CASES)
+            if case.source == family
+        ]
+        per_family[family] = _metrics(labels[indexes], predicted[indexes])
+
+    false_positives = []
+    false_negatives = []
+    for case, probability, guess in zip(PHASE7_HOLDOUT_CASES, probabilities, predicted):
+        if bool(guess) == case.leaky:
+            continue
+        contributions = model.local_contributions(case.code, limit=4)
+        item = {
+            "case": case.name,
+            "group": case.group,
+            "source": case.source,
+            "probability": round(float(probability), 4),
+            "signals": [
+                f"{name} ({contribution:+.2f})"
+                for name, _value, contribution in contributions
+            ],
+        }
+        if case.leaky:
+            false_negatives.append(item)
+        else:
+            false_positives.append(item)
+
+    return {
+        "cases": len(PHASE7_HOLDOUT_CASES),
+        "leaky": int(np.sum(labels)),
+        "legitimate": int(len(labels) - np.sum(labels)),
+        "threshold": model.threshold,
+        "metrics": metrics,
+        "calibration": _calibration(labels, probabilities),
+        "per_family": per_family,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "provenance": (
+            "Authored synthetic pairs, frozen before the final fit; grouped by "
+            "template pair and source family; never used for training or tuning."
+        ),
+    }
+
+
 def _evidence(source: str, kind: str, location: str, excerpt: str) -> EvidenceSpan:
     clean = re.sub(r"\s+", " ", excerpt).strip()[:320]
     digest = hashlib.sha1(
@@ -740,6 +961,187 @@ def _evidence_line(lines: Sequence[str]) -> int:
     return 1
 
 
+# Feature -> the line-level construct that activates it.  The mapping is
+# deliberately narrow: it is used to point a reviewer at code, not to explain
+# the model causally.  Unknown features fall back to the keyword heuristic.
+_FEATURE_EVIDENCE: dict[str, re.Pattern[str]] = {
+    "fit_before_split": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_transform_before_split": re.compile(r"\.fit_transform\s*\("),
+    "transformer_before_split": re.compile(
+        r"\b(?:StandardScaler|MinMaxScaler|RobustScaler|Normalizer|"
+        r"PowerTransformer|QuantileTransformer|SimpleImputer|KNNImputer|PCA)"
+    ),
+    "encoder_before_split": re.compile(
+        r"\b(?:OneHotEncoder|OrdinalEncoder|TargetEncoder)\b|get_dummies"
+    ),
+    "unsafe_target_encoding": re.compile(
+        r"\b(?:TargetEncoder|WOEEncoder|CatBoostEncoder)\b"
+    ),
+    "target_mean_before_split": re.compile(r"groupby\([^)]*\).*(?:mean|agg)\("),
+    "functional_scaling_before_split": re.compile(
+        r"\b(?:scale|normalize|power_transform|quantile_transform|"
+        r"robust_scale|minmax_scale|maxabs_scale)\s*\("
+    ),
+    "manual_scaling_before_split": re.compile(
+        r"[/][^=\n]*\.(?:max|min|std|mean)\s*\(|"
+        r"\([^)]*\.(?:mean|min)\s*\([^)]*\)\s*\)\s*/"
+    ),
+    "full_data_imputation_before_split": re.compile(
+        r"\.fillna\([^)]*\.(?:mode|mean|median|value_counts)\("
+    ),
+    "get_dummies_before_split": re.compile(r"get_dummies\s*\("),
+    "cv_on_test_partition": re.compile(
+        r"cross_val_(?:score|validate|predict)\([^)]*test"
+    ),
+    "group_kfold_without_groups": re.compile(r"GroupKFold\s*\("),
+    "group_boundary_ignored": re.compile(r"train_test_split\s*\("),
+    "repeated_test_scoring": re.compile(r"\.score\(\s*(?:X_)?test"),
+    "frequency_encoding_before_split": re.compile(r"value_counts\(\)"),
+    "default_shuffle_after_sort": re.compile(r"\.sort_values\s*\("),
+    "temporal_order_risk": re.compile(r"train_test_split\s*\("),
+    "future_feature_risk": re.compile(r"(?:shift\s*\(\s*-|bfill|center\s*=\s*True)"),
+    "target_feature_risk": re.compile(r"\[['\"][^'\"]+['\"]\]\s*="),
+    "duplicates_after_split": re.compile(r"drop_duplicates\s*\("),
+    "search_over_pipeline_safe": re.compile(
+        r"(?:GridSearchCV|RandomizedSearchCV)\s*\("
+    ),
+    "pipeline_boundary": re.compile(r"(?:Pipeline|make_pipeline)\s*\("),
+    # Coarse features that still deserve a pointer to code.  These are only
+    # used to cite a line for a reviewer; they do not affect the prediction.
+    "has_fit": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "has_fit_transform": re.compile(r"\.fit_transform\s*\("),
+    "fit_without_split": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_on_train_frame": re.compile(r"\.(?:fit|fit_transform)\s*\("),
+    "fit_on_test_frame": re.compile(r"\.(?:fit|fit_transform)\s*\(\s*(?:X_)?test"),
+    "cv_on_full_data": re.compile(r"cross_val_|\.split\s*\("),
+    "cross_validation": re.compile(r"cross_val_|\.split\s*\("),
+    "plain_kfold": re.compile(r"\bKFold\s*\("),
+    "has_shuffle": re.compile(r"shuffle\s*=\s*True"),
+    "target_in_assignment": re.compile(r"\b(?:target|label|outcome)\b"),
+    "target_reference": re.compile(r"\b(?:target|label|outcome)\b"),
+    "target_relabel_safe": re.compile(r"\b(?:target|label|outcome)\b"),
+    "time_words": re.compile(r"\b(?:timestamp|datetime|date|time)\b"),
+    "sort_values": re.compile(r"\.sort_values\s*\("),
+    "train_only_marker": re.compile(r"\btrain(?:ing)?\b"),
+    "log_split_position": re.compile(r"train_test_split\s*\(|\.split\s*\("),
+    "test_concat": re.compile(r"\.concat\s*\("),
+}
+
+
+# Features that describe a concrete leakage path rather than mere script shape.
+# A statistical score is not enough on its own: the runtime hypothesis gate
+# requires at least one of these to be active.  They are all context-aware
+# (position relative to the split, frame identity, target flow), so a safe
+# script that merely *contains* a scaler, a concat or a sort keeps its score
+# but does not produce a false alarm.
+_SEMANTIC_RISK_FEATURES = frozenset(
+    {
+        "unsafe_preprocessing",
+        "unsafe_resampling",
+        "unsafe_feature_selection",
+        "unsafe_target_encoding",
+        "transformer_before_split",
+        "encoder_before_split",
+        "target_mean_before_split",
+        "manual_full_data_stats",
+        "functional_scaling_before_split",
+        "manual_scaling_before_split",
+        "full_data_imputation_before_split",
+        "get_dummies_before_split",
+        "frequency_encoding_before_split",
+        "target_feature_risk",
+        "future_feature_risk",
+        "temporal_order_risk",
+        "default_shuffle_after_sort",
+        "group_boundary_ignored",
+        "identifier_feature_risk",
+        "test_rows_before_split",
+        "test_concat",
+        "cv_on_test_partition",
+        "repeated_test_scoring",
+        "tuning_on_full_data",
+        "group_kfold_without_groups",
+        "onehot_only_full_data",
+        "group_aggregate_before_split",
+        "pivot_before_split",
+        "fit_on_test_frame",
+        "fit_on_all_data_after_split",
+        "duplicates_after_split",
+        "leak_column_name",
+    }
+)
+
+
+def feature_metadata_errors() -> tuple[str, ...]:
+    """Return explanation metadata that cannot describe an emitted feature.
+
+    ``FEATURE_NAMES`` is the single authoritative catalogue: the vector, the
+    model view and every explanation table are keyed by it.  Anything else -
+    typically a Phase 5 intermediate that never became an emitted indicator -
+    is dead metadata: it can never fire, and it hides the missing evidence
+    pattern for the indicator that replaced it.
+    """
+
+    emitted = set(FEATURE_NAMES)
+    eligible = set(MODEL_FEATURE_NAMES)
+    errors: list[str] = []
+    for name in sorted(set(_FEATURE_EVIDENCE) - emitted):
+        errors.append(f"evidence pattern for unemitted feature: {name}")
+    for name in sorted(set(_FEATURE_EVIDENCE) - eligible):
+        errors.append(f"evidence pattern for model-excluded feature: {name}")
+    for name in sorted(set(_SEMANTIC_RISK_FEATURES) - emitted):
+        errors.append(f"risk indicator is not an emitted feature: {name}")
+    for name in sorted(set(_SEMANTIC_RISK_FEATURES) - eligible):
+        errors.append(f"risk indicator is excluded from the model: {name}")
+    return tuple(errors)
+
+
+_METADATA_ERRORS = feature_metadata_errors()
+if _METADATA_ERRORS:  # pragma: no cover - import guard
+    raise RuntimeError(
+        "feature metadata drifted from FEATURE_NAMES: " + "; ".join(_METADATA_ERRORS)
+    )
+
+
+def _active_risk_features(source: str) -> tuple[str, ...]:
+    """Return the semantic risk indicators active for one source unit."""
+
+    vector = model_features(source)
+    return tuple(
+        name
+        for name, value in zip(MODEL_FEATURE_NAMES, vector, strict=True)
+        if value and name in _SEMANTIC_RISK_FEATURES
+    )
+
+
+def _signal_lines(
+    lines: Sequence[str],
+    contributions: Sequence[tuple[str, float, float]],
+    *,
+    limit: int = 2,
+) -> list[tuple[int, str]]:
+    """Return distinct code lines that activate the strongest contributions."""
+
+    found: list[tuple[int, str]] = []
+    seen: set[int] = set()
+    for name, _value, _importance in contributions:
+        pattern = _FEATURE_EVIDENCE.get(name)
+        if pattern is None:
+            continue
+        for index, line in enumerate(lines, start=1):
+            if index in seen:
+                continue
+            if pattern.search(line) and not line.lstrip().startswith(
+                ("import ", "from ")
+            ):
+                seen.add(index)
+                found.append((index, line.strip()))
+                break
+        if len(found) >= limit:
+            break
+    return found
+
+
 def learned_hypotheses(
     code: Sequence[CodeSource],
     findings: Sequence[Finding] = (),
@@ -748,7 +1150,7 @@ def learned_hypotheses(
 ) -> tuple[Hypothesis, ...]:
     """Return at most one learned hypothesis per source unit above threshold."""
 
-    _evaluation, model = get_model()
+    _evaluation, model = get_model(compare_candidates=False)
     cutoff = model.threshold if threshold is None else float(threshold)
     known_kinds = {finding.kind for finding in findings}
     corroborating = next(
@@ -781,57 +1183,122 @@ def learned_hypotheses(
             probability = model.predict_proba(context)
             if probability < cutoff:
                 continue
-            contributions = model.top_contributions(context, limit=5)
+            risk_features = _active_risk_features(context)
+            if not risk_features and corroborating is None:
+                # A score driven only by script shape (has_split, concat,
+                # scaler presence) is not actionable evidence.  The unit is
+                # still scored by the model; it simply does not raise a hint.
+                continue
+            contributions = model.local_contributions(context, limit=5)
+            supporting = tuple(item for item in contributions if item[2] > 0)
+            opposing = tuple(item for item in contributions if item[2] < 0)
             line_number = _evidence_line(text.splitlines())
             first_line = text.splitlines()[line_number - 1] if text.splitlines() else ""
+            signal_lines = _signal_lines(context.splitlines(), supporting)
+            primary_line = signal_lines[0][0] if signal_lines else line_number
+            margin = probability - cutoff
+            if margin >= 0.20:
+                uncertainty = "clear"
+            elif margin >= 0.05:
+                uncertainty = "moderate"
+            else:
+                uncertainty = "uncertain"
             evidence = [
                 _evidence(
                     "model",
                     "probability",
-                    f"{label}:{line_number}",
+                    f"{label}:{primary_line}",
                     f"calibrated p(leaky pattern)={probability:.3f}; "
-                    f"threshold={cutoff:.2f}; model={MODEL_VERSION}",
-                ),
-                _evidence(
-                    "code",
-                    "pattern",
-                    f"{label}:{line_number}",
-                    first_line or f"code unit {label}",
-                ),
+                    f"threshold={cutoff:.2f}; margin={margin:+.3f}; "
+                    f"uncertainty={uncertainty}; model={MODEL_VERSION}",
+                )
             ]
-            for name, value, importance in contributions:
+            evidence.append(
+                _evidence(
+                    "model",
+                    "indicator",
+                    f"{label}:{primary_line}",
+                    "semantic risk indicators: "
+                    + (", ".join(risk_features) if risk_features else "none"),
+                )
+            )
+            if signal_lines:
+                for index, snippet in signal_lines:
+                    evidence.append(
+                        _evidence("code", "pattern", f"{label}:{index}", snippet)
+                    )
+            else:
+                evidence.append(
+                    _evidence(
+                        "code",
+                        "pattern",
+                        f"{label}:{line_number}",
+                        first_line or f"code unit {label}",
+                    )
+                )
+            for name, value, contribution in contributions:
+                direction = "supports" if contribution > 0 else "opposes"
                 evidence.append(
                     _evidence(
                         "model",
                         "feature",
-                        f"{label}:{line_number}",
-                        f"{name}={value:.2f} (global importance {importance:.3f})",
+                        f"{label}:{primary_line}",
+                        f"{name}={value:.2f}; local {direction} "
+                        f"log-odds {contribution:+.3f}",
                     )
                 )
-            confidence = min(0.95, 0.45 + 0.40 * probability)
-            signal_text = ", ".join(name for name, _value, _c in contributions[:3])
+            confidence = (
+                min(0.95, 0.35 + 0.55 * probability)
+                if uncertainty == "clear"
+                else min(0.70, 0.30 + 0.40 * probability)
+            )
+            signal_text = ", ".join(
+                f"{name} ({contribution:+.2f})"
+                for name, _value, contribution in supporting[:3]
+            )
+            counter_text = ", ".join(
+                name for name, _value, _contribution in opposing[:2]
+            )
+            top_signal = supporting[0][0] if supporting else "none"
+            excerpt = signal_lines[0][1] if signal_lines else first_line
             digest = hashlib.sha1(
-                f"{label}|{line_number}|{probability:.6f}".encode("utf-8", "replace"),
+                f"{label}|{primary_line}|{probability:.6f}".encode("utf-8", "replace"),
                 usedforsecurity=False,
             ).hexdigest()[:12]
             hypotheses.append(
                 Hypothesis(
                     hypothesis_id=f"hyp-learned-{digest}",
                     concept="learned_leakage_pattern",
-                    title="Learned model sees a leakage-like code pattern",
+                    title=(
+                        "Learned model sees a leakage-like code pattern"
+                        + (f" ({top_signal})" if contributions else "")
+                        + ("" if uncertainty == "clear" else " [needs review]")
+                    ),
                     explanation=(
-                        f"A calibrated local ensemble trained on labeled authored "
-                        f"pipelines gives this unit p={probability:.3f} for a leakage-like "
-                        f"pattern (threshold {cutoff:.2f}). Active signals: "
-                        f"{signal_text or 'none'}. Feature importances are global to the "
-                        "model, not a causal explanation. This is a statistical hint, not "
-                        "a verified finding."
+                        f"A calibrated local model trained on labeled authored "
+                        f"pipelines gives this unit p={probability:.3f} for a "
+                        f"leakage-like pattern (threshold {cutoff:.2f}, "
+                        f"margin {margin:+.3f}, {uncertainty}). Supporting local "
+                        f"signals: {signal_text or 'none'}."
+                        + (
+                            f" Signals pointing the other way: {counter_text}."
+                            if counter_text
+                            else ""
+                        )
+                        + f" The strongest cited line is `{excerpt[:160]}`. "
+                        "Contributions are local log-odds for this unit, not a "
+                        "causal explanation. The hint is emitted only when a "
+                        "semantic risk indicator is active (score alone is not "
+                        "enough). This is a statistical hint, not a verified "
+                        "finding."
                     ),
                     confidence=round(confidence, 4),
                     evidence=tuple(evidence),
-                    location=f"{label}:{line_number}",
+                    location=f"{label}:{primary_line}",
                     detector="learned",
-                    severity_hint="medium" if probability >= 0.85 else "low",
+                    severity_hint=(
+                        "medium" if probability >= 0.85 and margin >= 0.20 else "low"
+                    ),
                     corroborates=corroborating,
                     limitations=MODEL_LIMITATIONS[:3],
                 )
@@ -846,6 +1313,7 @@ __all__ = [
     "ModelEvaluation",
     "evaluate_locked_test",
     "evaluate_model",
+    "evaluate_phase7_holdout",
     "get_model",
     "learned_hypotheses",
     "reset_model_cache",

@@ -8,9 +8,10 @@ from leaklens import bench_ai
 def test_benchmark_reports_measured_metrics_and_limitations():
     data = bench_ai.evaluate()
 
-    assert data["corpus"]["cases"] == 185
-    assert data["corpus"]["train_cases"] == 145
+    assert data["corpus"]["cases"] == 259
+    assert data["corpus"]["train_cases"] == 219
     assert data["corpus"]["validation_cases"] == 40
+    assert data["corpus"]["holdout_cases"] == 12
     assert data["external_cases"] > 100
     assert 0.05 <= data["model"]["threshold"] <= 0.95
     assert len(data["candidates"]) >= 6
@@ -43,6 +44,30 @@ def test_benchmark_reports_measured_metrics_and_limitations():
     assert data["split_integrity"]["exact_duplicate_codes"] == 0
     assert "Not measured as an improvement" in data["deterministic_comparison"]
 
+    holdout = data["phase7_holdout"]
+    assert holdout["cases"] == 12
+    assert holdout["leaky"] == 6
+    assert holdout["metrics"]["recall"] >= 0.9
+    assert holdout["metrics"]["precision"] >= 0.8
+    assert holdout["metrics"]["false_positive_rate"] <= 0.2
+    assert holdout["per_family"]
+    assert "frozen before the final fit" in holdout["provenance"]
+
+    gate = data["runtime_gate"]
+    assert gate["cases"] == 259
+    assert gate["metrics"]["precision"] >= 0.9
+    assert gate["metrics"]["recall"] >= 0.9
+    assert gate["false_positives"] == []
+
+    attribution = data["local_attribution"]
+    assert len(attribution["rows"]) == 2
+    labels = {row["label"] for row in attribution["rows"]}
+    assert labels == {"leaky", "legitimate"}
+    assert all(
+        any(item["feature"] for item in row["supporting"])
+        for row in attribution["rows"]
+    )
+
 
 def test_benchmark_semantics_have_no_misses_or_false_alarms():
     semantics = bench_ai.evaluate_semantics()
@@ -68,7 +93,12 @@ def test_benchmark_markdown_states_the_limits(tmp_path, capsys):
     assert "## Split integrity" in text
     assert "## Baseline comparison" in text
     assert "## Locked independent test (evaluated once)" in text
-    assert "These cases are not used for training" in text
+    assert "## Phase 7 frozen holdout (authored, evaluated once)" in text
+    assert "## Runtime hypothesis gate (development)" in text
+    assert "## Local attribution example" in text
+    assert "These cases are not used for fitting, calibration" in text
+    assert "used for Phase 6 error analysis" in text
+    assert "development result, not independent" in text
     assert "## External false-positive analysis" in text
     assert "## Overfitting checks" in text
     assert "never change deterministic findings" in text

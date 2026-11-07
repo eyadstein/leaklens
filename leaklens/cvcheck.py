@@ -5,7 +5,17 @@ import warnings
 
 from .leakage import Finding
 from .partition import any_test, infer_roles, name_role
-from .scanner import BENIGN, FUNCS, HINTS, RESAMPLE, _all_names, _name, _sev, _tnames
+from .scanner import (
+    BENIGN,
+    FUNCS,
+    HINTS,
+    RESAMPLE,
+    _all_names,
+    _finding_keys,
+    _name,
+    _sev,
+    _tnames,
+)
 
 CV_FUNCS = {
     "cross_val_score",
@@ -104,6 +114,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
             tree = ast.parse(src)
     except SyntaxError:
         return []
+    keys = _finding_keys(tree)
     ctor, assigns, calls, funcs = {}, [], [], set()
     for n in ast.walk(tree):
         if isinstance(n, ast.Assign):
@@ -247,6 +258,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     f"{who}.fit() uses test data for hyperparameter tuning; the test "
                     f"set must only be used once for final evaluation. Tune on training "
                     f"data with cross-validation instead.",
+                    stable_key=keys[id(c)],
                 )
             )
             continue
@@ -261,6 +273,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     f"{who}() is run on the held-out test partition; cross-validation "
                     f"there reuses test rows as both training and validation data. "
                     f"Cross-validate on X_train and evaluate on X_test once.",
+                    stable_key=keys[id(c)],
                 )
             )
             continue
@@ -282,6 +295,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     f"{who}() tunes or cross-validates on the full dataset before the "
                     f"split at {loc(first_split)}; the held-out rows help choose the "
                     f"model/hyperparameters. Split first, then tune on X_train.",
+                    stable_key=keys[id(c)],
                 )
             )
             continue
@@ -300,6 +314,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{who}.fit() uses data that also feeds the earlier split at "
                     f"{loc(first_split)}; tune on the training partition only.",
+                    stable_key=keys[id(c)],
                 )
             )
 
@@ -356,6 +371,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                         "a loop over hyperparameter values fits the model on the test "
                         "partition; selecting the best loop iteration on test data "
                         "leaks the test set. Use GridSearchCV(cv=...) on X_train.",
+                        stable_key=keys[id(inner)],
                     )
                 )
                 break
@@ -382,6 +398,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 f"{receiver_cls}.split() is called without groups=; the same entity "
                 f"can appear in a training and a validation fold. Pass the entity "
                 f"column (groups=...) or use GroupKFold correctly.",
+                stable_key=keys[id(c)],
             )
         )
     for c in calls:
@@ -399,6 +416,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 loc(c.lineno),
                 f"{_name(c)}() uses a group-aware splitter without groups=; folds can "
                 f"share entities. Pass groups=entity_ids.",
+                stable_key=keys[id(c)],
             )
         )
     # GridSearchCV(cv=GroupKFold(...)).fit(X, y) without groups=.
@@ -433,6 +451,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                     loc(c.lineno),
                     f"{_name(a.value)} was built with a group-aware cv splitter, but "
                     f"fit() receives no groups=; folds can share entities.",
+                    stable_key=keys[id(c)],
                 )
             )
 
@@ -455,6 +474,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 f"the held-out partition is scored {len(scored)} times; choosing between "
                 f"models or hyperparameters after looking at test scores leaks the test "
                 f"set. Select on a validation split and touch the test set once.",
+                stable_key=keys[id(scored[0])],
             )
         )
 
@@ -469,6 +489,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
                 loc(g["first"].lineno),
                 f"{g['who']}(){extra} is given data transformed by {g['cls']} at {loc(line)}; the transform "
                 f"has seen every fold's validation rows. Put it inside a Pipeline passed to {g['who']}",
+                stable_key=keys[id(g["first"])],
             )
         )
     return out + special

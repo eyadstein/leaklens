@@ -15,7 +15,7 @@
 
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), near-duplicate images across split folders (`leaklens images`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), target-, split- and group-associated missingness (`missingness_*`, `--test`/`--group`), near-duplicate images across split folders (`leaklens images`) |
 | Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, target/frequency encoding built from all rows, feature selection (SelectKBest, RFE, SelectFromModel) before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`), hyperparameter tuning on the test set (`tuning_on_test_data`), tuning before the split or on the full frame (`tuning_before_split`, `tuning_on_full_data`), cross-validation on test rows (`cv_on_test_data`), repeated test-set scoring, group CV without `groups=`, shuffled splits of time-sorted data, and notebooks run out of order |
 
 Confidence is explicit in each finding's wording: a confirmed rule (for example a search fitted on `X_test`) is reported as a high-severity leak, while a suspicious but legitimate-possible pattern (for example frequency encoding before the split) is low/medium and says what was observed. Every finding has a fix hint under `--explain`.
@@ -99,7 +99,7 @@ CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intellige
 
 ### `leaklens doctor`
 
-`leaklens doctor` checks the install without network access and without reading secrets: Python is >=3.10, the LeakLens version and install location, the `leaklens` entry point, core dependencies (pandas, numpy, scikit-learn), which optional extras are importable, and whether `.leaklens.toml` or `pyproject.toml` (whichever it finds first) is valid TOML.
+`leaklens doctor` checks the install without network access and without reading secrets: Python is >=3.10, the LeakLens version and install location, the `leaklens` entry point, core dependencies (pandas, numpy, scikit-learn), which optional extras are importable, and whether `.leaklens.toml` (validated against the configuration schema) or `pyproject.toml` (whichever it finds first) is valid TOML. Pass `leaklens doctor --config PATH` to validate a specific configuration file.
 
 ```sh
 leaklens doctor             # human-readable report; exit 1 on a failed check
@@ -122,6 +122,7 @@ Every optional extra declared in `pyproject.toml`:
 | `images` | Near-duplicate image check (`leaklens images`) with Pillow | `pip install "leaklens-ml[images]"` |
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
 | `api` | Hardened public live-scan API (FastAPI + uvicorn, no Streamlit) | `pip install "leaklens-ml[api]"` |
+| `sql` | Optional SQL lineage analysis (`--sql`) with SQLGlot | `pip install "leaklens-ml[sql]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
 | `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
@@ -147,6 +148,8 @@ leaklens train.json --target label   # JSON input, no extra needed
 leaklens train.xlsx --target label   # Excel input (pip install "leaklens-ml[excel]")
 leaklens train.feather --target label   # Feather input (pip install "leaklens-ml[feather]")
 leaklens images data/train data/test   # near-duplicate images across splits (pip install "leaklens-ml[images]")
+leaklens train.csv --target label --test test.csv --drift   # opt-in, diagnostic-only drift
+leaklens --scan query.sql --target label --sql-dialect postgres   # needs [sql]
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -191,6 +194,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--llm` / `--llm-provider` | Optional LLM explanations (see next section) |
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
+| `--drift` | Opt-in train/test distribution-drift diagnostics (needs `--test`; diagnostic-only) |
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
@@ -200,6 +204,8 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 Unknown or extensionless input falls back to CSV. Optional formats (Parquet/Feather/Excel) raise an `ImportError` naming the extra that provides them.
 
 With `--test`, LeakLens runs three bounded duplicate checks in order and reports at most one: exact row overlap (all shared columns, including the label), identical feature vectors with a different label (label excluded), then normalised near-duplicates (text lower-cased/stripped, numbers rounded to 4 decimals). The checks sample at most 50,000 rows for feature overlap and 20,000 for near-duplicates, so large files stay fast. They are heuristics: they report the observed counts and whether labels conflict, and in low-cardinality tabular data an identical feature vector can occur naturally, so treat a medium finding as a prompt to inspect rather than proof of leakage.
+
+JSON findings also carry an additive `evidence` list (bounded, privacy-safe provenance for the highest-value detectors) and a stable `fingerprint`. SARIF writes the same evidence under `properties.leaklens.evidence` and the fingerprint under `partialFingerprints["leaklensFinding/v1"]`, so tracked findings keep their identity when only line numbers or messages change. Moving a file, changing the detector kind, changing the affected feature or changing a detector-supplied stable key changes the fingerprint. See [`docs/DETECTORS.md`](docs/DETECTORS.md) for the full detector contract. Existing fields, severities and the trust score are unchanged.
 
 ### `leaklens --scan PATH...`
 
@@ -211,7 +217,10 @@ leaklens --scan leaklens
 leaklens --scan . --sarif leaklens.sarif || true
 leaklens --scan src tests --llm
 leaklens --scan notebooks/ --ai          # experimental AI hypotheses (offline)
+leaklens --scan warehouse/sql --sql --target label --sql-dialect bigquery   # needs [sql]
 ```
+
+SQL: an explicit `.sql` file is analyzed when named on the command line; folders include `.sql` only with `--sql`. Dialects are explicit (`ansi`, `postgres`, `bigquery`, `snowflake`) and there is no silent fallback. See [SQL lineage analysis](#sql-lineage-analysis-optional).
 
 A deliberately leaky demo covering tuning, target encoding, feature selection, group CV, and time ordering is in [`examples/advanced_leaks.py`](examples/advanced_leaks.py); run `leaklens --scan examples/advanced_leaks.py --explain` to see each finding and its fix.
 
@@ -237,11 +246,116 @@ leaklens init mydir --force   # overwrite an existing .leaklens.toml
 
 It prints the pre-commit hook snippet (below).
 
+## Missingness audit
+
+Missing values are not automatically a leak, so the audit only reports patterns where *why* a value is missing can carry information that is unavailable at prediction time:
+
+- `missingness_target_signal` (medium): missingness is associated with the target (a point-biserial correlation for numeric targets, or a missing-rate difference between target classes with `z >= 3`).
+- `missingness_split_shift` (medium): missingness differs substantially between the train and test splits, including a feature populated in one split and absent from the other.
+- `missingness_group_signal` (low): missingness differs across `--group` entities.
+
+Every check needs a minimum number of rows, missing values and present values, plus a minimum effect size. Insufficient samples, constant columns, entirely missing columns and missing split metadata are reported as skips rather than findings. Evidence contains only aggregate rates and counts, never raw rows or group identifiers. Statistics are deterministic, use pandas/numpy only (no SciPy), and are linear-time per column. Findings are a reason to investigate, not proof of leakage; severity never exceeds `medium`, the data and splits are never modified, and the default exit behavior is unchanged. See [`docs/MISSINGNESS_BENCHMARK.md`](docs/MISSINGNESS_BENCHMARK.md) for the labeled regression benchmark and its limits.
+
+## SQL lineage analysis (optional)
+
+With the optional `sql` extra (`pip install "leaklens-ml[sql]"`), LeakLens parses `.sql` files with SQLGlot and resolves column lineage through CTEs, derived tables, joins, unions and aggregate aliases. It never executes SQL, opens a database connection or reads credentials.
+
+- `sql_target_as_feature` (high): a non-bare projection whose expression references the target **and** whose confirmed lineage includes the target column.
+- `sql_future_window` (medium): a window frame ends with `FOLLOWING`, so it can read rows that are not available at prediction time.
+- `sql_split_predicate_missing` (low): a configured `split_column` exists on a referenced table and no split predicate filters the query.
+- `sql_unresolved_column` (low, diagnostic): lineage was ambiguous or unavailable (`SELECT *` without a schema, an unqualified column over several tables, a non-SELECT statement).
+- `parse_error` (low): the declared dialect cannot parse the input.
+
+Bare target projections, renames (`label AS outcome`) and target filters (`WHERE label = 1`) are deliberately clean. Unresolved lineage never produces a target finding; it produces the low diagnostic instead, so the analysis fails safe. Dialects are explicit (`ansi`, `postgres`, `bigquery`, `snowflake`) with no silent fallback. Source locations are `path:line`; fingerprints use structural keys, so moving a query keeps its baseline identity. Without the `sql` extra, SQL scanning raises an actionable error naming the install command.
+
+```sh
+leaklens --scan query.sql --target label --sql-dialect postgres
+leaklens --scan warehouse/sql --sql --target label --sql-dialect bigquery
+```
+
+Full rules, the feasibility gate and limitations: [`docs/SQL_LINEAGE.md`](docs/SQL_LINEAGE.md). Measured synthetic corpus: [`docs/SQL_BENCHMARK.md`](docs/SQL_BENCHMARK.md).
+
+## Distribution drift (opt-in)
+
+`--drift` compares the training frame with `--test` and reports columns whose distribution changed. It is **off by default**, **low severity**, marked `diagnostic: true`, and **ignored by the trust score and the default exit code**. It never modifies data or splits and needs no SciPy.
+
+| Signal | Method |
+|---|---|
+| Numeric columns | Two-sample Kolmogorov-Smirnov statistic |
+| Categorical columns | Total-variation distance over the top-k categories |
+| Every column | Absolute missingness-rate difference |
+
+Defaults: at least 200 rows per split, a 0.20 effect floor, at most 50 columns and 20 top categories, with deterministic evenly spaced subsampling above 100,000 rows. Constant, fully missing, unsupported and target columns are skipped; no test frame gives `skipped`, a small sample gives `insufficient_data`. Evidence contains only aggregate statistics (`ks=0.62`, `tvd=0.55`, `missingness=0.41`), never raw values or categories. Drift is a reason to investigate, not proof of leakage.
+
+```sh
+leaklens train.csv --target label --test test.csv --drift
+leaklens train.csv --target label --test test.csv --drift --json
+```
+
+Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls: [`docs/DRIFT_BENCHMARK.md`](docs/DRIFT_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
-`leaklens init` writes a commented starter `.leaklens.toml` (one key per CLI flag) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
+`leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
 
-> The CLI does not read `.leaklens.toml` yet — it is a documentation starter. Pass the same values as CLI flags until config is read.
+The CLI reads `./.leaklens.toml` automatically when it exists (or the file passed with `--config`). Precedence is deterministic: built-in defaults, then the configuration file, then explicit CLI flags. Unknown keys, wrong types, unsafe output paths and invalid suppression rules fail closed with exit code 2 and the file location in the message; none of them silently change a scan. Output paths (`sarif`, `html`, `badge`, `[baseline].path`) must stay inside the configuration directory. The file cannot execute code, load plugins or access the network.
+
+```toml
+target = "label"
+test = "test.csv"          # resolved relative to this file
+scan = ["notebooks", "src"]
+fail_under = 80
+
+[baseline]
+path = "leaklens-baseline.json"
+fail_on_new = true         # opt-in CI failure for new findings
+
+[[suppressions]]
+fingerprint = "64-lowercase-hex-characters"
+reason = "accepted: the column is recorded before prediction"
+expires = "2027-01-01"
+
+[missingness]
+enabled = true
+min_rows = 200
+
+[sql]
+enabled = false            # --sql: also scan .sql files (needs the sql extra)
+dialect = "ansi"           # ansi, postgres, bigquery, snowflake
+split_column = "split"     # optional: flag queries without a split predicate
+
+[sql.schema.orders]        # optional column types for lineage resolution
+id = "INT"
+amount = "DOUBLE"
+label = "INT"
+split = "TEXT"
+
+[drift]
+enabled = false            # --drift: opt-in train/test drift diagnostics
+min_rows = 200
+min_effect = 0.20
+```
+
+Full schema, defaults and error behavior: [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md). Baseline and suppression workflow: [`docs/BASELINES.md`](docs/BASELINES.md).
+
+## Baselines and suppressions
+
+A **baseline** records the stable fingerprints of findings you have already reviewed. Later runs report each finding as `new`, `unchanged`, `changed` (same identity, different severity) or `resolved` (recorded but no longer present), so CI only needs to look at what moved.
+
+```sh
+leaklens train.csv --target label --write-baseline --baseline leaklens-baseline.json
+leaklens train.csv --target label --baseline leaklens-baseline.json --fail-on-new
+leaklens train.csv --target label --baseline leaklens-baseline.json --update-baseline
+```
+
+A baseline is never overwritten implicitly: a second `--write-baseline` exits 2 and `--update-baseline` is the explicit replace. The file is written atomically and contains only fingerprints and finding metadata (no rows, feature values or source). A baseline written with a different fingerprint schema is refused rather than compared.
+
+A **suppression** accepts one exact fingerprint with a required reason and an optional ISO expiration date. There are no wildcards, so a rule cannot hide future unrelated findings. Suppressed findings stay in JSON/SARIF/HTML with `status: "suppressed"` and their original severity and evidence; they stop counting toward the trust score and the default exit gate. Expired rules and rules that match nothing are reported as diagnostics and are never applied. Malformed rules abort the run (exit 2).
+
+A **resolved** finding is the opposite of suppression: the baseline recorded it but the current scan no longer produces it. Resolved findings are listed separately (`resolved` in JSON) and are not suppressions.
+
+The default exit behavior is unchanged: exit 1 for a high-severity active finding or a trust score below `--fail-under`. Only `--fail-on-new` (or `[baseline].fail_on_new`) adds a new CI failure mode, and it is opt-in.
+
 
 ## Optional LLM explanations
 
@@ -279,7 +393,7 @@ It combines deterministic semantic rules (pipeline order, future information, ta
 
 `--ai` adds an `ai` object to `--json`, an *AI intelligence (experimental)* section to `--html`, and is also exposed by the Python API (`leaklens.ai`) and the public live-scan API (`include_ai=true`). The website's live page has an explicit opt-in checkbox and renders AI output separately.
 
-Measured precision, recall, F1, false-positive rate, false positives, misses and limitations are in [docs/AI_BENCHMARK.md](docs/AI_BENCHMARK.md) and explained in [docs/AI_INTELLIGENCE.md](docs/AI_INTELLIGENCE.md). It is not claimed as an improvement over the deterministic scanner. `--ai-llm` sends only sanitized group metadata to the configured LLM provider, never raw code or dataset rows, and falls back to the deterministic plan if the provider fails or the reply is unsafe.
+Measured precision, recall, F1, false-positive rate, false positives, misses and limitations are in [docs/AI_BENCHMARK.md](docs/AI_BENCHMARK.md) and explained in [docs/AI_INTELLIGENCE.md](docs/AI_INTELLIGENCE.md). The independent check is [docs/AI_REALWORLD.md](docs/AI_REALWORLD.md): 48 reviewed units from 12 public repositories, measured at accuracy 0.833, precision 0.767, recall 0.958, F1 0.852 and FPR 0.292, with every mistake listed. That is a real measurement, **not** a production-accuracy claim, and it is lower than the authored locked test. It is not claimed as an improvement over the deterministic scanner. `--ai-llm` sends only sanitized group metadata to the configured LLM provider, never raw code or dataset rows, and falls back to the deterministic plan if the provider fails or the reply is unsafe.
 
 ## Model arena
 

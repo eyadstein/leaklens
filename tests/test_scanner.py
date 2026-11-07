@@ -394,3 +394,83 @@ a = train_test_split(X, y)
 """
     findings = scan_source(src)
     assert any(f.kind == "get_dummies_before_split" for f in findings)
+
+
+# --- issue #333: KBinsDiscretizer fitted before the split -------------------
+DISCRETIZER_BEFORE_SPLIT = """
+from sklearn.preprocessing import KBinsDiscretizer
+from sklearn.model_selection import train_test_split
+X = KBinsDiscretizer(n_bins=5).fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+"""
+
+DISCRETIZER_ALIAS_BEFORE_SPLIT = """
+from sklearn.preprocessing import KBinsDiscretizer as KBD
+from sklearn.model_selection import train_test_split
+X = KBD(n_bins=5).fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+"""
+
+DISCRETIZER_ALIAS_AFTER_SPLIT = """
+from sklearn.preprocessing import KBinsDiscretizer as KBD
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+X_train = KBD(n_bins=5).fit_transform(X_train)
+"""
+
+DISCRETIZER_IN_MAKE_PIPELINE_BEFORE_SPLIT = """
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import KBinsDiscretizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+X = make_pipeline(KBinsDiscretizer(n_bins=5), LogisticRegression()).fit_transform(X)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+"""
+
+DISCRETIZER_IN_MAKE_PIPELINE_AFTER_SPLIT = """
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import KBinsDiscretizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+pipe = make_pipeline(KBinsDiscretizer(n_bins=5), LogisticRegression())
+pipe.fit(X_train, y_train)
+"""
+
+
+def test_discretizer_before_split_is_high():
+    fs = [
+        f
+        for f in scan_source(DISCRETIZER_BEFORE_SPLIT)
+        if f.kind == "preprocess_before_split"
+    ]
+    assert fs and fs[0].severity == "high"
+    assert "split" in fs[0].detail
+
+
+def test_discretizer_alias_before_split_is_high():
+    fs = [
+        f
+        for f in scan_source(DISCRETIZER_ALIAS_BEFORE_SPLIT)
+        if f.kind == "preprocess_before_split"
+    ]
+    assert fs and fs[0].severity == "high"
+
+
+def test_discretizer_alias_after_split_is_clean():
+    findings = scan_source(DISCRETIZER_ALIAS_AFTER_SPLIT)
+    assert not any(f.kind == "preprocess_before_split" for f in findings)
+
+
+def test_discretizer_in_make_pipeline_before_split_is_high():
+    fs = [
+        f
+        for f in scan_source(DISCRETIZER_IN_MAKE_PIPELINE_BEFORE_SPLIT)
+        if f.kind == "preprocess_before_split"
+    ]
+    assert fs and fs[0].severity == "high"
+
+
+def test_discretizer_in_make_pipeline_after_split_is_clean():
+    findings = scan_source(DISCRETIZER_IN_MAKE_PIPELINE_AFTER_SPLIT)
+    assert not any(f.kind == "preprocess_before_split" for f in findings)

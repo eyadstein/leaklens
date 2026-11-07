@@ -78,7 +78,150 @@ export const fixtures = {
         "low": 0
       },
       "clean": false,
-      "trustScore": 0
+      "trustScore": 0,
+      "ai": {
+        "engine": "leaklens.ai.experimental",
+        "schemaVersion": "1.0",
+        "changesDeterministicFindings": false,
+        "model": {
+          "name": "leaklens-ai-p7",
+          "version": "leaklens-ai-p7-2026.11",
+          "threshold": 0.53,
+          "features": 108
+        },
+        "hypotheses": [
+          {
+            "id": "hyp-60230b37774c",
+            "concept": "target_derived_feature",
+            "title": "Feature is derived from the target",
+            "confidence": 0.68,
+            "severityHint": "medium",
+            "location": "advanced_leaks.py:16",
+            "corroborates": null,
+            "explanation": "An assignment builds a non-target column from an expression that references a target-like variable. If that expression is available at prediction time it may encode the label; if it is not, it is target leakage.",
+            "evidence": [
+              {
+                "source": "code",
+                "kind": "data_flow",
+                "location": "advanced_leaks.py:16",
+                "excerpt": "df[\"city_te\"] = df[\"city\"].map(city_target_mean)"
+              }
+            ]
+          },
+          {
+            "id": "hyp-cc979e26595a",
+            "concept": "global_statistic_before_split",
+            "title": "Global statistics computed before the split",
+            "confidence": 0.5,
+            "severityHint": "low",
+            "location": "advanced_leaks.py:15",
+            "corroborates": null,
+            "explanation": "Distribution statistics are computed on the full frame before the split. Even when the result is not fed to a model directly, statistics that use test rows do not describe a deployment-time pipeline.",
+            "evidence": [
+              {
+                "source": "code",
+                "kind": "data_flow",
+                "location": "advanced_leaks.py:15",
+                "excerpt": "city_target_mean = df.groupby(\"city\")[\"fraud\"].mean()"
+              }
+            ]
+          },
+          {
+            "id": "hyp-learned-0b912096205c",
+            "concept": "learned_leakage_pattern",
+            "title": "Learned model sees a leakage-like code pattern (fit_on_test_frame)",
+            "confidence": 0.8994,
+            "severityHint": "medium",
+            "location": "advanced_leaks.py:29",
+            "corroborates": "feature_selection_before_split",
+            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.53, margin +0.469, clear). Supporting local signals: fit_on_test_frame (+6.51), default_shuffle_after_sort (+4.97), group_kfold_without_groups (+4.64). The strongest cited line is `search.fit(X_test, y_test)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
+            "evidence": [
+              {
+                "source": "model",
+                "kind": "probability",
+                "location": "advanced_leaks.py:29",
+                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.53; margin=+0.469; uncertainty=clear; model=leaklens-ai-p7-2026.11"
+              },
+              {
+                "source": "model",
+                "kind": "indicator",
+                "location": "advanced_leaks.py:29",
+                "excerpt": "semantic risk indicators: unsafe_preprocessing, unsafe_feature_selection, unsafe_target_encoding, fit_on_test_frame, transformer_before_split, target_mean_before_split, tuning_on_full_data, leak_column_name, group_aggregate_before_split, group_kfold_without_groups, default_shuffle_after_sort"
+              },
+              {
+                "source": "code",
+                "kind": "pattern",
+                "location": "advanced_leaks.py:29",
+                "excerpt": "search.fit(X_test, y_test)"
+              },
+              {
+                "source": "code",
+                "kind": "pattern",
+                "location": "advanced_leaks.py:25",
+                "excerpt": "ordered = df.sort_values(\"event_date\")"
+              },
+              {
+                "source": "model",
+                "kind": "feature",
+                "location": "advanced_leaks.py:29",
+                "excerpt": "fit_on_test_frame=1.00; local supports log-odds +6.515"
+              },
+              {
+                "source": "model",
+                "kind": "feature",
+                "location": "advanced_leaks.py:29",
+                "excerpt": "default_shuffle_after_sort=1.00; local supports log-odds +4.967"
+              }
+            ]
+          }
+        ],
+        "remediation": [
+          {
+            "title": "Preprocessing or selection runs before the split",
+            "priority": "high",
+            "actions": [
+              "Split the data first, then fit every transformer on the training partition only.",
+              "Move preprocessing into a scikit-learn Pipeline so cross-validation refits it per fold.",
+              "Replace full-frame aggregates with statistics computed on training rows and applied to test rows."
+            ],
+            "verification": [
+              "Re-scan the file and confirm no fit/fit_transform call precedes the split.",
+              "Compare cross-validation and held-out scores; a large gap is a warning sign."
+            ]
+          },
+          {
+            "title": "Model selection sees held-out rows",
+            "priority": "high",
+            "actions": [
+              "Reserve the test split before any search and tune only on training data.",
+              "Use nested cross-validation when both tuning and an unbiased estimate are needed.",
+              "Keep the final test evaluation to a single untouched pass."
+            ],
+            "verification": [
+              "Re-scan for GridSearchCV/RandomizedSearchCV fitted on test data.",
+              "Confirm the search object is fitted on X_train, y_train."
+            ]
+          },
+          {
+            "title": "Entities cross the train/test boundary",
+            "priority": "high",
+            "actions": [
+              "Split by the entity/group column so each group appears on one side only.",
+              "Use GroupKFold or GroupShuffleSplit for evaluation.",
+              "Keep the group column out of model features."
+            ],
+            "verification": [
+              "Re-run the group overlap detector and confirm shared groups are zero.",
+              "Verify cross-validation groups are passed to the splitter."
+            ]
+          }
+        ],
+        "limitations": [
+          "AI hypotheses are experimental and are not verified leakage findings.",
+          "They never change deterministic findings, severity or the trust score.",
+          "A clean scan does not prove a dataset or pipeline is risk-free."
+        ]
+      }
     },
     {
       "id": "unsafe",
@@ -121,7 +264,113 @@ export const fixtures = {
         "low": 1
       },
       "clean": false,
-      "trustScore": 25
+      "trustScore": 25,
+      "ai": {
+        "engine": "leaklens.ai.experimental",
+        "schemaVersion": "1.0",
+        "changesDeterministicFindings": false,
+        "model": {
+          "name": "leaklens-ai-p7",
+          "version": "leaklens-ai-p7-2026.11",
+          "threshold": 0.53,
+          "features": 108
+        },
+        "hypotheses": [
+          {
+            "id": "hyp-learned-5e62a89288ea",
+            "concept": "learned_leakage_pattern",
+            "title": "Learned model sees a leakage-like code pattern (unsafe_resampling)",
+            "confidence": 0.8994,
+            "severityHint": "medium",
+            "location": "bad_pipeline.py:6",
+            "corroborates": "preprocess_before_split",
+            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.53, margin +0.469, clear). Supporting local signals: unsafe_resampling (+3.33), fit_before_split (+1.42), log_split_position (+1.32). The strongest cited line is `X = sc.fit_transform(X)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
+            "evidence": [
+              {
+                "source": "model",
+                "kind": "probability",
+                "location": "bad_pipeline.py:6",
+                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.53; margin=+0.469; uncertainty=clear; model=leaklens-ai-p7-2026.11"
+              },
+              {
+                "source": "model",
+                "kind": "indicator",
+                "location": "bad_pipeline.py:6",
+                "excerpt": "semantic risk indicators: unsafe_preprocessing, unsafe_resampling, transformer_before_split"
+              },
+              {
+                "source": "code",
+                "kind": "pattern",
+                "location": "bad_pipeline.py:6",
+                "excerpt": "X = sc.fit_transform(X)"
+              },
+              {
+                "source": "code",
+                "kind": "pattern",
+                "location": "bad_pipeline.py:9",
+                "excerpt": "X_train, X_test, y_train, y_test = train_test_split(X, y)"
+              },
+              {
+                "source": "model",
+                "kind": "feature",
+                "location": "bad_pipeline.py:6",
+                "excerpt": "unsafe_resampling=1.00; local supports log-odds +3.333"
+              },
+              {
+                "source": "model",
+                "kind": "feature",
+                "location": "bad_pipeline.py:6",
+                "excerpt": "fit_before_split=1.00; local supports log-odds +1.421"
+              }
+            ]
+          }
+        ],
+        "remediation": [
+          {
+            "title": "Preprocessing or selection runs before the split",
+            "priority": "high",
+            "actions": [
+              "Split the data first, then fit every transformer on the training partition only.",
+              "Move preprocessing into a scikit-learn Pipeline so cross-validation refits it per fold.",
+              "Replace full-frame aggregates with statistics computed on training rows and applied to test rows."
+            ],
+            "verification": [
+              "Re-scan the file and confirm no fit/fit_transform call precedes the split.",
+              "Compare cross-validation and held-out scores; a large gap is a warning sign."
+            ]
+          },
+          {
+            "title": "Resampling runs before the split",
+            "priority": "high",
+            "actions": [
+              "Split first and resample only the training partition.",
+              "Use an imbalanced-learn Pipeline so resampling happens inside each fold.",
+              "Report metrics on the untouched test split with its original class balance."
+            ],
+            "verification": [
+              "Re-scan for fit_resample before train_test_split.",
+              "Confirm the test split class balance is unchanged by resampling."
+            ]
+          },
+          {
+            "title": "The learned model sees a leakage-like pattern",
+            "priority": "medium",
+            "actions": [
+              "Review the cited code location and check the train/test boundary manually.",
+              "Use the deterministic findings and dataset checks as the authoritative signal."
+            ],
+            "verification": [
+              "Confirm whether the cited code actually touches held-out data.",
+              "Re-run the deterministic scanner after any change."
+            ]
+          }
+        ],
+        "limitations": [
+          "AI hypotheses are experimental and are not verified leakage findings.",
+          "They never change deterministic findings, severity or the trust score.",
+          "A clean scan does not prove a dataset or pipeline is risk-free."
+        ]
+      }
     },
     {
       "id": "safe",
@@ -139,7 +388,25 @@ export const fixtures = {
         "low": 0
       },
       "clean": true,
-      "trustScore": 100
+      "trustScore": 100,
+      "ai": {
+        "engine": "leaklens.ai.experimental",
+        "schemaVersion": "1.0",
+        "changesDeterministicFindings": false,
+        "model": {
+          "name": "leaklens-ai-p7",
+          "version": "leaklens-ai-p7-2026.11",
+          "threshold": 0.53,
+          "features": 108
+        },
+        "hypotheses": [],
+        "remediation": [],
+        "limitations": [
+          "AI hypotheses are experimental and are not verified leakage findings.",
+          "They never change deterministic findings, severity or the trust score.",
+          "A clean scan does not prove a dataset or pipeline is risk-free."
+        ]
+      }
     }
   ],
   "datasets": [

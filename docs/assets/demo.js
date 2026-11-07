@@ -415,6 +415,96 @@ if (root) {
     return [panel("Audit inputs", list)];
   };
 
+  /* --- Experimental AI output (opt-in layer, prerecorded) ---------------- */
+  const aiPanel = (fixture) => {
+    const ai = fixture.ai;
+    if (!ai) return [];
+    const wrapper = el("div", { class: "demo-side-panel ai-panel" });
+    wrapper.append(
+      el("h3", { text: "Experimental AI · prerecorded" }),
+      el("p", {
+        class: "ai-meta",
+        text: `${ai.model.name} · ${ai.model.version} · threshold ${ai.model.threshold}`,
+      }),
+      el("p", {
+        class: "ai-meta",
+        text: "Unverified hypotheses only. They never change deterministic findings, severity or the trust score.",
+      })
+    );
+
+    if (!ai.hypotheses.length) {
+      wrapper.append(
+        el("p", {
+          class: "empty-state",
+          text: "No AI hypothesis for this fixture. A clean pass is not proof of safety.",
+        })
+      );
+    } else {
+      const list = el("ul", { class: "ai-list" });
+      for (const hypothesis of ai.hypotheses) {
+        const item = el(
+          "li",
+          { class: "ai-item" },
+          el(
+            "div",
+            { class: "ai-title" },
+            el("span", {
+              class: `badge badge-${hypothesis.severityHint}`,
+              text: hypothesis.severityHint,
+            }),
+            el("span", { text: hypothesis.title })
+          ),
+          el("p", {
+            class: "ai-meta",
+            text: `confidence ${hypothesis.confidence.toFixed(2)} · ${hypothesis.concept} · ${hypothesis.location}`,
+          }),
+          el("p", { text: hypothesis.explanation })
+        );
+        const evidence = el(
+          "details",
+          { class: "ai-evidence" },
+          el("summary", { text: `Evidence (${hypothesis.evidence.length})` })
+        );
+        const evidenceList = el("ul");
+        for (const span of hypothesis.evidence) {
+          evidenceList.append(
+            el(
+              "li",
+              {},
+              el("span", {
+                class: "ai-meta",
+                text: `${span.source}/${span.kind} · ${span.location}`,
+              }),
+              el("code", { text: span.excerpt })
+            )
+          );
+        }
+        evidence.append(evidenceList);
+        item.append(evidence);
+        list.append(item);
+      }
+      wrapper.append(list);
+    }
+
+    if (ai.remediation.length) {
+      const remediation = el(
+        "details",
+        { class: "ai-remediation" },
+        el("summary", { text: `Remediation plan (${ai.remediation.length})` })
+      );
+      const causes = el("ol");
+      for (const cause of ai.remediation) {
+        const actions = el("ul");
+        for (const action of cause.actions) actions.append(el("li", { text: action }));
+        causes.append(el("li", {}, el("strong", { text: cause.title }), actions));
+      }
+      remediation.append(causes);
+      wrapper.append(remediation);
+    }
+
+    return [wrapper];
+  };
+
   const renderBody = () => {
     const fixture = activeFixture();
     if (!fixture) {
@@ -423,7 +513,7 @@ if (root) {
     }
     const results = el("div", { class: "demo-results" }, renderGate(fixture), renderFindings(fixture));
     let side = [];
-    if (fixture.group === "code") side = sourcePanel(fixture);
+    if (fixture.group === "code") side = [...sourcePanel(fixture), ...aiPanel(fixture)];
     else side = [...previewPanel(fixture), ...metaPanel(fixture)];
     if (fixture.group === "overlap") {
       side = [...metaPanel(fixture), ...previewPanel(fixture)];
