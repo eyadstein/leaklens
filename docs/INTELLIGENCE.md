@@ -105,7 +105,22 @@ leaklens --scan src/ --graph-baseline evidence-baseline.json \
 
 `--graph-snapshot` and `--graph-baseline` imply `--intelligence`. They are
 opt-in: without them the findings, trust score, JSON/SARIF payload and exit code
-are exactly as before.
+are exactly as before. The same comparison is available through configuration and
+both HTTP APIs:
+
+```toml
+# .leaklens.toml -- opt-in
+[graph]
+enabled = true
+baseline = "evidence-baseline.json"
+snapshot = "evidence-current.json"
+update_snapshot = false
+fail_on_new = false
+```
+
+Other `[graph]` keys require `enabled = true`; paths are config-relative and must
+stay inside the project, and an existing snapshot is never replaced without
+`update_snapshot = true`. Explicit CLI flags override config values.
 
 ### Change states
 
@@ -113,10 +128,17 @@ Evidence is matched by **stable finding fingerprint**, never by list position,
 display label or evidence id. Reordering findings, rebuilding evidence ids or
 re-running the same scan therefore compares as unchanged.
 
+For evidence without a fingerprint, identity uses a content digest plus the
+file/feature part of its location, with line and notebook-cell numbers removed.
+A finding that only **moves lines** is `unchanged` with `changes: ["location"]`
+and additive `baseline_location`, `current_location` and `location_changed`
+fields. A real change to source, kind, description, support or metadata remains
+`changed`. Identical content in different files stays distinct.
+
 | State | Meaning |
 |---|---|
 | `new` | Current evidence has no baseline counterpart. |
-| `unchanged` | Same identity and same relevant content and relationships. |
+| `unchanged` | Same identity and same relevant content and relationships (location may have moved). |
 | `changed` | Same identity, but evidence content or an incident relationship changed. |
 | `resolved` | Baseline evidence has no current counterpart, and the comparison is complete enough to say so. |
 | `uncertain` | Baseline evidence is absent, but the scan was incomplete, the analysis context differs, or dangling links were found. |
@@ -126,7 +148,31 @@ re-running the same scan therefore compares as unchanged.
 separately as `added` / `removed`, and relationship-only movement marks the
 incident evidence `changed`. Cluster changes use the same states with their
 own anchor and membership details. Duplicate evidence is kept with a
-deterministic `#0`, `#1`, ... ordinal and counted in `duplicates`.
+deterministic `#0`, `#1`, ... ordinal and counted in `duplicates`; differing
+duplicate counts emit a warning rather than guessing a match.
+
+### Completeness
+
+Snapshots now record `summary.completeness` as `{state, reasons}`. The state is
+`complete`, `incomplete` or `unknown`, and reasons come only from real execution
+paths: a path that was not found or contained no scannable files, a parse error,
+or a truncated evidence-link list. Legacy version 1 snapshots without detail
+still load; their completeness is derived from the existing `complete` boolean.
+The comparison reports `baseline_completeness`, `current_completeness`,
+`context_compatible` and a combined `completeness` object, and never turns
+missing evidence into `resolved` when either side is incomplete or contexts
+differ.
+
+### APIs
+
+Legacy `POST /scan` and `POST /audit` accept `graph_baseline` (the snapshot
+object) and `include_graph_snapshot`. The public live-scan API accepts the same
+fields; its `/audit` upload form takes `graph_baseline` as JSON text and `/scan`
+takes the object. Responses stay additive (`graph_baseline`, `graph_snapshot`)
+and default payloads are unchanged. Snapshots are validated and capped at 2 MiB;
+malformed or incompatible input returns 422 and oversized input returns 413.
+Requests never read or write server files and nothing is persisted.
+`GET /capabilities` advertises the opt-in graph-baseline fields and limit.
 
 ### Safety and interpretation
 

@@ -265,6 +265,56 @@ def test_report_renders_graph_baseline_and_escapes_it():
     assert "<img src=x onerror" not in report
 
 
+def test_report_renders_location_moves_and_completeness_reasons():
+    report = render(
+        {
+            "trust_score": 80,
+            "findings": [],
+            "graph_baseline": {
+                "counts": {
+                    "new": 0,
+                    "unchanged": 1,
+                    "changed": 0,
+                    "resolved": 0,
+                    "uncertain": 0,
+                },
+                "moved": 1,
+                "resolution_complete": True,
+                "completeness": {
+                    "baseline": {"state": "complete", "reasons": []},
+                    "current": {
+                        "state": "incomplete",
+                        "reasons": ["<script>bad()</script>"],
+                    },
+                    "context_compatible": True,
+                },
+                "evidence": [
+                    {
+                        "state": "unchanged",
+                        "identity": "primary:abc#0",
+                        "kind": "target_leakage",
+                        "fingerprint": "a" * 64,
+                        "baseline_id": "old",
+                        "current_id": "new",
+                        "changes": ["location"],
+                        "baseline_location": "train.py:10",
+                        "current_location": "train.py:42",
+                        "location_changed": True,
+                    }
+                ],
+                "cluster_changes": [],
+                "relationship_changes": [],
+            },
+        }
+    )
+
+    assert "Current scan completeness:" in report
+    assert "train.py:10 -&gt; train.py:42" in report
+    assert "matched by content" in report
+    assert "&lt;script&gt;bad()&lt;/script&gt;" in report
+    assert "<script>bad()</script>" not in report
+
+
 def test_report_omits_graph_baseline_section_by_default():
     report = render({"trust_score": 100, "findings": []})
     assert "Evidence-graph baseline comparison" not in report

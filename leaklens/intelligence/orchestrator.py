@@ -35,14 +35,21 @@ class IntelligenceReport:
     ai_enriched: bool = False
     clusters: tuple[EvidenceCluster, ...] = ()
     links: tuple[EvidenceLink, ...] = ()
+    links_truncated: bool = False
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        data = asdict(self)
+        # Completeness detail is exposed on the graph snapshot, not the report.
+        data.pop("links_truncated", None)
+        return data
 
     def to_graph(self) -> EvidenceGraph:
         """Return the inspectable graph built from this report."""
         return EvidenceGraph(
-            evidence=self.evidence, clusters=self.clusters, links=self.links
+            evidence=self.evidence,
+            clusters=self.clusters,
+            links=self.links,
+            links_truncated=self.links_truncated,
         )
 
 
@@ -316,4 +323,5 @@ def analyze_findings(
         impact=impact,
         clusters=graph.clusters,
         links=graph.links,
+        links_truncated=graph.links_truncated,
     )

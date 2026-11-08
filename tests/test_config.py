@@ -90,6 +90,43 @@ def test_invalid_configuration_fails_closed(tmp_path, text, message):
         load_config(_write(tmp_path, text))
 
 
+def test_graph_config_is_opt_in_and_project_relative(tmp_path):
+    _project(tmp_path)
+    baseline = tmp_path / "base.json"
+    baseline.write_text("{}", encoding="utf-8")
+    config = load_config(
+        _write(
+            tmp_path,
+            "[graph]\nenabled = true\nbaseline = 'base.json'\n"
+            "snapshot = 'current.json'\nupdate_snapshot = true\n"
+            "fail_on_new = true\n",
+        )
+    )
+
+    assert config.graph_enabled is True
+    assert config.graph_baseline_path == baseline.resolve()
+    assert config.graph_snapshot_path == (tmp_path / "current.json").resolve()
+    assert config.graph_update_snapshot is True
+    assert config.graph_fail_on_new is True
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("graph = 1\n", "graph must be a table"),
+        ("[graph]\nwat = 1\n", "unsupported graph keys: wat"),
+        ("[graph]\nsnapshot = 'base.json'\n", "graph.enabled must be true"),
+        ("[graph]\nenabled = true\nupdate_snapshot = true\n", "needs graph.snapshot"),
+        ("[graph]\nenabled = true\nfail_on_new = true\n", "needs graph.baseline"),
+        ("[graph]\nenabled = true\nbaseline = 'missing.json'\n", "not found"),
+    ],
+)
+def test_invalid_graph_configuration_fails_closed(tmp_path, text, message):
+    _project(tmp_path)
+    with pytest.raises(ConfigError, match=message):
+        load_config(_write(tmp_path, text))
+
+
 def test_output_paths_must_stay_inside_the_config_directory(tmp_path):
     _project(tmp_path)
     absolute = (tmp_path.parent / "outside.html").as_posix()

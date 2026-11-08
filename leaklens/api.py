@@ -16,7 +16,13 @@ from .audit import audit
 from .baseline import BaselineError
 from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
 from .drift import audit_drift
-from .intelligence import analyze_findings
+from .intelligence import (
+    GraphBaselineError,
+    GraphSnapshot,
+    analyze_findings,
+    compare_graph_snapshots,
+    snapshot_context,
+)
 from .leakage import scan, score
 from .missingness import audit_missingness
 from .policy import apply_policy, parse_baseline, parse_suppressions
@@ -38,6 +44,8 @@ class ScanReq(BaseModel):
     split_column: str | None = None
     schema_map: dict[str, dict[str, str]] | None = None
     intelligence: bool = False
+    graph_baseline: dict | None = None
+    include_graph_snapshot: bool = False
 
 
 class PredictReq(BaseModel):
@@ -62,7 +70,7 @@ def _finding_payloads(outcome) -> list[dict]:
     return [outcome.finding_payload(finding) for finding in outcome.findings]
 
 
-def _policy_payload(outcome) -> dict:
+def _policy_payload(outcome) -> tuple[dict, dict | None]:
     if outcome.diff is None and outcome.suppression is None:
         return {}
     payload = {"policy": outcome.summary()}
@@ -101,6 +109,67 @@ def _check_upload(name: str, data: bytes) -> None:
         raise HTTPException(413, f"too many rows (>50k): {name}")
 
 
+MAX_GRAPH_SNAPSHOT_BYTES = 2 * 1024 * 1024
+
+
+def _graph_baseline(payload) -> GraphSnapshot | None:
+    """Validate an API-supplied snapshot without touching the filesystem."""
+    if payload is None:
+        return None
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError):
+        raise HTTPException(422, "graph baseline must be a JSON object") from None
+    if len(encoded) > MAX_GRAPH_SNAPSHOT_BYTES:
+        raise HTTPException(
+            413,
+            f"graph baseline exceeds {MAX_GRAPH_SNAPSHOT_BYTES} bytes",
+        )
+    try:
+        return GraphSnapshot.from_dict(payload)
+    except GraphBaselineError as exc:
+        raise HTTPException(422, f"invalid graph baseline: {exc}") from None
+
+
+def _graph_payload(
+    findings,
+    *,
+    baseline: GraphSnapshot | None,
+    include_snapshot: bool,
+    include_intelligence: bool,
+    context: dict[str, str],
+) -> dict:
+    """Build one graph and derive every optional response field from it."""
+    report = None
+    snapshot = None
+    payload: dict = {}
+    if baseline is not None or include_snapshot or include_intelligence:
+        report = analyze_findings(findings)
+        snapshot = GraphSnapshot.from_findings(
+            findings,
+            graph=report.to_graph(),
+            complete=not any(f.kind == "parse_error" for f in findings),
+            incomplete_reasons=(
+                ("a source file could not be parsed completely",)
+                if any(f.kind == "parse_error" for f in findings)
+                else ()
+            ),
+            context=context,
+        )
+    if include_intelligence and report is not None:
+        payload["intelligence"] = report.to_dict()
+    if baseline is not None and snapshot is not None:
+        try:
+            payload["graph_baseline"] = compare_graph_snapshots(
+                baseline, snapshot
+            ).to_dict()
+        except GraphBaselineError as exc:
+            raise HTTPException(422, f"cannot compare graph baseline: {exc}") from None
+    if include_snapshot and snapshot is not None:
+        payload["graph_snapshot"] = snapshot.to_dict()
+    return payload
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": __version__}
@@ -116,7 +185,10 @@ async def audit_csv(
     test: UploadFile | None = File(None),  # noqa: B008
     drift: bool = Form(False),
     intelligence: bool = Form(False),
+    graph_baseline: str | None = Form(None),
+    include_graph_snapshot: bool = Form(False),
 ):
+    graph_doc = _graph_baseline(_json_form(graph_baseline, "graph baseline"))
     try:
         data = io.BytesIO(await file.read())
         _check_upload(file.filename or "upload", data.getvalue())
@@ -164,8 +236,23 @@ async def audit_csv(
     }
     if drift_report is not None:
         payload["drift"] = drift_report.to_dict()
-    if intelligence:
-        payload["intelligence"] = analyze_findings(fs).to_dict()
+    payload.update(
+        _graph_payload(
+            fs,
+            baseline=graph_doc,
+            include_snapshot=include_graph_snapshot,
+            include_intelligence=intelligence,
+            context=snapshot_context(
+                mode="dataset",
+                target=target,
+                test=test_df is not None,
+                group="",
+                time="",
+                threshold=threshold,
+                drift=bool(drift),
+            ),
+        )
+    )
     return payload
 
 
@@ -173,7 +260,9 @@ async def audit_csv(
 def scan_code(req: ScanReq):
     if len(req.source) > UploadLimits.MAX_BYTES:
         raise HTTPException(413, f"scan source too large (>8 MiB): {req.name}")
-    if req.name.lower().endswith(".sql"):
+    graph_doc = _graph_baseline(req.graph_baseline)
+    is_sql = req.name.lower().endswith(".sql")
+    if is_sql:
         try:
             fs = scan_sql(
                 req.source,
@@ -195,8 +284,21 @@ def scan_code(req: ScanReq):
         "findings": _finding_payloads(outcome),
         **_policy_payload(outcome),
     }
-    if req.intelligence:
-        payload["intelligence"] = analyze_findings(fs).to_dict()
+    payload.update(
+        _graph_payload(
+            fs,
+            baseline=graph_doc,
+            include_snapshot=req.include_graph_snapshot,
+            include_intelligence=req.intelligence,
+            context=snapshot_context(
+                mode="code",
+                target=req.target or "",
+                split=req.split_column or "",
+                dialect=req.dialect if is_sql else "",
+                threshold=0.95,
+            ),
+        )
+    )
     return payload
 
 

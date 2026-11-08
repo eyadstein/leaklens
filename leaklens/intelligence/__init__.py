@@ -3,10 +3,12 @@
 from .confidence import assess_cluster_confidence, assess_confidence
 from .context import AnalysisContext, build_context
 from .graph_baseline import (
+    Completeness,
     GraphBaselineError,
     GraphDiff,
     GraphSnapshot,
     compare_graph_snapshots,
+    snapshot_context,
 )
 from .impact import DatasetImpact, analyze_dataset_impact
 from .orchestrator import IntelligenceReport, analyze_findings
@@ -22,6 +24,7 @@ from .schemas import (
 
 __all__ = [
     "AnalysisContext",
+    "Completeness",
     "ConfidenceAssessment",
     "DatasetImpact",
     "Evidence",
@@ -42,4 +45,5 @@ __all__ = [
     "build_context",
     "build_evidence_graph",
     "compare_graph_snapshots",
+    "snapshot_context",
 ]

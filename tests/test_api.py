@@ -116,6 +116,54 @@ def test_audit_intelligence_is_opt_in_and_additive():
     assert response["intelligence"]["links"]
 
 
+def test_scan_graph_baseline_is_opt_in_and_compatible_with_defaults():
+    plain = c.post("/scan", json={"source": BAD_SOURCE}).json()
+    first = c.post("/scan", json={"source": BAD_SOURCE, "include_graph_snapshot": True})
+    snapshot = first.json()["graph_snapshot"]
+    compared = c.post(
+        "/scan", json={"source": BAD_SOURCE, "graph_baseline": snapshot}
+    ).json()
+
+    assert set(first.json()) == {"trust_score", "findings", "graph_snapshot"}
+    assert set(compared) == {"trust_score", "findings", "graph_baseline"}
+    assert compared["trust_score"] == plain["trust_score"]
+    assert compared["findings"] == plain["findings"]
+    assert compared["graph_baseline"]["counts"]["new"] == 0
+    assert compared["graph_baseline"]["counts"]["resolved"] == 0
+    assert compared["graph_baseline"]["resolution_complete"] is True
+
+
+def test_scan_rejects_invalid_graph_baseline():
+    response = c.post("/scan", json={"source": BAD_SOURCE, "graph_baseline": {"x": 1}})
+    assert response.status_code == 422
+    assert "invalid graph baseline" in response.json()["detail"]
+
+
+def test_audit_graph_baseline_is_opt_in_and_additive():
+    plain = c.post(
+        "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}
+    ).json()
+    first = c.post(
+        "/audit",
+        files={"file": ("d.csv", _csv(), "text/csv")},
+        data={"target": "y", "include_graph_snapshot": "true"},
+    ).json()
+    compared = c.post(
+        "/audit",
+        files={"file": ("d.csv", _csv(), "text/csv")},
+        data={
+            "target": "y",
+            "graph_baseline": json.dumps(first["graph_snapshot"]),
+        },
+    ).json()
+
+    assert "graph_snapshot" not in plain
+    assert "graph_baseline" not in plain
+    assert compared["trust_score"] == plain["trust_score"]
+    assert compared["findings"] == plain["findings"]
+    assert compared["graph_baseline"]["counts"]["new"] == 0
+
+
 def test_audit_payload_keeps_legacy_fields_and_adds_optional_ones():
     body = c.post(
         "/audit", files={"file": ("d.csv", _csv(), "text/csv")}, data={"target": "y"}

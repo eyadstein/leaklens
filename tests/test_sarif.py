@@ -93,9 +93,12 @@ def test_sarif_graph_metadata_is_compact_and_opt_in():
     assert graph["schema"] == "leaklens-evidence-graph"
     assert graph["version"] == snapshot.version
     assert graph["complete"] is True
+    assert graph["completeness"] == {"state": "complete", "reasons": []}
     assert graph["summary"]["evidence"] == len(snapshot.evidence)
     assert graph["comparison"]["new"] == len(diff.evidence)
     assert graph["comparison"]["resolution_complete"] is True
+    assert graph["comparison"]["moved"] == 0
+    assert graph["comparison"]["completeness"]["current"]["state"] == "complete"
     assert "evidence" not in graph["comparison"]
 
     for finding, result in zip(findings, run["results"], strict=True):

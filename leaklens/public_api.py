@@ -18,6 +18,7 @@ parser internals, filesystem paths and stack traces never reach the client.
 from __future__ import annotations
 
 import contextlib
+import json
 import math
 import os
 import re
@@ -44,7 +45,14 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from . import __version__
 from .audit import audit
 from .fixes import advice
-from .intelligence import analyze_dataset_impact, analyze_findings
+from .intelligence import (
+    GraphBaselineError,
+    GraphSnapshot,
+    analyze_dataset_impact,
+    analyze_findings,
+    compare_graph_snapshots,
+    snapshot_context,
+)
 from .leakage import (
     feature_overlap,
     group_overlap,
@@ -74,6 +82,7 @@ _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _IP_CHARS = re.compile(r"^[0-9a-fA-F:.]{3,64}$")
 
 MAX_SOURCE_BYTES = 262_144
+MAX_GRAPH_SNAPSHOT_BYTES = 2 * 1024 * 1024
 _CODE_NAME = "snippet.py"
 
 
@@ -496,6 +505,84 @@ def _severity_counts(findings: list[Any]) -> dict[str, int]:
     return counts
 
 
+def _form_json(raw: str | None) -> Any:
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        raise UploadRejected(
+            "The graph baseline is not valid JSON.", 422, "invalid_graph_baseline"
+        ) from None
+
+
+def parse_graph_baseline(payload: Any) -> GraphSnapshot | None:
+    """Validate a client snapshot; never read or write server files."""
+    if payload is None:
+        return None
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError):
+        raise UploadRejected(
+            "The graph baseline must be a JSON object.", 422, "invalid_graph_baseline"
+        ) from None
+    if len(encoded) > MAX_GRAPH_SNAPSHOT_BYTES:
+        raise UploadRejected(
+            f"The graph baseline is larger than {MAX_GRAPH_SNAPSHOT_BYTES} bytes.",
+            413,
+            "graph_baseline_too_large",
+        )
+    try:
+        return GraphSnapshot.from_dict(payload)
+    except GraphBaselineError:
+        raise UploadRejected(
+            "The graph baseline is malformed or uses an unsupported schema.",
+            422,
+            "invalid_graph_baseline",
+        ) from None
+
+
+def _graph_payload(
+    findings: list[Any],
+    *,
+    baseline: GraphSnapshot | None,
+    include_snapshot: bool,
+    include_intelligence: bool,
+    context: dict[str, str],
+) -> dict[str, Any]:
+    """Derive intelligence, comparison and snapshot from one graph build."""
+    payload: dict[str, Any] = {}
+    if baseline is None and not include_snapshot and not include_intelligence:
+        return payload
+    report = analyze_findings(findings)
+    parse_error = any(finding.kind == "parse_error" for finding in findings)
+    snapshot = GraphSnapshot.from_findings(
+        findings,
+        graph=report.to_graph(),
+        complete=not parse_error,
+        incomplete_reasons=(
+            ("a source file could not be parsed completely",) if parse_error else ()
+        ),
+        context=context,
+    )
+    if include_intelligence:
+        payload["intelligence"] = report.to_dict()
+    if baseline is not None:
+        try:
+            payload["graph_baseline"] = compare_graph_snapshots(
+                baseline, snapshot
+            ).to_dict()
+        except GraphBaselineError:
+            raise UploadRejected(
+                "The graph baseline is incompatible with this scan.",
+                422,
+                "incompatible_graph_baseline",
+            ) from None
+    if include_snapshot:
+        payload["graph_snapshot"] = snapshot.to_dict()
+    return payload
+
+
 def run_inspect_job(upload: Any, limits: GuardLimits) -> dict[str, Any]:
     df = read_guarded_dataset(upload, limits)
     result = describe_dataset(df, limits)
@@ -513,6 +600,8 @@ def run_audit_job(
     group_col: str | None = None,
     include_ai: bool = False,
     include_intelligence: bool = False,
+    graph_baseline: GraphSnapshot | None = None,
+    include_graph_snapshot: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     df = read_guarded_dataset(upload, limits, target, require_target=True)
@@ -587,11 +676,23 @@ def run_audit_job(
         "limits": limits.to_public_dict(),
         "report_filename": "leaklens-report.html",
     }
-    intelligence = (
-        analyze_findings(findings).to_dict() if include_intelligence else None
+    payload.update(
+        _graph_payload(
+            findings,
+            baseline=graph_baseline,
+            include_snapshot=include_graph_snapshot,
+            include_intelligence=include_intelligence,
+            context=snapshot_context(
+                mode="dataset",
+                target=target,
+                test=test_df is not None,
+                group=group_col or "",
+                time=time_col or "",
+                threshold=threshold,
+            ),
+        )
     )
-    if intelligence is not None:
-        payload["intelligence"] = intelligence
+    intelligence = payload.get("intelligence")
     ai_payload = None
     if include_ai:
         try:
@@ -617,6 +718,7 @@ def run_audit_job(
             "audit": audit_data,
             "impact": impact,
             "intelligence": intelligence,
+            "graph_baseline": payload.get("graph_baseline"),
             "ai": ai_payload,
         },
         title=f"LeakLens report - {upload.filename}",
@@ -629,6 +731,8 @@ def run_code_job(
     name: str,
     include_ai: bool = False,
     include_intelligence: bool = False,
+    graph_baseline: GraphSnapshot | None = None,
+    include_graph_snapshot: bool = False,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     findings = scan_source(source, name)
@@ -646,8 +750,19 @@ def run_code_job(
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
         },
     }
-    if include_intelligence:
-        payload["intelligence"] = analyze_findings(findings).to_dict()
+    payload.update(
+        _graph_payload(
+            findings,
+            baseline=graph_baseline,
+            include_snapshot=include_graph_snapshot,
+            include_intelligence=include_intelligence,
+            context=snapshot_context(
+                mode="code",
+                target=name,
+                threshold=0.95,
+            ),
+        )
+    )
     if include_ai:
         try:
             from .ai import CodeSource, analyze_code
@@ -669,6 +784,8 @@ class CodeScanRequest(BaseModel):
     name: str = Field(default=_CODE_NAME, max_length=120)
     include_ai: bool = Field(default=False)
     include_intelligence: bool = Field(default=False)
+    graph_baseline: dict | None = Field(default=None)
+    include_graph_snapshot: bool = Field(default=False)
 
 
 async def _read_bounded(file: UploadFile, max_bytes: int) -> bytes:
@@ -897,6 +1014,13 @@ def create_app(
                 "engine": "leaklens.intelligence.deterministic",
                 "graph": ["evidence", "clusters", "links"],
                 "changes_deterministic_findings": False,
+                "graph_baseline": {
+                    "enabled": True,
+                    "opt_in": True,
+                    "field": "graph_baseline",
+                    "max_bytes": MAX_GRAPH_SNAPSHOT_BYTES,
+                    "snapshot_field": "include_graph_snapshot",
+                },
             },
             "privacy": (
                 "Uploads are parsed in memory for one request, never written to "
@@ -929,12 +1053,15 @@ def create_app(
         group_col: str | None = Form(default=None, alias="group"),
         include_ai: bool = Form(default=False),
         include_intelligence: bool = Form(default=False),
+        graph_baseline: str | None = Form(default=None),
+        include_graph_snapshot: bool = Form(default=False),
     ) -> JSONResponse:
         clean_target = target.strip()
         if not clean_target:
             raise UploadRejected(
                 "Choose a target column before scanning.", 422, "missing_target"
             )
+        baseline = parse_graph_baseline(_form_json(graph_baseline))
         upload = await _guard_upload(file, settings)
         test_upload = await _guard_upload(test, settings) if test is not None else None
         result = await run_in_threadpool(
@@ -950,6 +1077,8 @@ def create_app(
                 _clean_option(group_col, "group"),
                 include_ai,
                 include_intelligence,
+                baseline,
+                include_graph_snapshot,
             )
         )
         return JSONResponse(result)
@@ -964,6 +1093,7 @@ def create_app(
                 "source_too_large",
             )
         name = body.name if body.name.lower().endswith(".py") else _CODE_NAME
+        baseline = parse_graph_baseline(body.graph_baseline)
         result = await run_in_threadpool(
             partial(
                 request.app.state.runner.run,
@@ -972,6 +1102,8 @@ def create_app(
                 name,
                 body.include_ai,
                 body.include_intelligence,
+                baseline,
+                body.include_graph_snapshot,
             )
         )
         return JSONResponse(result)

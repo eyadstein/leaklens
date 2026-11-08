@@ -39,8 +39,10 @@ _TOP_LEVEL = {
     "missingness",
     "sql",
     "drift",
+    "graph",
 }
 _BASELINE_KEYS = {"path", "fail_on_new"}
+_GRAPH_KEYS = {"enabled", "baseline", "snapshot", "update_snapshot", "fail_on_new"}
 _SQL_KEYS = {"enabled", "dialect", "split_column", "schema"}
 _DRIFT_KEYS = {
     "enabled",
@@ -89,6 +91,11 @@ class Config:
     missingness: MissingnessSettings = DEFAULT_SETTINGS
     sql: SqlSettings = DEFAULT_SQL_SETTINGS
     drift: DriftSettings = DEFAULT_DRIFT_SETTINGS
+    graph_enabled: bool | None = None
+    graph_baseline_path: Path | None = None
+    graph_snapshot_path: Path | None = None
+    graph_update_snapshot: bool | None = None
+    graph_fail_on_new: bool | None = None
 
 
 DEFAULT_CONFIG = Config()
@@ -184,6 +191,40 @@ def _parse_baseline(
             f"{path}: baseline.fail_on_new needs baseline.path in the same table"
         )
     return baseline_path, fail_on_new
+
+
+def _parse_graph(data: Any, path: Path, base: Path) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path}: graph must be a table")
+    unknown = sorted(set(data) - _GRAPH_KEYS)
+    if unknown:
+        raise ConfigError(f"{path}: unsupported graph keys: {', '.join(unknown)}")
+    enabled = _boolean(data, "enabled", path) if "enabled" in data else None
+    baseline = _input_path(data, "baseline", path, base) if "baseline" in data else None
+    snapshot = (
+        _output_path(data, "snapshot", path, base) if "snapshot" in data else None
+    )
+    update = (
+        _boolean(data, "update_snapshot", path) if "update_snapshot" in data else None
+    )
+    fail_on_new = _boolean(data, "fail_on_new", path) if "fail_on_new" in data else None
+    if baseline is not None and not baseline.is_file():
+        raise ConfigError(f"{path}: graph.baseline not found: {baseline}")
+    if (baseline or snapshot or update or fail_on_new) and enabled is not True:
+        raise ConfigError(
+            f"{path}: graph.enabled must be true when other graph settings are present"
+        )
+    if update and snapshot is None:
+        raise ConfigError(f"{path}: graph.update_snapshot needs graph.snapshot")
+    if fail_on_new and baseline is None:
+        raise ConfigError(f"{path}: graph.fail_on_new needs graph.baseline")
+    return {
+        "graph_enabled": enabled,
+        "graph_baseline_path": baseline,
+        "graph_snapshot_path": snapshot,
+        "graph_update_snapshot": update,
+        "graph_fail_on_new": fail_on_new,
+    }
 
 
 def _parse_missingness(data: Any, path: Path) -> MissingnessSettings:
@@ -354,6 +395,8 @@ def _parse(data: Any, path: Path) -> Config:
         values["sql"] = _parse_sql(data["sql"], path)
     if "drift" in data:
         values["drift"] = _parse_drift(data["drift"], path)
+    if "graph" in data:
+        values.update(_parse_graph(data["graph"], path, base))
     return Config(**values)
 
 

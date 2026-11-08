@@ -47,6 +47,207 @@ def _manual(evidence, *, clusters=(), links=(), fingerprints=()):
     )
 
 
+def _evidence(
+    evidence_id,
+    *,
+    location=None,
+    description="detail",
+    kind="target_leakage",
+    index=None,
+    metadata=(),
+):
+    return Evidence(
+        evidence_id,
+        "scanner",
+        kind,
+        description,
+        finding_index=index,
+        location=location,
+        metadata=metadata,
+    )
+
+
+def test_location_only_move_is_unchanged_and_reported():
+    baseline = _manual([_evidence("old", location="train.py:10")])
+    current = _manual([_evidence("new", location="train.py:42")])
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.counts["unchanged"] == 1
+    assert diff.counts["changed"] == 0
+    assert diff.moved == 1
+    item = diff.evidence[0]
+    assert item.changes == ("location",)
+    assert item.location_changed is True
+    assert item.baseline_location == "train.py:10"
+    assert item.current_location == "train.py:42"
+    assert diff.summary["moved"] == 1
+
+
+def test_unrelated_line_insertion_keeps_every_finding_unchanged():
+    baseline = _manual(
+        [
+            _evidence("a", location="train.py:5", description="scaler", index=0),
+            _evidence("b", location="train.py:9", description="split", index=1),
+        ],
+        fingerprints=((0, "a" * 64), (1, "b" * 64)),
+    )
+    current = _manual(
+        [
+            _evidence("a2", location="train.py:25", description="scaler", index=0),
+            _evidence("b2", location="train.py:29", description="split", index=1),
+        ],
+        fingerprints=((0, "a" * 64), (1, "b" * 64)),
+    )
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.counts["unchanged"] == 2
+    assert diff.moved == 2
+    assert {item.changes for item in diff.evidence} == {("location",)}
+
+
+def test_same_content_in_different_files_stays_distinct():
+    baseline = _manual([_evidence("a", location="train.py:10")])
+    current = _manual([_evidence("a", location="infer.py:10")])
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.counts["new"] == 1
+    assert diff.counts["resolved"] == 1
+    assert diff.counts["unchanged"] == 0
+
+
+def test_duplicate_evidence_is_matched_by_deterministic_ordinal():
+    baseline = _manual(
+        [
+            _evidence("dup-1", location="train.py:10"),
+            _evidence("dup-2", location="train.py:10"),
+        ]
+    )
+    current = _manual([_evidence("dup-3", location="train.py:10")])
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.duplicate_evidence == 1
+    assert diff.counts["resolved"] == 1
+    assert any("duplicate evidence counts differ" in item for item in diff.warnings)
+
+
+def test_one_sided_duplicates_do_not_guess_a_match():
+    baseline = _manual([_evidence("dup-1", location="train.py:10")])
+    current = _manual(
+        [
+            _evidence("dup-2", location="train.py:10"),
+            _evidence("dup-3", location="train.py:10"),
+        ]
+    )
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.duplicate_evidence == 1
+    assert diff.counts["new"] == 1
+    assert diff.counts["unchanged"] == 1
+    assert any("duplicate evidence counts differ" in item for item in diff.warnings)
+
+
+def test_fingerprint_identity_survives_content_change_and_reports_it():
+    baseline = _manual(
+        [_evidence("old", description="old detail", location="train.py:10", index=0)],
+        fingerprints=((0, "f" * 64),),
+    )
+    current = _manual(
+        [_evidence("new", description="new detail", location="train.py:11", index=0)],
+        fingerprints=((0, "f" * 64),),
+    )
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert diff.counts["changed"] == 1
+    item = diff.evidence[0]
+    assert "description" in item.changes
+    assert item.location_changed is True
+    assert item.state == "changed"
+
+
+def test_incomplete_current_scan_reports_uncertain_not_resolved():
+    finding = _finding()
+    diff = compare_graph_snapshots(
+        _snapshot([finding]),
+        _snapshot([], complete=False),
+    )
+
+    assert diff.resolution_complete is False
+    assert diff.counts["resolved"] == 0
+    assert diff.counts["uncertain"] == 1
+    assert diff.current_completeness.state == "incomplete"
+    assert diff.current_completeness.reasons
+    assert any("current scan was incomplete" in item for item in diff.warnings)
+
+
+def test_context_mismatch_makes_missing_evidence_uncertain():
+    finding = _finding()
+    diff = compare_graph_snapshots(
+        _snapshot([finding], context={"mode": "dataset", "target": "a"}),
+        _snapshot([], context={"mode": "dataset", "target": "b"}),
+    )
+
+    assert diff.context_compatible is False
+    assert diff.resolution_complete is False
+    assert diff.counts["uncertain"] == 1
+    assert diff.completeness["context_compatible"] is False
+
+
+def test_unknown_completeness_is_preserved_and_never_resolves():
+    from leaklens.intelligence import Completeness
+
+    baseline = _snapshot([_finding()])
+    current = GraphSnapshot.from_findings(
+        [],
+        completeness=Completeness("unknown", ("producer could not tell",)),
+        context={"mode": "dataset"},
+    )
+
+    diff = compare_graph_snapshots(baseline, current)
+
+    assert current.analysis_completeness.state == "unknown"
+    assert diff.current_completeness.state == "unknown"
+    assert diff.counts["uncertain"] == 1
+    assert diff.counts["resolved"] == 0
+    assert diff.resolution_complete is False
+    assert (
+        GraphSnapshot.from_dict(json.loads(current.to_json())).completeness
+        == current.completeness
+    )
+
+
+def test_legacy_snapshot_derives_completeness_from_boolean():
+    payload = json.loads(_snapshot([], complete=False).to_json())
+    del payload["summary"]["completeness"]
+
+    loaded = GraphSnapshot.from_dict(payload)
+
+    assert loaded.completeness is not None
+    assert loaded.analysis_completeness.state == "incomplete"
+    assert "did not record why" in loaded.analysis_completeness.reasons[0]
+
+
+def test_completeness_reasons_roundtrip():
+    snapshot = GraphSnapshot.from_findings(
+        [_finding()],
+        complete=False,
+        incomplete_reasons=("unreadable notebook",),
+    )
+
+    loaded = GraphSnapshot.from_dict(json.loads(snapshot.to_json()))
+
+    assert loaded.completeness == snapshot.completeness
+    assert loaded.analysis_completeness.reasons == ("unreadable notebook",)
+    assert json.loads(snapshot.to_json())["summary"]["completeness"]["state"] == (
+        "incomplete"
+    )
+
+
 def test_snapshot_roundtrip_is_deterministic():
     finding = _finding()
     snapshot = _snapshot([finding])

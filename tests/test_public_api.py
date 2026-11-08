@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 
@@ -568,6 +569,71 @@ def test_scan_intelligence_is_opt_in_and_additive(client):
     assert payload["intelligence"]["clusters"]
 
 
+def test_scan_graph_baseline_is_opt_in_and_additive(client):
+    source = (
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.preprocessing import StandardScaler\n"
+        "X = StandardScaler().fit_transform(X)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+    )
+    plain = client.post("/scan", json={"source": source}).json()
+    snapshot = client.post(
+        "/scan", json={"source": source, "include_graph_snapshot": True}
+    ).json()["graph_snapshot"]
+    compared = client.post(
+        "/scan", json={"source": source, "graph_baseline": snapshot}
+    ).json()
+
+    assert "graph_baseline" not in plain
+    assert "graph_snapshot" not in plain
+    assert compared["trust_score"] == plain["trust_score"]
+    assert compared["findings"] == plain["findings"]
+    assert compared["graph_baseline"]["counts"]["new"] == 0
+    assert compared["graph_baseline"]["resolution_complete"] is True
+
+
+def test_scan_rejects_invalid_or_oversized_graph_baselines(client):
+    invalid = client.post(
+        "/scan", json={"source": "x = 1\n", "graph_baseline": {"x": 1}}
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "invalid_graph_baseline"
+
+    from leaklens import public_api
+
+    oversized = {"evidence": "x" * 32}
+    original = public_api.MAX_GRAPH_SNAPSHOT_BYTES
+    public_api.MAX_GRAPH_SNAPSHOT_BYTES = 8
+    try:
+        too_big = client.post(
+            "/scan", json={"source": "x = 1\n", "graph_baseline": oversized}
+        )
+    finally:
+        public_api.MAX_GRAPH_SNAPSHOT_BYTES = original
+    assert too_big.status_code == 413
+    assert too_big.json()["error"]["code"] == "graph_baseline_too_large"
+
+
+def test_audit_graph_baseline_is_opt_in_and_additive(client):
+    files = multipart()
+    plain = client.post("/audit", files=files, data={"target": "y"}).json()
+    snapshot = client.post(
+        "/audit",
+        files=multipart(),
+        data={"target": "y", "include_graph_snapshot": "true"},
+    ).json()["graph_snapshot"]
+    compared = client.post(
+        "/audit",
+        files=multipart(),
+        data={"target": "y", "graph_baseline": json.dumps(snapshot)},
+    ).json()
+
+    assert "graph_baseline" not in plain
+    assert compared["trust_score"] == plain["trust_score"]
+    assert compared["findings"] == plain["findings"]
+    assert compared["graph_baseline"]["counts"]["new"] == 0
+
+
 def test_scan_rejects_empty_and_oversized_sources():
     test_client = client_for(settings(max_json_bytes=1024 * 1024))
     try:
@@ -1016,4 +1082,11 @@ def test_capabilities_advertise_intelligence_as_opt_in(client):
         "engine": "leaklens.intelligence.deterministic",
         "graph": ["evidence", "clusters", "links"],
         "changes_deterministic_findings": False,
+        "graph_baseline": {
+            "enabled": True,
+            "opt_in": True,
+            "field": "graph_baseline",
+            "max_bytes": 2 * 1024 * 1024,
+            "snapshot_field": "include_graph_snapshot",
+        },
     }

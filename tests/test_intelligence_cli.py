@@ -169,6 +169,70 @@ def test_graph_snapshot_round_trip_and_unchanged_comparison(tmp_path, capsys):
     assert counts["unchanged"] == len(payload["evidence"])
 
 
+def test_graph_config_is_opt_in_and_cli_flags_stay_authoritative(
+    tmp_path, monkeypatch, capsys
+):
+    source = tmp_path / "leaky.py"
+    source.write_text(LEAKY, encoding="utf-8")
+    configured = tmp_path / "from-config.json"
+    explicit = tmp_path / "explicit.json"
+    (tmp_path / ".leaklens.toml").write_text(
+        "[graph]\nenabled = true\nsnapshot = 'from-config.json'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--scan", str(source)]) == 1
+    capsys.readouterr()
+    assert configured.is_file()
+
+    assert main(["--scan", str(source), "--graph-snapshot", str(explicit)]) == 1
+    capsys.readouterr()
+    assert explicit.is_file()
+
+    assert (
+        main(
+            [
+                "--scan",
+                str(source),
+                "--graph-baseline",
+                str(explicit),
+                "--update-graph-snapshot",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert "Graph baseline:" in output
+    assert "0 new," in output
+
+
+def test_graph_config_without_enabled_is_ignored(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "clean.py"
+    source.write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / ".leaklens.toml").write_text(
+        "[graph]\nsnapshot = 'never.json'\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--scan", str(source)]) == 2
+    assert "graph.enabled must be true" in capsys.readouterr().err
+    assert not (tmp_path / "never.json").exists()
+
+
+def test_graph_incomplete_terminal_output_explains_completeness(tmp_path, capsys):
+    broken = tmp_path / "broken.py"
+    broken.write_text("def broken(:\n", encoding="utf-8")
+    snapshot = tmp_path / "baseline.json"
+
+    assert main(["--scan", str(broken), "--graph-snapshot", str(snapshot)]) == 0
+    capsys.readouterr()
+    assert main(["--scan", str(broken), "--graph-baseline", str(snapshot)]) == 0
+    output = capsys.readouterr().out
+    assert "Graph completeness (baseline): incomplete" in output
+    assert "could not be parsed" in output
+
+
 def test_graph_comparison_reports_new_and_resolved(tmp_path, capsys):
     leaky = tmp_path / "leaky.py"
     leaky.write_text(LEAKY, encoding="utf-8")

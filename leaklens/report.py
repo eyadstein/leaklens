@@ -170,13 +170,27 @@ def _graph_baseline_section(data: dict) -> str:
             "analysis context, so missing evidence is shown as uncertain instead "
             "of resolved.</p>"
         )
+    completeness = data.get("completeness") or {}
+    for label in ("baseline", "current"):
+        detail = completeness.get(label) or {}
+        if detail.get("state") in (None, "complete"):
+            continue
+        reasons = "; ".join(str(reason) for reason in detail.get("reasons", []))
+        sections.append(
+            f"<p><b>{html.escape(label.capitalize())} scan completeness:</b> "
+            f"{html.escape(str(detail.get('state', 'unknown')))}"
+            + (f" ({html.escape(reasons)})" if reasons else "")
+            + "</p>"
+        )
     if data.get("duplicates"):
         sections.append(
             f"<p><b>Collapsed duplicate records:</b> "
             f"{html.escape(str(data.get('duplicates')))}</p>"
         )
     evidence = [
-        item for item in data.get("evidence", []) if item.get("state") != "unchanged"
+        item
+        for item in data.get("evidence", [])
+        if item.get("state") != "unchanged" or item.get("location_changed")
     ]
     if evidence:
         rows = [
@@ -185,14 +199,21 @@ def _graph_baseline_section(data: dict) -> str:
                 "Kind": item.get("kind", ""),
                 "Fingerprint": str(item.get("fingerprint") or "")[:12],
                 "Evidence": item.get("current_id") or item.get("baseline_id") or "",
+                "Location": (
+                    f"{item.get('baseline_location') or 'unknown'} -> "
+                    f"{item.get('current_location') or 'unknown'}"
+                    if item.get("location_changed")
+                    else ""
+                ),
                 "Changed": ", ".join(item.get("changes", [])),
             }
             for item in evidence
         ]
         sections.append(
             "<h3>Evidence changes</h3>"
-            '<p class="sub">Evidence is matched by finding fingerprint, not by '
-            "display order or evidence id.</p>" + _table(rows)
+            '<p class="sub">Evidence is matched by content rather than display '
+            "location, so a finding that only moved lines is unchanged.</p>"
+            + _table(rows)
         )
     clusters = [
         item

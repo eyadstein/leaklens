@@ -122,6 +122,7 @@ def to_sarif(
                 "schema": "leaklens-evidence-graph",
                 "version": graph_snapshot.version,
                 "complete": graph_snapshot.complete,
+                "completeness": graph_snapshot.completeness.to_dict(),
                 "summary": graph_snapshot.graph.summary(),
             }
             if graph_diff is not None:

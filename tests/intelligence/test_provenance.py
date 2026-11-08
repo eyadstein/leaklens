@@ -327,10 +327,18 @@ def test_links_are_bounded_and_reference_existing_evidence():
     graph = build_evidence_graph(findings)
 
     assert len(graph.links) <= _MAX_LINKS
+    assert graph.links_truncated is True
     evidence_ids = {item.evidence_id for item in graph.evidence}
     for link in graph.links:
         assert link.source_id in evidence_ids
         assert link.target_id in evidence_ids
+
+
+def test_small_graphs_are_not_marked_truncated():
+    graph = build_evidence_graph([_finding("id_like", "column", "low", (_detector(),))])
+
+    assert graph.links
+    assert graph.links_truncated is False
 
 
 def test_measured_impact_is_attached_to_the_relevant_cluster():

@@ -15,7 +15,7 @@ import os
 import re
 import tempfile
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -81,10 +81,40 @@ _CONFIDENCE_FIELDS = {
 _LINK_FIELDS = {"source_id", "target_id", "relation", "rationale"}
 _STATES = ("new", "unchanged", "changed", "resolved", "uncertain")
 _RELATION_STATES = ("added", "removed")
+_COMPLETENESS_STATES = ("complete", "incomplete", "unknown")
+_LOCATION_LINE = re.compile(r"(?:\[cell \d+\])?:\d+$")
 
 
 class GraphBaselineError(ValueError):
     """A snapshot is missing, malformed, incompatible or cannot be written."""
+
+
+@dataclass(frozen=True, slots=True)
+class Completeness:
+    """Whether a scan covered everything a comparison needs to conclude.
+
+    ``complete`` means every supported input was analysed; ``incomplete``
+    means a real code path skipped or truncated analysis; ``unknown`` means the
+    snapshot predates completeness metadata or the producer could not tell.
+    """
+
+    state: str = "complete"
+    reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.state not in _COMPLETENESS_STATES:
+            raise GraphBaselineError(f"unsupported completeness state: {self.state}")
+        checked = tuple(
+            _text(reason, "completeness reason", 300) for reason in self.reasons
+        )
+        object.__setattr__(self, "reasons", checked)
+
+    @property
+    def complete(self) -> bool:
+        return self.state == "complete"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"state": self.state, "reasons": list(self.reasons)}
 
 
 def _text(value: Any, field: str, limit: int, *, required: bool = True) -> str:
@@ -160,6 +190,50 @@ def _evidence(value: Any, where: str) -> Evidence:
 
 def _strings(value: Any, field: str) -> tuple[str, ...]:
     return tuple(_text(item, field, 2_000) for item in _list(value, field))
+
+
+def _completeness(value: Any, where: str) -> Completeness:
+    if not isinstance(value, dict):
+        raise GraphBaselineError(f"{where} must be an object")
+    unknown = sorted(set(value) - {"state", "reasons"})
+    if unknown:
+        raise GraphBaselineError(f"{where} has unsupported keys: {', '.join(unknown)}")
+    state = value.get("state")
+    if not isinstance(state, str):
+        raise GraphBaselineError(f"{where}.state must be a string")
+    reasons = _strings(value.get("reasons", []), f"{where}.reasons")
+    return Completeness(state, reasons)
+
+
+def snapshot_context(
+    *,
+    mode: str,
+    target: str = "",
+    test: bool = False,
+    group: str = "",
+    time: str = "",
+    split: str = "",
+    dialect: str = "",
+    threshold: float = 0.95,
+    drift: bool = False,
+) -> dict[str, str]:
+    """Build the analysis-context labels shared by every interface.
+
+    Two snapshots with different contexts are not compared as complete: a
+    missing baseline record could be absent because the scan was configured
+    differently, not because it was fixed.
+    """
+    return {
+        "mode": mode,
+        "target": target or "",
+        "test": "yes" if test else "no",
+        "group": group or "",
+        "time": time or "",
+        "split": split or "",
+        "dialect": dialect or "",
+        "threshold": f"{threshold:g}",
+        "drift": "yes" if drift else "no",
+    }
 
 
 def _confidence(value: Any, where: str) -> ConfidenceAssessment:
@@ -245,11 +319,32 @@ class GraphSnapshot:
     fingerprint_schema: int = 1
     context: tuple[tuple[str, str], ...] = ()
     version: int = SNAPSHOT_VERSION
+    completeness: Completeness | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.completeness is not None
+            and self.completeness.complete != self.complete
+        ):
+            raise GraphBaselineError(
+                "complete must agree with the snapshot completeness state"
+            )
 
     @property
     def graph(self) -> EvidenceGraph:
         return EvidenceGraph(
             evidence=self.evidence, clusters=self.clusters, links=self.links
+        )
+
+    @property
+    def analysis_completeness(self) -> Completeness:
+        """Explicit completeness, or a conservative legacy-derived value."""
+        if self.completeness is not None:
+            return self.completeness
+        if self.complete:
+            return Completeness("complete", ())
+        return Completeness(
+            "incomplete", ("snapshot did not record why the scan was incomplete",)
         )
 
     @property
@@ -263,6 +358,8 @@ class GraphSnapshot:
         *,
         graph: EvidenceGraph | None = None,
         complete: bool = True,
+        incomplete_reasons: tuple[str, ...] = (),
+        completeness: Completeness | None = None,
         context: dict[str, str] | None = None,
         tool_version: str = __version__,
     ) -> GraphSnapshot:
@@ -275,14 +372,24 @@ class GraphSnapshot:
         fingerprints = tuple(
             (index, finding.fingerprint) for index, finding in enumerate(findings)
         )
+        if completeness is None:
+            completeness = (
+                Completeness("complete", ())
+                if complete
+                else Completeness(
+                    "incomplete",
+                    tuple(incomplete_reasons) or ("scan analysis was incomplete",),
+                )
+            )
         return cls(
             evidence=graph.evidence,
             clusters=graph.clusters,
             links=graph.links,
             finding_fingerprints=fingerprints,
-            complete=bool(complete),
+            complete=completeness.complete,
             tool_version=tool_version,
             context=tuple(sorted((str(k), str(v)) for k, v in (context or {}).items())),
+            completeness=completeness,
         )
 
     @classmethod
@@ -324,6 +431,22 @@ class GraphSnapshot:
         summary = data["summary"]
         if not isinstance(summary, dict):
             raise GraphBaselineError("summary must be an object")
+        raw_completeness = summary.get("completeness")
+        if raw_completeness is None:
+            completeness = (
+                Completeness("complete", ())
+                if data["complete"]
+                else Completeness(
+                    "incomplete",
+                    ("snapshot did not record why the scan was incomplete",),
+                )
+            )
+        else:
+            completeness = _completeness(raw_completeness, "summary.completeness")
+            if completeness.complete != data["complete"]:
+                raise GraphBaselineError(
+                    "summary.completeness.state disagrees with complete"
+                )
 
         raw_evidence = _list(data["evidence"], "evidence")
         if len(raw_evidence) > MAX_SNAPSHOT_EVIDENCE:
@@ -362,11 +485,12 @@ class GraphSnapshot:
                     f"{', '.join(missing)}"
                 )
         for index, link in enumerate(links):
-            for field in ("source_id", "target_id"):
-                value = getattr(link, field)
+            for attribute in ("source_id", "target_id"):
+                value = getattr(link, attribute)
                 if value not in known:
                     raise GraphBaselineError(
-                        f"links[{index}].{field} references unknown evidence: {value}"
+                        f"links[{index}].{attribute} references unknown evidence: "
+                        f"{value}"
                     )
 
         raw_fingerprints = _list(data["finding_fingerprints"], "finding_fingerprints")
@@ -409,6 +533,7 @@ class GraphSnapshot:
             fingerprint_schema=schema,
             context=context,
             version=version,
+            completeness=completeness,
         )
 
     @classmethod
@@ -461,6 +586,7 @@ class GraphSnapshot:
                 "clusters": len(self.clusters),
                 "links": len(self.links),
                 "relations": relations,
+                "completeness": self.analysis_completeness.to_dict(),
             },
             "finding_fingerprints": [
                 [index, fingerprint] for index, fingerprint in self.finding_fingerprints
@@ -523,6 +649,9 @@ class EvidenceState:
     baseline_id: str | None = None
     current_id: str | None = None
     changes: tuple[str, ...] = ()
+    baseline_location: str | None = None
+    current_location: str | None = None
+    location_changed: bool = False
 
     def __post_init__(self) -> None:
         if self.state not in _STATES:
@@ -537,6 +666,9 @@ class EvidenceState:
             "baseline_id": self.baseline_id,
             "current_id": self.current_id,
             "changes": list(self.changes),
+            "baseline_location": self.baseline_location,
+            "current_location": self.current_location,
+            "location_changed": self.location_changed,
         }
 
 
@@ -590,6 +722,21 @@ class GraphDiff:
     warnings: tuple[str, ...] = ()
     duplicate_evidence: int = 0
     resolution_complete: bool = True
+    baseline_completeness: Completeness = field(
+        default_factory=lambda: Completeness("complete", ())
+    )
+    current_completeness: Completeness = field(
+        default_factory=lambda: Completeness("complete", ())
+    )
+    context_compatible: bool = True
+
+    @property
+    def completeness(self) -> dict[str, Any]:
+        return {
+            "baseline": self.baseline_completeness.to_dict(),
+            "current": self.current_completeness.to_dict(),
+            "context_compatible": self.context_compatible,
+        }
 
     @property
     def counts(self) -> dict[str, int]:
@@ -613,13 +760,19 @@ class GraphDiff:
         return counts
 
     @property
+    def moved(self) -> int:
+        return sum(1 for item in self.evidence if item.location_changed)
+
+    @property
     def summary(self) -> dict[str, Any]:
         return {
             **self.counts,
             "clusters": self.cluster_counts,
             "relationships": self.relationship_counts,
             "duplicates": self.duplicate_evidence,
+            "moved": self.moved,
             "resolution_complete": self.resolution_complete,
+            "completeness": self.completeness,
         }
 
     @property
@@ -641,7 +794,9 @@ class GraphDiff:
             "clusters": self.cluster_counts,
             "relationships": self.relationship_counts,
             "duplicates": self.duplicate_evidence,
+            "moved": self.moved,
             "resolution_complete": self.resolution_complete,
+            "completeness": self.completeness,
             "warnings": list(self.warnings),
             "evidence": [item.to_dict() for item in self.evidence],
             "cluster_changes": [item.to_dict() for item in self.clusters],
@@ -670,11 +825,11 @@ def _content_payload(item: Evidence, fingerprint: str | None) -> dict[str, Any]:
         "source": item.source,
         "kind": item.kind,
         "description": item.description,
-        "location": item.location,
         "supports": item.supports,
         "finding_fingerprint": fingerprint or "",
-        # finding_index and evidence_id are deliberately excluded: both move
-        # when unrelated findings are reordered.
+        # location, finding_index and evidence_id are deliberately excluded:
+        # insertions before a finding move its line and both ids, not its
+        # identity. Location changes are reported separately from content.
         "metadata": sorted((str(key), str(value)) for key, value in item.metadata),
     }
 
@@ -689,12 +844,22 @@ def _digest(item: Evidence, fingerprint: str | None) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _location_identity(location: str | None) -> str:
+    """Keep the file/feature part of a location but drop line and cell numbers."""
+    if not location:
+        return ""
+    return _LOCATION_LINE.sub("", location).strip()
+
+
 def _base_identity(item: Evidence, fingerprint: str | None, content: str) -> str:
     role = _role(item)
     if fingerprint:
         if role == "detector":
             return f"detector:{fingerprint}:{item.kind}"
         return f"primary:{fingerprint}"
+    location = _location_identity(item.location)
+    if location:
+        return f"{role}:content:{content[:24]}:{location[:120]}"
     return f"{role}:content:{content[:24]}"
 
 
@@ -826,8 +991,6 @@ def _evidence_changes(baseline: Evidence, current: Evidence) -> tuple[str, ...]:
         changes.append("kind")
     if baseline.description != current.description:
         changes.append("description")
-    if baseline.location != current.location:
-        changes.append("location")
     if baseline.supports != current.supports:
         changes.append("supports")
     if sorted(baseline.metadata) != sorted(current.metadata):
@@ -862,15 +1025,27 @@ def compare_graph_snapshots(
             "analysis context differs; baseline-only evidence is reported as "
             "uncertain instead of resolved"
         )
-    resolution_complete = baseline.complete and current.complete and context_compatible
-    if not baseline.complete:
+    baseline_completeness = baseline.analysis_completeness
+    current_completeness = current.analysis_completeness
+    resolution_complete = (
+        baseline_completeness.complete
+        and current_completeness.complete
+        and context_compatible
+    )
+    if not baseline_completeness.complete:
         warnings.append("baseline scan was incomplete")
-    if not current.complete:
+    if not current_completeness.complete:
         warnings.append("current scan was incomplete")
 
     baseline_evidence, baseline_duplicates, baseline_ids = _prepare(baseline)
     current_evidence, current_duplicates, current_ids = _prepare(current)
     duplicates = baseline_duplicates + current_duplicates
+    if baseline_duplicates != current_duplicates:
+        warnings.append(
+            "duplicate evidence counts differ "
+            f"({baseline_duplicates} -> {current_duplicates}); duplicates are "
+            "matched by deterministic ordinal, so review changed records"
+        )
 
     baseline_links, baseline_link_warnings = _relationships(baseline, baseline_ids)
     current_links, current_link_warnings = _relationships(current, current_ids)
@@ -907,6 +1082,7 @@ def compare_graph_snapshots(
                     kind=item.kind,
                     fingerprint=after.fingerprint,  # type: ignore[union-attr]
                     current_id=item.evidence_id,
+                    current_location=item.location,
                 )
             )
         elif after is None:
@@ -918,24 +1094,31 @@ def compare_graph_snapshots(
                     kind=item.kind,
                     fingerprint=before.fingerprint,
                     baseline_id=item.evidence_id,
+                    baseline_location=item.location,
                 )
             )
         else:
+            location_changed = before.evidence.location != after.evidence.location
             changes = list(_evidence_changes(before.evidence, after.evidence))
             if identity in affected:
                 changes.append("relationships")
             if before.digest != after.digest and not changes:
                 changes.append("content")
-            state = "changed" if changes else "unchanged"
+            material = [change for change in changes if change != "location"]
+            if location_changed:
+                changes.append("location")
             states.append(
                 EvidenceState(
-                    state=state,
+                    state="changed" if material else "unchanged",
                     identity=identity,
                     kind=after.evidence.kind,
                     fingerprint=after.fingerprint,
                     baseline_id=before.evidence.evidence_id,
                     current_id=after.evidence.evidence_id,
                     changes=tuple(changes),
+                    baseline_location=before.evidence.location,
+                    current_location=after.evidence.location,
+                    location_changed=location_changed,
                 )
             )
 
@@ -979,4 +1162,7 @@ def compare_graph_snapshots(
         warnings=tuple(warnings),
         duplicate_evidence=duplicates,
         resolution_complete=resolution_complete,
+        baseline_completeness=baseline_completeness,
+        current_completeness=current_completeness,
+        context_compatible=context_compatible,
     )

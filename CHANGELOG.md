@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Unified baseline intelligence (0.14.0 phase 10 wave 7)
+
+- Evidence identity is now location-neutral: lines, notebook cells, finding indices and rebuilt evidence ids no longer decide identity, so a finding that only moved lines is `unchanged` and reports `changes: ["location"]` with `baseline_location`, `current_location` and `location_changed`. Genuine source, kind, description, support or metadata changes still classify as `changed`; fingerprint-bearing evidence keeps fingerprint identity.
+- Fingerprint-less evidence uses a content digest plus the file/feature part of its location, so identical findings in different files remain distinct. Duplicate records continue to be matched by deterministic ordinal and a differing duplicate count emits a warning instead of guessing.
+- Added an explicit completeness model (`Completeness(state, reasons)`) serialized under `summary.completeness`. Legacy snapshots without detail derive `complete`/`incomplete` from the existing boolean, so version 1 snapshots still load. Comparison exposes `baseline_completeness`, `current_completeness`, `context_compatible`, and `completeness` in JSON; missing evidence is `uncertain`, never `resolved`, when either side is incomplete or the context differs.
+- Truncated evidence links are now tracked exactly (`EvidenceGraph.links_truncated`), propagate through `IntelligenceReport` without changing its public payload, and make a scan incomplete for comparison purposes.
+- Legacy API (`POST /scan`, `POST /audit`) and the public live-scan API now accept opt-in `graph_baseline` plus `include_graph_snapshot`. Comparison reuses `GraphSnapshot`/`compare_graph_snapshots()`, validates schema and size (2 MiB), rejects malformed snapshots with 422/413, never touches the filesystem or persists requests, and keeps default payloads unchanged. `GET /capabilities` advertises the opt-in fields and limit.
+- Config gains a strict opt-in `[graph]` table: `enabled`, `baseline`, `snapshot`, `update_snapshot`, `fail_on_new`. Other graph keys require `enabled = true`; paths must be project-relative/inside the config directory, the baseline must exist, and snapshots are never replaced without `update_snapshot`. Explicit CLI flags remain authoritative.
+- CLI, JSON, HTML and SARIF now derive from the same comparison result: terminal output prints locations and completeness reasons, HTML shows location moves and incomplete-scan reasons with escaping, JSON carries completeness, and SARIF run metadata includes snapshot completeness plus the compact comparison summary (`moved` count included).
+- Added regression tests for line movement, unrelated insertions, different files, duplicates, conservative ambiguous matches, genuine changes, complete/incomplete/unknown scans, legacy snapshot loading, API validation/size limits, config parsing/precedence, HTML location/completeness rendering, SARIF completeness and link truncation.
+
 ### Baseline-aware evidence graph comparisons (0.14.0 phase 10 wave 6)
 
 - Added `leaklens/intelligence/graph_baseline.py`: validated, deterministic evidence-graph snapshots (`schema: "leaklens-evidence-graph"`, version 1, separate from the existing `--graph-out` JSON) and `compare_graph_snapshots()`. Snapshots record evidence, clusters, links, finding fingerprints, completeness, tool version, fingerprint schema and the analysis context.

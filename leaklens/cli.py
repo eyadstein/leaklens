@@ -26,7 +26,7 @@ from .leakage import (
 from .missingness import audit_missingness
 from .policy import apply_policy
 from .readers import read_dataset
-from .scanner import scan_path
+from .scanner import SKIP, scan_path
 
 _SEVERITY_COLORS = {
     "high": "\033[31m",
@@ -72,6 +72,28 @@ def _severity_label(severity: str) -> str:
 
 def _read_dataset(path):
     return read_dataset(path)
+
+
+def _graph_completeness_reasons(scan_targets, findings, graph, *, sql=False):
+    """Collect only conditions a real scan path reports as partial."""
+    suffixes = {".py", ".ipynb"}
+    if sql:
+        suffixes.add(".sql")
+    reasons: list[str] = []
+    for target in scan_targets:
+        path = Path(target)
+        if not path.exists():
+            reasons.append(f"source path was not found: {target}")
+        elif path.is_dir() and not any(
+            item.is_file() and item.suffix in suffixes and not (SKIP & set(item.parts))
+            for item in path.rglob("*")
+        ):
+            reasons.append(f"no scannable source files under: {target}")
+    if any(finding.kind == "parse_error" for finding in findings):
+        reasons.append("a source file could not be parsed completely")
+    if graph is not None and graph.links_truncated:
+        reasons.append("evidence link limit was reached; links are truncated")
+    return tuple(dict.fromkeys(reasons))
 
 
 STARTER_CONFIG = """# LeakLens settings for this project.
@@ -123,6 +145,13 @@ STARTER_CONFIG = """# LeakLens settings for this project.
 # amount = "DOUBLE"
 # label = "INT"
 # split = "TEXT"
+#
+# [graph]                   # opt-in baseline-aware evidence graph
+# enabled = true
+# baseline = "evidence-baseline.json"  # existing snapshot to compare against
+# snapshot = "evidence-current.json"   # write/refresh this snapshot
+# update_snapshot = false              # must be true to replace an existing file
+# fail_on_new = false                  # exit 1 only when new evidence appears
 #
 # [drift]
 # enabled = false           # --drift: opt-in train/test drift diagnostics
@@ -406,6 +435,7 @@ def main(argv=None) -> int:
     p.add_argument(
         "--intelligence",
         action="store_true",
+        default=None,
         help="include deterministic confidence, root-cause, and remediation analysis",
     )
     p.add_argument(
@@ -539,6 +569,17 @@ def main(argv=None) -> int:
         cfg.drift, enabled=choose(a.drift, cfg.drift.enabled, False)
     )
     scan_targets = a.scan if a.scan is not None else [str(path) for path in cfg.scan]
+    use_graph_intelligence = choose(a.intelligence, cfg.graph_enabled, False)
+    graph_baseline_path = choose(
+        a.graph_baseline,
+        str(cfg.graph_baseline_path) if cfg.graph_baseline_path is not None else None,
+    )
+    graph_snapshot_path = choose(
+        a.graph_snapshot,
+        str(cfg.graph_snapshot_path) if cfg.graph_snapshot_path is not None else None,
+    )
+    update_graph_snapshot = bool(a.update_graph_snapshot or cfg.graph_update_snapshot)
+    fail_on_graph_new = bool(a.fail_on_graph_new or cfg.graph_fail_on_new)
     baseline_path = (
         a.baseline
         if a.baseline is not None
@@ -550,10 +591,14 @@ def main(argv=None) -> int:
         baseline_path = "leaklens-baseline.json"
     if a.fail_on_new and not baseline_path:
         p.error("--fail-on-new needs --baseline PATH or [baseline].path in config")
-    if a.update_graph_snapshot and not a.graph_snapshot:
+    if a.update_graph_snapshot and not graph_snapshot_path:
         p.error("--update-graph-snapshot needs --graph-snapshot PATH")
-    if a.fail_on_graph_new and not a.graph_baseline:
+    if a.fail_on_graph_new and not graph_baseline_path:
         p.error("--fail-on-graph-new needs --graph-baseline PATH")
+    if update_graph_snapshot and not graph_snapshot_path:
+        p.error("graph.update_snapshot needs graph.snapshot in config")
+    if fail_on_graph_new and not graph_baseline_path:
+        p.error("graph.fail_on_new needs graph.baseline in config")
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
     if not a.train and not scan_targets:
@@ -572,11 +617,11 @@ def main(argv=None) -> int:
             return 2
 
     graph_baseline = None
-    if a.graph_baseline:
+    if graph_baseline_path:
         from .intelligence import GraphBaselineError, GraphSnapshot
 
         try:
-            graph_baseline = GraphSnapshot.load(a.graph_baseline)
+            graph_baseline = GraphSnapshot.load(graph_baseline_path)
         except GraphBaselineError as exc:
             print(f"leaklens: {exc}", file=sys.stderr)
             return 2
@@ -709,7 +754,12 @@ def main(argv=None) -> int:
     evidence_graph = None
     graph_snapshot = None
     graph_diff = None
-    if a.intelligence or a.graph_out or a.graph_baseline or a.graph_snapshot:
+    if (
+        use_graph_intelligence
+        or a.graph_out
+        or graph_baseline_path
+        or graph_snapshot_path
+    ):
         from .intelligence import analyze_dataset_impact, analyze_findings
 
         impact = None
@@ -732,8 +782,12 @@ def main(argv=None) -> int:
         evidence_graph = report.to_graph()
         intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
-    if a.graph_baseline or a.graph_snapshot:
-        from .intelligence import GraphSnapshot, compare_graph_snapshots
+    if graph_baseline_path or graph_snapshot_path:
+        from .intelligence import (
+            GraphSnapshot,
+            compare_graph_snapshots,
+            snapshot_context,
+        )
 
         mode = (
             "mixed"
@@ -748,27 +802,33 @@ def main(argv=None) -> int:
             fs,
             graph=evidence_graph,
             complete=not any(f.kind == "parse_error" for f in fs),
-            context={
-                "mode": mode,
-                "target": target or "",
-                "test": "yes" if test_path else "no",
-                "group": group_col or "",
-                "time": time_col or "",
-                "split": sql_settings.split_column or "",
-                "dialect": sql_settings.dialect if sql_settings.enabled else "",
-                "threshold": f"{threshold:g}",
-                "drift": "yes" if drift_settings.enabled else "no",
-            },
+            incomplete_reasons=_graph_completeness_reasons(
+                scan_targets,
+                fs,
+                evidence_graph,
+                sql=sql_settings.enabled,
+            ),
+            context=snapshot_context(
+                mode=mode,
+                target=target or "",
+                test=bool(test_path),
+                group=group_col or "",
+                time=time_col or "",
+                split=sql_settings.split_column or "",
+                dialect=sql_settings.dialect if sql_settings.enabled else "",
+                threshold=threshold,
+                drift=drift_settings.enabled,
+            ),
         )
         if graph_baseline is not None:
             graph_diff = compare_graph_snapshots(graph_baseline, graph_snapshot)
             rep["graph_baseline"] = graph_diff.to_dict()
-    if a.graph_snapshot and graph_snapshot is not None:
+    if graph_snapshot_path and graph_snapshot is not None:
         from .intelligence import GraphBaselineError
 
         try:
             written = graph_snapshot.write(
-                a.graph_snapshot, update=bool(a.update_graph_snapshot)
+                graph_snapshot_path, update=update_graph_snapshot
             )
         except GraphBaselineError as exc:
             print(f"leaklens: {exc}", file=sys.stderr)
@@ -858,10 +918,27 @@ def main(argv=None) -> int:
                     f"{relations['removed']} removed"
                 )
             for item in graph_diff.evidence:
-                if item.state == "unchanged":
+                if item.state == "unchanged" and not item.location_changed:
                     continue
+                changed = ", ".join(item.changes)
                 print(
-                    f"    Graph evidence [{item.state}] {item.kind} :: {item.identity}"
+                    f"    Graph evidence [{item.state}] {item.kind} :: "
+                    f"{item.identity}" + (f" ({changed})" if changed else "")
+                )
+                if item.location_changed:
+                    print(
+                        f"        moved: {item.baseline_location or 'unknown'} -> "
+                        f"{item.current_location or 'unknown'}"
+                    )
+            for name, completeness in (
+                ("baseline", graph_diff.baseline_completeness),
+                ("current", graph_diff.current_completeness),
+            ):
+                if completeness.complete:
+                    continue
+                detail = "; ".join(completeness.reasons) or "no reason recorded"
+                print(
+                    f"    Graph completeness ({name}): {completeness.state} ({detail})"
                 )
             for warning in graph_diff.warnings:
                 print(f"    Graph baseline warning: {warning}")
@@ -980,6 +1057,6 @@ def main(argv=None) -> int:
     )
     if fail_on_new and outcome.diff is not None and outcome.diff.new:
         gate = True
-    if a.fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
+    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
         gate = True
     return 1 if gate else 0

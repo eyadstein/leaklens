@@ -35,6 +35,7 @@ class EvidenceGraph:
     evidence: tuple[Evidence, ...]
     clusters: tuple[EvidenceCluster, ...]
     links: tuple[EvidenceLink, ...]
+    links_truncated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -417,14 +418,17 @@ def build_evidence_graph(
 
     by_id = {item.evidence_id: item for item in context.evidence}
     links: list[EvidenceLink] = []
+    truncated = False
     for cluster in clusters:
         links.extend(_links_for(cluster, by_id))
-        if len(links) >= _MAX_LINKS:
+        if len(links) > _MAX_LINKS:
             del links[_MAX_LINKS:]
+            truncated = True
             break
 
     return EvidenceGraph(
         evidence=context.evidence,
         clusters=tuple(clusters),
         links=tuple(links),
+        links_truncated=truncated,
     )
