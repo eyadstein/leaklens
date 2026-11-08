@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Phase 11.3: baseline and suppression visibility in the workspace
+
+- Source scans and dataset audits now run findings through the existing `policy.apply_policy()` step. The workspace UI shows the policy engine's real `new`, `unchanged`, `changed` and `suppressed` statuses, previous severity for changed findings, suppression reason/fingerprint/expiry, `requires_attention`, fingerprints and the original evidence. Suppressed findings stay in the results and stop counting toward `score()`, exactly as in the CLI.
+- Baseline selection is a validated path relative to the workspace root, falling back to `[baseline].path` from `.leaklens.toml`. `Baseline.load` owns validation; missing, malformed, incompatible, non-UTF-8 and out-of-root baselines fail the request with an explicit 422 and are never replaced with an empty baseline. `[[suppressions]]` from the same config apply to both scan types.
+- Results add `policy` (baseline counts, suppression rules/diagnostics, emitted status counts, unclassified count), `resolved` entries and per-finding `status`/`requires_attention`/`previous`/`suppression`. Counts are derived from returned findings and only emitted statuses are shown, so a suppression-only scan does not pretend to have a baseline. The source and dataset HTML reports include the same policy section.
+- The UI gains a shared baseline field with config feedback, status filters and summaries for both panels, status chips, previous/suppression details and a resolved list. Suppression remains visible and is never described as a fix.
+- The workspace stays read-only: it loads and compares baselines but does not create or update them. Explicit, atomic baseline writes remain the CLI's `--write-baseline` / `--update-baseline`. A cancelled source scan skips baseline comparison so partial results cannot look resolved.
+- `Baseline.load` now reports non-UTF-8 files as `BaselineError` instead of leaking a decode error. Extended `tests/test_workspace.py` with config/explicit baseline selection, validation and traversal, all four statuses, suppression-only scans, count consistency, resolved entries, report rendering, and source/dataset parity with the CLI policy result; updated `docs/WORKSPACE.md`.
+
 ### Phase 11.2: dataset audits in the workspace
 
 - `leaklens workspace` now audits datasets too: `POST /api/datasets/inspect` lists columns, preview rows and target candidates, and `POST /api/datasets` runs a background audit of a file under the workspace root with the target, threshold, optional held-out dataset, and optional time/group columns.

@@ -238,7 +238,7 @@ class Baseline:
             raise BaselineError(
                 f"baseline not found: {source}; create it with --write-baseline"
             ) from None
-        except OSError as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             raise BaselineError(f"cannot read baseline {source}: {exc}") from None
         try:
             payload = json.loads(text)

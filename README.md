@@ -273,8 +273,12 @@ leaklens workspace notebooks/ --port 9000 --no-open
 
 Source scans cover the same files as `--scan DIR`. Dataset audits pick a file,
 inspect its columns, then run the same engine as `leaklens FILE --target COL`
-(target, threshold, optional held-out file, time and group columns). Nothing is
-written to disk, no code is executed, and one activity runs at a time. See
+(target, threshold, optional held-out file, time and group columns). Both reuse
+the CLI's baseline and suppression policy: choose a baseline in the page or set
+`[baseline].path` in `.leaklens.toml`, and the UI shows `new`, `unchanged`,
+`changed` and `suppressed` findings, suppression reasons and resolved entries.
+The workspace never writes a baseline. Nothing else is written to disk, no code
+is executed, and one activity runs at a time. See
 [docs/WORKSPACE.md](docs/WORKSPACE.md).
 
 ## Missingness audit

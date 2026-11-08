@@ -29,10 +29,40 @@ workspace root.
 3. On completion, builds one payload from the existing deterministic layers:
    findings (`Finding.to_dict(root=...)`), the evidence graph
    (`intelligence.analyze_findings`), cluster confidence, root causes,
-   recommendations and `leakage.score()`.
+   recommendations, `policy.apply_policy()` and `leakage.score()`.
 4. Renders the normal static HTML report with `report.render`.
 
 Scans never write to disk and never execute the scanned code.
+
+## Baselines and suppressions
+
+Both scan types use the existing policy engine. Nothing in the workspace defines
+its own status or suppression semantics.
+
+- The baseline is the file in the scan form (relative to the workspace root) or,
+  when that field is blank, `[baseline].path` from `.leaklens.toml` at the root.
+  A path outside the root is rejected, and a missing, malformed, incompatible or
+  non-UTF-8 baseline fails the request with the `Baseline.load` message. It is
+  never replaced with an empty baseline.
+- `[[suppressions]]` from `.leaklens.toml` apply to source scans and dataset
+  audits. Suppressed findings stay in the results with their original severity,
+  detail and evidence; they carry `status: "suppressed"`, the matching rule's
+  reason/fingerprint/expiry and `requires_attention: false`, and they stop
+  counting toward `score()`.
+- With a baseline, every finding gets the policy engine's `new`, `unchanged`,
+  `changed` or `suppressed` status exactly as `policy.apply_policy()` returned
+  it. `changed` keeps the previous baseline entry under `previous`. `resolved`
+  entries are returned separately. Without a baseline, only suppressed findings
+  have a status; the others are reported as `unclassified`, never invented as
+  `unchanged`.
+- `policy.statuses` counts are derived from the returned findings and
+  `policy.unclassified` covers findings that had no baseline comparison. The
+  UI filters on those exact statuses and keeps the severity/kind filters.
+- A cancelled source scan is not compared with a baseline: a partial scan would
+  make missing findings look resolved. Suppressions still label findings.
+- The workspace is read-only: it loads and compares baselines but never creates
+  or updates one. Use `leaklens --scan . --write-baseline` or
+  `--update-baseline`; those writes stay atomic and explicit.
 
 ## What one dataset audit does
 
@@ -51,8 +81,11 @@ API's audited pipeline, called in a background thread.
    target validation, `leakage.scan`, split/feature/near-duplicate/temporal
    overlap, group risk, `audit()`, `analyze_dataset_impact()`, `score()`, the
    intelligence payload and `report.render`.
-4. Adds two presentation-only keys to each finding (`index`, `advice`) and keeps
-   the rest of the engine payload byte-for-byte as the API returns it.
+4. Adds two presentation-only keys to each finding (`index`, `advice`), applies
+   the same `policy.apply_policy()` step as source scans to the serialized
+   findings, and keeps the rest of the engine payload as the API returns it.
+   Baseline statuses therefore match the CLI for the same dataset root and
+   baseline; the audit engine itself is unchanged.
 
 `POST /api/datasets/inspect` parses once with `run_inspect_job` to list columns,
 preview rows and target candidates, so the UI can offer real choices instead of
@@ -66,23 +99,23 @@ UI explains which ones are unavailable and why.
 
 Exposed engine options are exactly those the audit job accepts: target,
 threshold (`0.5`–`1.0`, rounded to 4 decimals), held-out dataset, time column
-and group column. There is no AI, baseline or snapshot control in this
-milestone.
+and group column. There is no AI or snapshot control in this milestone; the
+baseline and suppression controls described above are shared with source scans.
 
 ## Endpoints
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /` | the single-page UI |
-| `GET /api/info` | version, root, scan limits, dataset limits/formats, SQL availability |
-| `POST /api/scans` | `{"path": "...", "sql": false}` → `{"scan_id"}` (202) |
+| `GET /api/info` | version, root, scan limits, dataset limits/formats, SQL availability, config baseline/suppressions |
+| `POST /api/scans` | `{"path": "...", "sql": false, "baseline": null}` → `{"scan_id"}` (202) |
 | `GET /api/scans/{id}` | state, `done`, `total`, `current`, counts, errors, elapsed |
 | `POST /api/scans/{id}/cancel` | request cancellation (409 if not running) |
-| `GET /api/scans/{id}/results` | findings + clusters + links + next actions (409 until finished) |
+| `GET /api/scans/{id}/results` | findings + statuses + policy + clusters + links + next actions (409 until finished) |
 | `GET /api/scans/{id}/report` | the static HTML report |
 | `GET /api/source?path=...&line=N` | read-only source window around a line |
 | `POST /api/datasets/inspect` | `{"path": "train.csv"}` → columns, preview, target candidates |
-| `POST /api/datasets` | `{"path", "target", "threshold", "test_path", "time_col", "group_col"}` → `{"dataset_id"}` (202) |
+| `POST /api/datasets` | `{"path", "target", "threshold", "test_path", "time_col", "group_col", "baseline"}` → `{"dataset_id"}` (202) |
 | `GET /api/datasets/{id}` | state, echoed request, error, elapsed |
 | `POST /api/datasets/{id}/cancel` | cancel before the engine starts (409 once it runs) |
 | `GET /api/datasets/{id}/results` | the audit payload (409 until finished, or with the failure message) |
@@ -129,3 +162,8 @@ parity with `run_audit_job` and the CLI trust score, target and threshold
 validation, held-out datasets and impact, format/optional-parser reporting,
 traversal and absolute escapes, empty and malformed files, serialisation,
 failure reporting, cross-kind locking, cancellation rules and report rendering.
+Baseline coverage adds config and explicit selection, valid/missing/invalid/
+non-UTF-8 baselines, traversal for both scan types, all four finding statuses,
+suppression reason/rule identity, count consistency, resolved entries, source
+and dataset parity with the CLI policy result, and suppression-only scans that
+do not invent baseline statuses.

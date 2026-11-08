@@ -12,6 +12,8 @@ pytest.importorskip("fastapi")
 pytest.importorskip("httpx")
 from fastapi.testclient import TestClient
 
+from leaklens.baseline import BASELINE_SCHEMA, BASELINE_VERSION
+from leaklens.fingerprint import SCHEMA_VERSION
 from leaklens.workspace import create_workspace_app
 
 LEAKY = (
@@ -44,6 +46,75 @@ def _client(tmp_path):
     return TestClient(create_workspace_app(tmp_path))
 
 
+POLICY_LEAKY = (
+    "import pandas as pd\n"
+    "from sklearn.preprocessing import StandardScaler\n"
+    "from sklearn.impute import SimpleImputer\n"
+    "from sklearn.model_selection import (\n"
+    "    train_test_split, cross_val_score, StratifiedKFold)\n"
+    "from sklearn.linear_model import LogisticRegression\n"
+    'df = pd.read_csv("data.csv")\n'
+    'X = df.drop(columns=["y"])\n'
+    'y = df["y"]\n'
+    "sc = StandardScaler()\n"
+    "X = sc.fit_transform(X)\n"
+    "imp = SimpleImputer()\n"
+    "X = imp.fit_transform(X)\n"
+    "a = train_test_split(X)\n"
+    "cross_val_score(LogisticRegression(), X, y,\n"
+    "    cv=StratifiedKFold(5, shuffle=True, random_state=0))\n"
+)
+
+
+def _policy_project(tmp_path):
+    (tmp_path / "leaky.py").write_text(POLICY_LEAKY, encoding="utf-8")
+    return tmp_path
+
+
+def _baseline_entries(findings, *, omit=(), severity=None):
+    """Baseline entries from workspace findings, optionally changed or omitted."""
+    entries = {}
+    for finding in findings:
+        key = finding["fingerprint"]
+        if key in omit:
+            continue
+        entries[key] = {
+            "fingerprint": key,
+            "kind": finding["kind"],
+            "severity": (severity or {}).get(key, finding["severity"]),
+            "column": finding["column"],
+        }
+    return list(entries.values())
+
+
+def _write_baseline(path, entries):
+    path.write_text(
+        json.dumps(
+            {
+                "schema": BASELINE_SCHEMA,
+                "version": BASELINE_VERSION,
+                "fingerprint_schema": SCHEMA_VERSION,
+                "tool_version": "test",
+                "findings": entries,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_config(tmp_path, *, baseline=None, suppressions=()):
+    lines = []
+    if baseline:
+        lines += ["[baseline]", f'path = "{baseline}"']
+    for rule in suppressions:
+        lines += [
+            "[[suppressions]]",
+            f'fingerprint = "{rule["fingerprint"]}"',
+            f'reason = "{rule["reason"]}"',
+        ]
+    (tmp_path / ".leaklens.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _wait(client, scan_id, timeout=15.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -54,8 +125,10 @@ def _wait(client, scan_id, timeout=15.0):
     raise AssertionError("scan did not finish")
 
 
-def _run(client, path=".", sql=False):
-    response = client.post("/api/scans", json={"path": path, "sql": sql})
+def _run(client, path=".", sql=False, baseline=None):
+    response = client.post(
+        "/api/scans", json={"path": path, "sql": sql, "baseline": baseline}
+    )
     assert response.status_code == 202, response.text
     scan_id = response.json()["scan_id"]
     status = _wait(client, scan_id)
@@ -67,10 +140,15 @@ def test_page_and_info_expose_the_root(tmp_path):
     page = client.get("/")
     assert page.status_code == 200
     assert "LeakLens workspace" in page.text
+    for control in ('id="baseline"', 'id="f-status"', 'id="ds-status"'):
+        assert control in page.text
     info = client.get("/api/info").json()
     assert info["root"] == tmp_path.resolve().as_posix()
     assert info["max_files"] >= 1
     assert info["source_context"] >= 1
+    assert set(info["config"]) == {"path", "baseline", "suppressions", "error"}
+    assert info["config"]["error"] is None
+    assert info["config"]["baseline"] is None
 
 
 def test_scan_lifecycle_reports_progress_and_evidence(tmp_path):
@@ -353,12 +431,21 @@ def test_dataset_audit_reuses_the_public_audit_engine(tmp_path):
 
     def engine_view(payload):
         data = json.loads(json.dumps(payload))
-        for key in ("dataset_id", "state", "request", "elapsed_ms", "report_html"):
+        for key in (
+            "dataset_id",
+            "state",
+            "request",
+            "elapsed_ms",
+            "report_html",
+            "policy",
+            "resolved",
+        ):
             data.pop(key, None)
         data["summary"].pop("duration_ms", None)
         for finding in data["findings"]:
             finding.pop("index", None)
             finding.pop("advice", None)
+            finding.pop("requires_attention", None)
         return data
 
     assert engine_view(results) == engine_view(expected)
@@ -644,3 +731,312 @@ def test_unknown_dataset_audit_returns_404(tmp_path):
     assert client.get("/api/datasets/missing/results").status_code == 404
     assert client.get("/api/datasets/missing/report").status_code == 404
     assert client.post("/api/datasets/missing/cancel").status_code == 404
+
+
+# --- baseline and suppression visibility ----------------------------------
+
+
+def _statuses(results):
+    return {
+        finding["fingerprint"]: finding.get("status") for finding in results["findings"]
+    }
+
+
+def _trust_without(findings, suppressed):
+    penalty = {"high": 35, "medium": 15, "low": 5}
+    return max(
+        0,
+        100
+        - sum(
+            penalty.get(finding["severity"], 0)
+            for finding in findings
+            if finding["fingerprint"] != suppressed
+        ),
+    )
+
+
+def test_baseline_statuses_suppression_and_summary_are_consistent(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    initial = client.get(f"/api/scans/{scan_id}/results").json()
+    findings = initial["findings"]
+    assert len(findings) >= 4
+    new, changed, suppressed, unchanged = findings[:4]
+    changed_severity = "low" if changed["severity"] != "low" else "high"
+    extra = {
+        "fingerprint": "a" * 64,
+        "kind": "target_leakage",
+        "severity": "medium",
+        "column": "ghost",
+    }
+    entries = _baseline_entries(
+        findings,
+        omit={new["fingerprint"]},
+        severity={changed["fingerprint"]: changed_severity},
+    )
+    _write_baseline(tmp_path / "baseline.json", [*entries, extra])
+    _write_config(
+        tmp_path,
+        baseline="baseline.json",
+        suppressions=[
+            {"fingerprint": suppressed["fingerprint"], "reason": "accepted risk"}
+        ],
+    )
+
+    scan_id, _ = _run(client)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    statuses = _statuses(results)
+
+    assert statuses[new["fingerprint"]] == "new"
+    assert statuses[changed["fingerprint"]] == "changed"
+    assert statuses[suppressed["fingerprint"]] == "suppressed"
+    assert statuses[unchanged["fingerprint"]] == "unchanged"
+    by_fingerprint = {
+        finding["fingerprint"]: finding for finding in results["findings"]
+    }
+    assert (
+        by_fingerprint[changed["fingerprint"]]["previous"]["severity"]
+        == changed_severity
+    )
+    assert by_fingerprint[suppressed["fingerprint"]]["suppression"] == {
+        "fingerprint": suppressed["fingerprint"],
+        "reason": "accepted risk",
+    }
+    assert by_fingerprint[suppressed["fingerprint"]]["requires_attention"] is False
+    assert (
+        by_fingerprint[suppressed["fingerprint"]]["evidence"] == suppressed["evidence"]
+    )
+    for key in (new["fingerprint"], changed["fingerprint"], unchanged["fingerprint"]):
+        assert by_fingerprint[key]["requires_attention"] is True
+
+    policy = results["policy"]
+    assert policy["baseline_selected"] is True
+    assert policy["baseline_path"] == "baseline.json"
+    assert policy["baseline"] == {
+        "path": "baseline.json",
+        "fail_on_new": False,
+        "new": 1,
+        "unchanged": 2,
+        "changed": 1,
+        "resolved": 1,
+    }
+    assert policy["statuses"] == {
+        "changed": 1,
+        "new": 1,
+        "suppressed": 1,
+        "unchanged": 1,
+    }
+    assert policy["unclassified"] == 0
+    assert sum(policy["statuses"].values()) == len(results["findings"])
+    assert results["resolved"][0]["fingerprint"] == extra["fingerprint"]
+    assert results["trust_score"] == _trust_without(
+        results["findings"], suppressed["fingerprint"]
+    )
+
+    report = client.get(f"/api/scans/{scan_id}/report")
+    assert "Baseline and suppression policy" in report.text
+    assert "accepted risk" in report.text
+    assert "suppressed" in report.text.lower()
+
+
+def test_suppression_without_baseline_keeps_evidence_and_invents_no_status(tmp_path):
+    client = _client(_project(tmp_path))
+    scan_id, _ = _run(client)
+    initial = client.get(f"/api/scans/{scan_id}/results").json()
+    target = initial["findings"][0]
+    _write_config(
+        tmp_path,
+        suppressions=[{"fingerprint": target["fingerprint"], "reason": "known parser"}],
+    )
+
+    scan_id, _ = _run(client)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    by_fingerprint = {
+        finding["fingerprint"]: finding for finding in results["findings"]
+    }
+    suppressed = by_fingerprint[target["fingerprint"]]
+    assert suppressed["status"] == "suppressed"
+    assert suppressed["suppression"]["reason"] == "known parser"
+    assert suppressed["severity"] == target["severity"]
+    assert suppressed["detail"] == target["detail"]
+    assert "evidence" in suppressed
+    assert suppressed["requires_attention"] is False
+    assert all(
+        "status" not in finding
+        for finding in results["findings"]
+        if finding["fingerprint"] != target["fingerprint"]
+    )
+
+    policy = results["policy"]
+    assert policy["baseline_selected"] is False
+    assert "baseline" not in policy
+    assert policy["statuses"] == {"suppressed": 1}
+    assert policy["unclassified"] == len(results["findings"]) - 1
+    assert results["trust_score"] == _trust_without(
+        results["findings"], target["fingerprint"]
+    )
+
+
+def test_baseline_validation_missing_and_traversal_are_explicit(tmp_path):
+    client = _client(_project(tmp_path))
+    outside = (tmp_path.parent / "outside-baseline.json").as_posix()
+
+    for value in ("../outside-baseline.json", outside):
+        response = client.post("/api/scans", json={"path": ".", "baseline": value})
+        assert response.status_code == 422, response.text
+        assert "outside the workspace root" in response.json()["detail"]
+
+    missing = client.post("/api/scans", json={"path": ".", "baseline": "missing.json"})
+    assert missing.status_code == 422
+    assert "baseline not found" in missing.json()["detail"]
+    assert "--write-baseline" in missing.json()["detail"]
+    assert not (tmp_path / "missing.json").exists()
+
+    (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+    broken = client.post("/api/scans", json={"path": ".", "baseline": "broken.json"})
+    assert broken.status_code == 422
+    assert "invalid JSON" in broken.json()["detail"]
+
+    (tmp_path / "schema.json").write_text(
+        json.dumps({"schema": "not-leaklens"}), encoding="utf-8"
+    )
+    schema = client.post("/api/scans", json={"path": ".", "baseline": "schema.json"})
+    assert schema.status_code == 422
+    assert "baseline schema" in schema.json()["detail"]
+
+    (tmp_path / "bytes.json").write_bytes(b"\xff\xfe")
+    binary = client.post("/api/scans", json={"path": ".", "baseline": "bytes.json"})
+    assert binary.status_code == 422
+    assert "cannot read baseline" in binary.json()["detail"]
+
+    _write_config(tmp_path, baseline="configured.json")
+    configured = client.post("/api/scans", json={"path": "."})
+    assert configured.status_code == 422
+    assert "baseline not found" in configured.json()["detail"]
+    assert not (tmp_path / "configured.json").exists()
+
+
+def test_dataset_baseline_validation_and_traversal(tmp_path):
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+
+    for baseline in ("../outside.json", (tmp_path.parent / "outside.json").as_posix()):
+        response = client.post(
+            "/api/datasets",
+            json={"path": "train.csv", "target": "y", "baseline": baseline},
+        )
+        assert response.status_code == 422, response.text
+        assert "outside the workspace root" in response.json()["detail"]
+
+    missing = client.post(
+        "/api/datasets",
+        json={"path": "train.csv", "target": "y", "baseline": "missing.json"},
+    )
+    assert missing.status_code == 422
+    assert "baseline not found" in missing.json()["detail"]
+
+    (tmp_path / "broken.json").write_text("not json", encoding="utf-8")
+    broken = client.post(
+        "/api/datasets",
+        json={"path": "train.csv", "target": "y", "baseline": "broken.json"},
+    )
+    assert broken.status_code == 422
+    assert "invalid JSON" in broken.json()["detail"]
+
+
+def test_info_reports_config_and_invalid_config_fails_closed(tmp_path):
+    _dataset(tmp_path)
+    client = _client(_project(tmp_path))
+    _write_config(
+        tmp_path,
+        baseline="leaklens-baseline.json",
+        suppressions=[{"fingerprint": "b" * 64, "reason": "documented"}],
+    )
+    info = client.get("/api/info").json()["config"]
+    assert info == {
+        "path": ".leaklens.toml",
+        "baseline": "leaklens-baseline.json",
+        "suppressions": 1,
+        "error": None,
+    }
+
+    (tmp_path / ".leaklens.toml").write_text("unknown = true\n", encoding="utf-8")
+    info = client.get("/api/info").json()["config"]
+    assert "unknown configuration keys" in info["error"]
+    for endpoint, body in (
+        ("/api/scans", {"path": "."}),
+        ("/api/datasets", {"path": "train.csv", "target": "y"}),
+    ):
+        response = client.post(endpoint, json=body)
+        assert response.status_code == 422, response.text
+        assert "unknown configuration keys" in response.json()["detail"]
+
+
+def test_source_scan_policy_matches_the_cli(tmp_path, monkeypatch, capsys):
+    from leaklens import cli
+
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    initial = client.get(f"/api/scans/{scan_id}/results").json()
+    target = initial["findings"][0]
+    _write_baseline(tmp_path / "baseline.json", _baseline_entries(initial["findings"]))
+    _write_config(
+        tmp_path,
+        baseline="baseline.json",
+        suppressions=[{"fingerprint": target["fingerprint"], "reason": "triaged"}],
+    )
+
+    scan_id, _ = _run(client)
+    workspace = client.get(f"/api/scans/{scan_id}/results").json()
+
+    monkeypatch.chdir(tmp_path)
+    code = cli.main(["--scan", ".", "--json"])
+    cli_report = json.loads(capsys.readouterr().out)
+    assert code in (0, 1)
+    workspace_statuses = _statuses(workspace)
+    cli_statuses = {
+        finding["fingerprint"]: finding.get("status")
+        for finding in cli_report["findings"]
+    }
+    assert workspace_statuses == cli_statuses, (workspace_statuses, cli_statuses)
+    assert workspace["trust_score"] == cli_report["trust_score"]
+
+
+def test_dataset_audit_policy_matches_the_cli(tmp_path, monkeypatch, capsys):
+    from leaklens import cli
+
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    dataset_id, _ = _run_dataset(client, test_path="test.csv")
+    initial = client.get(f"/api/datasets/{dataset_id}/results").json()
+    target = initial["findings"][0]
+    _write_baseline(tmp_path / "baseline.json", _baseline_entries(initial["findings"]))
+    _write_config(
+        tmp_path,
+        baseline="baseline.json",
+        suppressions=[{"fingerprint": target["fingerprint"], "reason": "accepted"}],
+    )
+
+    dataset_id, _ = _run_dataset(client, test_path="test.csv")
+    workspace = client.get(f"/api/datasets/{dataset_id}/results").json()
+
+    monkeypatch.chdir(tmp_path)
+    code = cli.main(
+        [
+            str(tmp_path / "train.csv"),
+            "--target",
+            "y",
+            "--test",
+            str(tmp_path / "test.csv"),
+            "--json",
+        ]
+    )
+    cli_report = json.loads(capsys.readouterr().out)
+    assert code in (0, 1)
+    workspace_statuses = _statuses(workspace)
+    cli_statuses = {
+        finding["fingerprint"]: finding.get("status")
+        for finding in cli_report["findings"]
+    }
+    assert workspace_statuses == cli_statuses, (workspace_statuses, cli_statuses)
+    assert workspace["trust_score"] == cli_report["trust_score"]

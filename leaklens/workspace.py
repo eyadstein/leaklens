@@ -17,6 +17,7 @@ import re
 import secrets
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,15 +27,19 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .baseline import Baseline, BaselineError
+from .config import ConfigError, load_config
 from .fingerprint import LOCATION, normalize_path
 from .fixes import advice
 from .intelligence import analyze_findings
 from .leakage import Finding, score
+from .policy import PolicyOutcome, apply_policy
 from .public_api import GuardLimits, _threshold, run_audit_job, run_inspect_job
 from .report import render
 from .scanner import scan_file, scan_targets
 from .sqlscan import SqlSettings, scan_sql_file
 from .sqlscan import available as sql_available
+from .suppression import SuppressionRule
 from .upload_guard import UploadRejected, available_formats, guard_upload
 
 MAX_FILES = 5_000
@@ -79,6 +84,9 @@ class ScanSession:
     scan_id: str
     files: tuple[Path, ...]
     include_sql: bool
+    baseline: Baseline | None = None
+    rules: tuple[SuppressionRule, ...] = ()
+    baseline_path: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
     started_at: float = field(default_factory=time.perf_counter)
@@ -142,6 +150,9 @@ class DatasetSession:
     test_path: Path | None = None
     time_col: str | None = None
     group_col: str | None = None
+    baseline: Baseline | None = None
+    rules: tuple[SuppressionRule, ...] = ()
+    baseline_path: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
     started_at: float = field(default_factory=time.perf_counter)
@@ -202,9 +213,89 @@ def _finding_payload(finding: Finding, index: int, root: Path) -> dict[str, Any]
 def _report_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The static report table already knows these columns; keep it readable."""
     return [
-        {key: item.get(key) for key in ("severity", "kind", "column", "detail")}
+        {
+            key: item.get(key)
+            for key in ("severity", "kind", "column", "detail", "status", "diagnostic")
+        }
         for item in findings
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class _PolicyFinding:
+    """A serialized finding that keeps the engine's exact fingerprint."""
+
+    payload: dict[str, Any]
+    fingerprint: str
+    severity: str
+    kind: str
+    column: str
+    diagnostic: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.payload)
+
+
+def _policy_view(finding: dict[str, Any]) -> _PolicyFinding:
+    return _PolicyFinding(
+        payload=finding,
+        fingerprint=str(finding["fingerprint"]),
+        severity=str(finding["severity"]),
+        kind=str(finding["kind"]),
+        column=str(finding["column"]),
+        diagnostic=bool(finding.get("diagnostic", False)),
+    )
+
+
+def _apply_workspace_policy(
+    findings: list[dict[str, Any]],
+    *,
+    baseline: Baseline | None,
+    rules: tuple[SuppressionRule, ...],
+    baseline_path: str | None,
+    partial: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, str]], PolicyOutcome]:
+    """Apply the existing policy engine to already-serialized findings.
+
+    Serialized fingerprints are the ones ``Finding.to_dict(root=...)`` produced,
+    so a workspace scan and the CLI from the same root classify identically.
+    A cancelled scan is never compared with a baseline: its missing findings
+    would otherwise look resolved.
+    """
+    views = [_policy_view(finding) for finding in findings]
+    outcome = apply_policy(views, baseline=None if partial else baseline, rules=rules)
+    items = [outcome.finding_payload(view) for view in views]
+    previous = (
+        {entry.fingerprint: entry.to_dict() for entry in baseline.entries}
+        if baseline is not None and not partial
+        else {}
+    )
+    for item in items:
+        item["requires_attention"] = item["fingerprint"] not in outcome.suppressed
+        if item.get("status") == "changed" and item["fingerprint"] in previous:
+            item["previous"] = previous[item["fingerprint"]]
+    statuses = Counter(item["status"] for item in items if item.get("status"))
+    policy = outcome.summary(baseline_path=baseline_path)
+    policy["baseline_selected"] = outcome.diff is not None
+    policy["baseline_path"] = baseline_path
+    policy["suppressions_configured"] = len(rules)
+    policy["statuses"] = dict(sorted(statuses.items()))
+    policy["unclassified"] = sum(1 for item in items if not item.get("status"))
+    if partial and baseline is not None:
+        policy["baseline_skipped"] = (
+            "the scan was cancelled; a baseline comparison needs a complete scan"
+        )
+    resolved = (
+        [entry.to_dict() for entry in outcome.diff.resolved]
+        if outcome.diff is not None
+        else []
+    )
+    return items, policy, resolved, outcome
+
+
+def _report_policy(policy: dict[str, Any]) -> dict[str, Any] | None:
+    """Only render the report policy card when there is policy content."""
+    return policy if policy.get("baseline") or policy.get("suppressions") else None
 
 
 class WorkspaceScanManager:
@@ -230,13 +321,40 @@ class WorkspaceScanManager:
             raise WorkspacePathError("path is outside the workspace root")
         return target
 
+    def _policy(
+        self, value: str | None
+    ) -> tuple[Baseline | None, tuple[SuppressionRule, ...], str | None]:
+        """Load the project config and the selected baseline before a scan runs."""
+        try:
+            cfg = load_config(cwd=self.root)
+        except ConfigError as exc:
+            raise WorkspacePathError(str(exc)) from None
+        selected = (value or "").strip()
+        if selected:
+            path = self.resolve(selected)
+            label = _relative(path, self.root)
+        elif cfg.baseline_path is not None:
+            path = cfg.baseline_path
+            label = _relative(path, self.root)
+        else:
+            return None, cfg.suppressions, None
+        if path != self.root and not path.is_relative_to(self.root):
+            raise WorkspacePathError("baseline is outside the workspace root")
+        try:
+            baseline = Baseline.load(path)
+        except (BaselineError, UnicodeError) as exc:
+            raise WorkspacePathError(str(exc)) from None
+        return baseline, cfg.suppressions, label
+
     def _claim(self, session) -> None:
         """Take the one activity slot; callers already hold ``self._lock``."""
         if self._active is not None and self._active.state in ACTIVE_STATES:
             raise WorkspaceBusy("a scan or audit is already running")
         self._active = session
 
-    def start(self, path: str = ".", *, sql: bool = False) -> ScanSession:
+    def start(
+        self, path: str = ".", *, sql: bool = False, baseline: str | None = None
+    ) -> ScanSession:
         target = self.resolve(path)
         if not target.exists():
             raise WorkspacePathError(f"not found: {path}")
@@ -254,11 +372,15 @@ class WorkspaceScanManager:
             raise WorkspacePathError(
                 f"too many files ({len(files)}); scan a folder with fewer than {MAX_FILES}"
             )
+        baseline_doc, rules, baseline_label = self._policy(baseline)
         with self._lock:
             session = ScanSession(
                 scan_id=secrets.token_hex(6),
                 files=files,
                 include_sql=sql,
+                baseline=baseline_doc,
+                rules=rules,
+                baseline_path=baseline_label,
             )
             self._claim(session)
             self._scans[session.scan_id] = session
@@ -314,10 +436,20 @@ class WorkspaceScanManager:
     ) -> None:
         report = analyze_findings(findings)
         intelligence = report.to_dict()
+        items, policy, resolved, outcome = _apply_workspace_policy(
+            [
+                _finding_payload(finding, index, self.root)
+                for index, finding in enumerate(findings)
+            ],
+            baseline=session.baseline,
+            rules=session.rules,
+            baseline_path=session.baseline_path,
+            partial=state != "done",
+        )
         payload = {
             "scan_id": session.scan_id,
             "state": state,
-            "trust_score": score(findings),
+            "trust_score": score(outcome.active),
             "counts": dict(session.counts),
             "files": len(session.files),
             "errors": list(session.errors),
@@ -325,16 +457,17 @@ class WorkspaceScanManager:
             # Clusters, links, evidence, confidence, root causes and next
             # actions are the existing deterministic intelligence layer.
             **intelligence,
-            "findings": [
-                _finding_payload(finding, index, self.root)
-                for index, finding in enumerate(findings)
-            ],
+            "policy": policy,
+            "findings": items,
         }
+        if resolved:
+            payload["resolved"] = resolved
         report_html = render(
             {
                 "trust_score": payload["trust_score"],
                 "findings": _report_findings(payload["findings"]),
                 "intelligence": intelligence,
+                "policy": _report_policy(policy),
             },
             title="LeakLens workspace report",
         )
@@ -375,6 +508,7 @@ class WorkspaceScanManager:
         test_path: str | None = None,
         time_col: str | None = None,
         group_col: str | None = None,
+        baseline: str | None = None,
     ) -> DatasetSession:
         threshold = _threshold(threshold)
         upload = self.open_dataset(path)
@@ -384,6 +518,7 @@ class WorkspaceScanManager:
             raise UploadRejected(
                 "Choose a target column before scanning.", 422, "missing_target"
             )
+        baseline_doc, rules, baseline_label = self._policy(baseline)
         with self._lock:
             session = DatasetSession(
                 dataset_id=secrets.token_hex(6),
@@ -393,6 +528,9 @@ class WorkspaceScanManager:
                 test_path=self.resolve(test_path) if test_path else None,
                 time_col=(time_col or "").strip() or None,
                 group_col=(group_col or "").strip() or None,
+                baseline=baseline_doc,
+                rules=rules,
+                baseline_path=baseline_label,
             )
             self._claim(session)
             self._datasets[session.dataset_id] = session
@@ -461,10 +599,34 @@ class WorkspaceScanManager:
                     "message": str(exc)[:300],
                 }
             return
-        report_html = payload.pop("report_html", None)
+        payload.pop("report_html", None)
         for index, finding in enumerate(payload["findings"]):
             finding["index"] = index
             finding["advice"] = advice(finding["kind"]) or None
+        items, policy, resolved, outcome = _apply_workspace_policy(
+            payload["findings"],
+            baseline=session.baseline,
+            rules=session.rules,
+            baseline_path=session.baseline_path,
+        )
+        payload["findings"] = items
+        payload["trust_score"] = score(outcome.active)
+        payload["policy"] = policy
+        if resolved:
+            payload["resolved"] = resolved
+        report_html = render(
+            {
+                "trust_score": payload["trust_score"],
+                "findings": items,
+                "audit": payload.get("audit"),
+                "impact": payload.get("impact"),
+                "intelligence": payload.get("intelligence"),
+                "graph_baseline": payload.get("graph_baseline"),
+                "ai": payload.get("ai"),
+                "policy": _report_policy(policy),
+            },
+            title=f"LeakLens report - {payload['summary']['file']}",
+        )
         results = {
             "dataset_id": session.dataset_id,
             "state": "done",
@@ -488,6 +650,7 @@ def _unfinished(session: DatasetSession) -> str:
 class ScanRequest(BaseModel):
     path: str = Field(default=".", max_length=1000)
     sql: bool = Field(default=False)
+    baseline: str | None = Field(default=None, max_length=1000)
 
 
 class DatasetPathRequest(BaseModel):
@@ -501,6 +664,7 @@ class DatasetRequest(BaseModel):
     test_path: str | None = Field(default=None, max_length=1000)
     time_col: str | None = Field(default=None, max_length=200)
     group_col: str | None = Field(default=None, max_length=200)
+    baseline: str | None = Field(default=None, max_length=1000)
 
 
 def create_workspace_app(root: str | Path | None = None) -> FastAPI:
@@ -523,6 +687,25 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
 
     @app.get("/api/info")
     def info() -> dict[str, Any]:
+        try:
+            cfg = load_config(cwd=manager.root)
+            config_info = {
+                "path": _relative(cfg.path, manager.root) if cfg.path else None,
+                "baseline": (
+                    _relative(cfg.baseline_path, manager.root)
+                    if cfg.baseline_path is not None
+                    else None
+                ),
+                "suppressions": len(cfg.suppressions),
+                "error": None,
+            }
+        except ConfigError as exc:
+            config_info = {
+                "path": None,
+                "baseline": None,
+                "suppressions": 0,
+                "error": str(exc),
+            }
         return {
             "version": __version__,
             "root": manager.root.as_posix(),
@@ -534,12 +717,13 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             "dataset_formats": available_formats(DATASET_LIMITS),
             "threshold_range": [0.5, 1.0],
             "default_threshold": 0.95,
+            "config": config_info,
         }
 
     @app.post("/api/scans", status_code=202)
     def start_scan(req: ScanRequest) -> dict[str, str]:
         try:
-            session = manager.start(req.path, sql=req.sql)
+            session = manager.start(req.path, sql=req.sql, baseline=req.baseline)
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None
         except WorkspaceBusy as exc:
@@ -602,6 +786,7 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
                 test_path=req.test_path,
                 time_col=req.time_col,
                 group_col=req.group_col,
+                baseline=req.baseline,
             )
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None

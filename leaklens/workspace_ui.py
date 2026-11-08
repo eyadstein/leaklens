@@ -32,6 +32,10 @@ button.finding:hover,button.finding:focus-visible{border-color:var(--line);backg
 button.finding[aria-current=true]{border-color:var(--accent);background:#1c2128}
 .chip{display:inline-block;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid currentColor;margin-right:6px}
 .high{color:var(--high)}.medium{color:var(--medium)}.low{color:var(--low)}
+.status{color:var(--accent)}
+.status.new{color:var(--high)}.status.changed{color:var(--medium)}
+.status.unchanged,.status.suppressed{color:var(--muted)}
+.status.suppressed{text-decoration:line-through}
 .badge{display:inline-block;font-size:12px;padding:2px 9px;border-radius:999px;background:#21262d;border:1px solid var(--line)}
 .badge.running{color:var(--accent);border-color:var(--accent)}
 .badge.done{color:var(--ok);border-color:var(--ok)}
@@ -69,6 +73,21 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
   <span class="muted">root: <code id="root">@@ROOT@@</code></span>
 </header>
 <main>
+  <section class="card" aria-labelledby="policy-title">
+    <h2 id="policy-title" style="font-size:14px;margin:0 0 10px">Baseline and suppression policy</h2>
+    <div class="row">
+      <div class="grow">
+        <label for="baseline">Baseline file, relative to the workspace root (blank = <code>[baseline].path</code> from <code>.leaklens.toml</code>)</label>
+        <input id="baseline" type="text" placeholder="leaklens-baseline.json" spellcheck="false" autocomplete="off">
+      </div>
+    </div>
+    <p id="policy-info" class="meta" role="status" aria-live="polite"></p>
+    <p class="meta">Suppression rules in <code>.leaklens.toml</code> apply to both scan types.
+      Suppressed findings stay in the results with their reason and fingerprint and do not count
+      toward the trust score. The workspace never writes or updates a baseline: use
+      <code>leaklens --scan . --write-baseline</code> or <code>--update-baseline</code>.</p>
+  </section>
+
   <section class="card" aria-labelledby="scan-title">
     <h2 id="scan-title" style="font-size:14px;margin:0 0 10px">Start a scan</h2>
     <form id="scan-form" class="row">
@@ -107,14 +126,17 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
           <select id="f-sev"><option value="">all</option><option value="high">high</option>
           <option value="medium">medium</option><option value="low">low</option></select></span>
         <span><label for="f-kind">Kind</label><select id="f-kind"><option value="">all</option></select></span>
+        <span><label for="f-status">Status</label><select id="f-status"><option value="">all</option></select></span>
         <span><label for="f-q">Search</label><input id="f-q" type="text" placeholder="kind, file, detail" style="min-width:200px"></span>
       </div>
       <p class="meta" id="summary"></p>
+      <p class="meta" id="policy-notes"></p>
     </div>
     <div class="layout">
       <div>
         <h2 style="font-size:14px">Findings by evidence cluster</h2>
         <div id="clusters"><p class="empty">No findings.</p></div>
+        <div id="resolved"></div>
       </div>
       <aside class="card" id="detail" aria-live="polite">
         <p class="empty">Select a finding to see its evidence and source.</p>
@@ -175,9 +197,12 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
       <div class="row">
         <span><label>Trust score</label><b id="ds-trust" style="font-size:22px">-</b></span>
         <span class="grow"></span>
+        <span><label for="ds-status">Status</label>
+          <select id="ds-status"><option value="">all</option></select></span>
         <span id="ds-links"></span>
       </div>
       <p class="meta" id="ds-summary"></p>
+      <p class="meta" id="ds-policy-notes"></p>
       <p class="meta high" id="ds-error"></p>
     </div>
     <div class="layout">
@@ -186,6 +211,7 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
         <div id="ds-clusters"></div>
         <h2 style="font-size:14px">Recommended next actions</h2>
         <div id="ds-recs"></div>
+        <div id="ds-resolved"></div>
       </div>
       <aside class="card" aria-live="polite">
         <h3 style="margin-top:0">Dataset</h3>
@@ -245,6 +271,62 @@ function counts(c) {
   $("c-low").textContent = c.low;
 }
 
+function statusChip(finding) {
+  return finding.status ? el("span", {class: "chip status " + finding.status,
+    text: finding.status}) : null;
+}
+
+function policyText(policy) {
+  if (!policy) return "";
+  const parts = [];
+  if (policy.baseline) {
+    parts.push("baseline " + policy.baseline.new + " new, " +
+      policy.baseline.unchanged + " unchanged, " +
+      policy.baseline.changed + " changed, " +
+      policy.baseline.resolved + " resolved" +
+      (policy.baseline.path ? " (" + policy.baseline.path + ")" : ""));
+  } else if (!policy.baseline_selected) {
+    parts.push("no baseline selected: findings are not compared");
+  }
+  const statuses = policy.statuses || {};
+  for (const name of Object.keys(statuses).sort()) {
+    parts.push(statuses[name] + " " + name);
+  }
+  if (policy.unclassified) parts.push(policy.unclassified + " not compared");
+  if (policy.suppressions_configured) {
+    parts.push(policy.suppressions_configured + " suppression rule(s) configured");
+  }
+  if (policy.baseline_skipped) parts.push(policy.baseline_skipped);
+  return parts.join(" · ");
+}
+
+function policyNotes(policy) {
+  const diagnostics = (policy && policy.diagnostics) || [];
+  return diagnostics.length ? "Policy diagnostics: " + diagnostics.join("; ") : "";
+}
+
+function renderResolved(box, items) {
+  box.replaceChildren();
+  if (!items || !items.length) return;
+  box.append(el("details", {class: "cluster"},
+    el("summary", {text: "Resolved since baseline (" + items.length + ")"}),
+    el("ul", {class: "files"}, ...items.map((entry) => el("li", {},
+      el("span", {class: "chip status resolved", text: "resolved"}),
+      el("strong", {text: entry.kind}),
+      el("span", {class: "meta", text: " · " + entry.column + " · " +
+        entry.fingerprint.slice(0, 12)}))))));
+}
+
+function fillStatusSelect(select, policy) {
+  const statuses = Object.keys((policy && policy.statuses) || {}).sort();
+  const options = [el("option", {value: "", text: "all"}),
+    ...statuses.map((name) => el("option", {value: name, text: name}))];
+  if (policy && policy.unclassified) {
+    options.push(el("option", {value: "__none__", text: "not compared"}));
+  }
+  select.replaceChildren(...options);
+}
+
 function renderStatus(status) {
   setState(status.state);
   $("done").textContent = status.done + "/" + status.total;
@@ -286,7 +368,9 @@ async function loadResults() {
   $("summary").textContent =
     data.findings.length + " findings from " + data.files + " files in " +
     (data.duration_ms / 1000).toFixed(1) + "s · high " + c.high +
-    " · medium " + c.medium + " · low " + c.low;
+    " · medium " + c.medium + " · low " + c.low +
+    (policyText(data.policy) ? " · " + policyText(data.policy) : "");
+  $("policy-notes").textContent = policyNotes(data.policy);
   $("report-link").href = "/api/scans/" + state.id + "/report";
   $("report-link").hidden = false;
   $("json-link").href = "/api/scans/" + state.id + "/results";
@@ -295,6 +379,8 @@ async function loadResults() {
   const kindSelect = $("f-kind");
   kindSelect.replaceChildren(el("option", {value: "", text: "all"}),
     ...kinds.map((kind) => el("option", {value: kind, text: kind})));
+  fillStatusSelect($("f-status"), data.policy);
+  renderResolved($("resolved"), data.resolved);
   renderFindings();
 }
 
@@ -303,10 +389,14 @@ function visibleFindings() {
   if (!data) return [];
   const severity = $("f-sev").value;
   const kind = $("f-kind").value;
+  const status = $("f-status").value;
   const query = $("f-q").value.trim().toLowerCase();
   return data.findings.filter((f) => {
     if (severity && f.severity !== severity) return false;
     if (kind && f.kind !== kind) return false;
+    if (status === "__none__") {
+      if (f.status) return false;
+    } else if (status && f.status !== status) return false;
     if (!query) return true;
     return (f.kind + " " + f.column + " " + f.detail + " " +
       (f.advice || "")).toLowerCase().includes(query);
@@ -358,6 +448,7 @@ function findingNode(finding) {
   const where = finding.file ? finding.file + ":" + finding.line : finding.column;
   const row = el("button", {class: "finding", type: "button"},
     el("span", {class: "chip " + finding.severity, text: finding.severity}),
+    statusChip(finding),
     el("strong", {text: finding.kind}),
     el("span", {class: "meta", text: " · " + where}),
     el("div", {class: "meta", text: finding.detail}));
@@ -377,10 +468,25 @@ async function select(finding, row) {
   const blocks = [
     el("div", {},
       el("span", {class: "chip " + finding.severity, text: finding.severity}),
+      statusChip(finding),
       el("strong", {text: finding.kind})),
     el("p", {text: finding.detail}),
     el("p", {class: "kv", text: (finding.file || finding.column) +
       (finding.line ? " · line " + finding.line : "")}),
+    finding.status ? el("p", {class: "meta", text:
+      "Policy status: " + finding.status + " · " +
+      (finding.requires_attention
+        ? "requires attention and counts toward the trust score"
+        : "suppressed, so it does not count toward the trust score; the underlying finding and its evidence remain")}) : null,
+    finding.previous ? el("div", {},
+      el("label", {text: "Previous baseline entry"}),
+      el("p", {class: "kv", text: "severity " + finding.previous.severity +
+        " · kind " + finding.previous.kind + " · " + finding.previous.column})) : null,
+    finding.suppression ? el("div", {},
+      el("label", {text: "Suppression rule"}),
+      el("p", {class: "kv", text: "reason: " + finding.suppression.reason +
+        " · fingerprint: " + finding.suppression.fingerprint +
+        (finding.suppression.expires ? " · expires " + finding.suppression.expires : "")})) : null,
     finding.advice ? el("div", {},
       el("label", {text: "Suggested fix"}),
       el("p", {text: finding.advice})) : null,
@@ -429,7 +535,8 @@ $("scan-form").addEventListener("submit", async (event) => {
     const started = await api("/api/scans", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({path: $("path").value, sql: $("sql").checked}),
+      body: JSON.stringify({path: $("path").value, sql: $("sql").checked,
+        baseline: $("baseline").value.trim() || null}),
     });
     state.id = started.scan_id;
     state.selected = null;
@@ -454,7 +561,7 @@ $("cancel").addEventListener("click", async () => {
   }
 });
 
-for (const id of ["f-sev", "f-kind", "f-q"]) {
+for (const id of ["f-sev", "f-kind", "f-status", "f-q"]) {
   $(id).addEventListener("input", renderFindings);
 }
 
@@ -572,10 +679,23 @@ function kvRows(box, pairs) {
 function datasetFinding(finding) {
   return el("li", {},
     el("span", {class: "chip " + finding.severity, text: finding.severity}),
+    statusChip(finding),
     el("strong", {text: finding.kind}),
     el("span", {class: "meta", text: " · " + finding.column}),
     el("div", {class: "meta", text: finding.detail}),
+    finding.previous ? el("div", {class: "meta", text: "previous baseline severity: " +
+      finding.previous.severity}) : null,
+    finding.suppression ? el("div", {class: "meta", text: "suppressed: " +
+      finding.suppression.reason + " (" + finding.suppression.fingerprint.slice(0, 12) + ")"}) : null,
     finding.advice ? el("div", {class: "meta", text: "fix: " + finding.advice}) : null);
+}
+
+function dsVisibleFindings(data) {
+  const found = data.findings || [];
+  const status = $("ds-status").value;
+  if (!status) return found;
+  if (status === "__none__") return found.filter((finding) => !finding.status);
+  return found.filter((finding) => finding.status === status);
 }
 
 function datasetClusters(data) {
@@ -586,10 +706,17 @@ function datasetClusters(data) {
     box.append(el("p", {class: "empty", text: "No leakage found."}));
     return;
   }
+  const visible = dsVisibleFindings(data);
+  if (!visible.length) {
+    box.append(el("p", {class: "empty", text: "No findings match these filters."}));
+    return;
+  }
+  const allowed = new Set(visible.map((finding) => finding.index));
   const byIndex = new Map(findings.map((finding) => [finding.index, finding]));
   const grouped = new Set();
   for (const cluster of data.intelligence.clusters || []) {
     const members = cluster.finding_indices
+      .filter((index) => allowed.has(index))
       .map((index) => byIndex.get(index)).filter(Boolean);
     if (!members.length) continue;
     members.forEach((finding) => grouped.add(finding.index));
@@ -602,7 +729,7 @@ function datasetClusters(data) {
           cluster.anchor_kind + " · confidence " + confidence + "%"})),
       el("ul", {class: "files"}, ...members.map(datasetFinding))));
   }
-  const rest = findings.filter((finding) => !grouped.has(finding.index));
+  const rest = visible.filter((finding) => !grouped.has(finding.index));
   if (rest.length) {
     box.append(el("details", {class: "cluster", open: ""},
       el("summary", {text: "Other findings (" + rest.length + ")"}),
@@ -666,27 +793,34 @@ function renderDataset(data) {
     (summary.test_rows != null ? " · held-out " + summary.test_rows + " rows" : "") +
     " · " + (data.elapsed_ms / 1000).toFixed(1) + "s" +
     " · high " + (counts.high || 0) + " · medium " + (counts.medium || 0) +
-    " · low " + (counts.low || 0);
+    " · low " + (counts.low || 0) +
+    (policyText(data.policy) ? " · " + policyText(data.policy) : "");
+  $("ds-policy-notes").textContent = policyNotes(data.policy);
   $("ds-links").replaceChildren(
     el("a", {href: "/api/datasets/" + ds.id + "/report", text: "HTML report"}),
     el("a", {href: "/api/datasets/" + ds.id + "/results", text: "Raw results (JSON)",
       style: "margin-left:16px"}));
+  fillStatusSelect($("ds-status"), data.policy);
   datasetClusters(data);
   datasetRecommendations(data);
   datasetSidebar(data);
+  renderResolved($("ds-resolved"), data.resolved);
 }
 
 function renderDatasetError(error) {
   $("ds-results").hidden = false;
   $("ds-trust").textContent = "-";
   $("ds-summary").textContent = "";
+  $("ds-policy-notes").textContent = "";
   $("ds-links").replaceChildren();
   $("ds-error").textContent = error.message + " [" + error.code + "]";
+  $("ds-status").replaceChildren(el("option", {value: "", text: "all"}));
   datasetClusters({findings: [], intelligence: {clusters: []}});
   datasetRecommendations({intelligence: {recommendations: []}});
   kvRows($("ds-audit"), []);
   kvRows($("ds-impact"), []);
   kvRows($("ds-request"), []);
+  $("ds-resolved").replaceChildren();
 }
 
 $("ds-form").addEventListener("submit", (event) => {
@@ -702,6 +836,7 @@ $("ds-run").addEventListener("click", async () => {
     test_path: $("ds-test").value.trim() || null,
     time_col: $("ds-time").value || null,
     group_col: $("ds-group").value || null,
+    baseline: $("baseline").value.trim() || null,
   };
   $("ds-notice").textContent = "";
   $("ds-results").hidden = true;
@@ -735,11 +870,29 @@ $("ds-cancel").addEventListener("click", async () => {
   }
 });
 
+$("ds-status").addEventListener("input", () => {
+  if (ds.results) datasetClusters(ds.results);
+});
+
 api("/api/info").then((info) => {
   state.info = info;
   $("sql").disabled = !info.sql_available;
   if (!info.sql_available) $("sql").parentElement.title = "requires the sql extra";
   $("root").textContent = info.root;
+  const config = info.config || {};
+  if (config.error) {
+    $("policy-info").textContent = "Configuration error: " + config.error;
+    $("policy-info").className = "meta high";
+  } else if (config.baseline) {
+    $("baseline").value = config.baseline;
+    $("policy-info").textContent = "Using [baseline].path = " + config.baseline +
+      " from " + config.path + " · " + config.suppressions +
+      " suppression rule(s) configured.";
+  } else {
+    $("policy-info").textContent = "No [baseline].path in " + (config.path ||
+      ".leaklens.toml") + " · " + config.suppressions +
+      " suppression rule(s) configured. Enter a baseline file above to compare.";
+  }
   const formats = info.dataset_formats.filter((item) => item.enabled)
     .map((item) => item.extension);
   const missing = info.dataset_formats
