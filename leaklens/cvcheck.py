@@ -106,17 +106,29 @@ def _full_data_names(assigns, tts, first_split):
     return full
 
 
-def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
+def scan_cv(
+    src: str,
+    label: str = "<src>",
+    cells=None,
+    *,
+    tree: ast.AST | None = None,
+    keys: dict[int, str] | None = None,
+    nodes: tuple[ast.AST, ...] | None = None,
+) -> list[Finding]:
     """Tuning, cross-validation, and preprocessing misused around validation folds."""
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            tree = ast.parse(src)
-    except SyntaxError:
-        return []
-    keys = _finding_keys(tree)
+    if tree is None:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                tree = ast.parse(src)
+        except SyntaxError:
+            return []
+    if nodes is None:
+        nodes = tuple(ast.walk(tree))
+    if keys is None:
+        keys = _finding_keys(tree, nodes)
     ctor, assigns, calls, funcs = {}, [], [], set()
-    for n in ast.walk(tree):
+    for n in nodes:
         if isinstance(n, ast.Assign):
             assigns.append(n)
             if isinstance(n.value, ast.Call):
@@ -342,7 +354,7 @@ def scan_cv(src: str, label: str = "<src>", cells=None) -> list[Finding]:
         g["n"] += 1
 
     # Custom hyperparameter loops: for C in [...]: model.fit(X_test, y_test).
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.For):
             continue
         grid = isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)) or (

@@ -605,7 +605,7 @@ The corpus under `realworld/` holds 60 public notebooks (see [realworld/README.m
 
 ## Accuracy and security
 
-The code scanner is checked against a labeled synthetic regression benchmark on every CI run (`python -m leaklens.bench`, results in [docs/BENCHMARK.md](docs/BENCHMARK.md)). Dataset detectors have a separate synthetic benchmark with per-case runtime (`python -m leaklens.bench_data`, results in [docs/DATA_BENCHMARK.md](docs/DATA_BENCHMARK.md)). Both are hand-written and shaped around supported rules — treat them as regression guards, not real-world accuracy claims. The real-world corpus is kept separate from those synthetic benchmarks (different directory, different scoring). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+The code scanner is checked against a labeled synthetic regression benchmark on every CI run (`python -m leaklens.bench`, results in [docs/BENCHMARK.md](docs/BENCHMARK.md)). Dataset detectors have a separate synthetic benchmark with per-case runtime (`python -m leaklens.bench_data`, results in [docs/DATA_BENCHMARK.md](docs/DATA_BENCHMARK.md)). Both are hand-written and shaped around supported rules — treat them as regression guards, not real-world accuracy claims. The real-world corpus is kept separate from those synthetic benchmarks (different directory, different scoring). Scanner runtime measurements, the bounded source cache and the measured decision against parallel scanning are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 

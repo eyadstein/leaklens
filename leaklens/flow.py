@@ -74,16 +74,27 @@ def _transform(c, ctor, node_of, funcs):
     return None
 
 
-def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
+def scan_flow(
+    src: str,
+    label: str = "<src>",
+    cells=None,
+    *,
+    tree: ast.AST | None = None,
+    keys: dict[int, str] | None = None,
+    nodes: tuple[ast.AST, ...] | None = None,
+) -> list[Finding]:
     """Transformed data that later feeds a split, wherever the transform sits in the source."""
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            tree = ast.parse(src)
-    except SyntaxError:
-        return []
+    if tree is None:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                tree = ast.parse(src)
+        except SyntaxError:
+            return []
+    if nodes is None:
+        nodes = tuple(ast.walk(tree))
     ctor, node_of, assigns, calls, funcs = {}, {}, [], [], set()
-    for n in ast.walk(tree):
+    for n in nodes:
         if isinstance(n, ast.Assign):
             assigns.append(n)
             if isinstance(n.value, ast.Call):
@@ -115,7 +126,8 @@ def scan_flow(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     splits = sorted((c for c in calls if is_split(c)), key=lambda c: c.lineno)
     if not splits:
         return []
-    keys = _finding_keys(tree)
+    if keys is None:
+        keys = _finding_keys(tree, nodes)
 
     def loc(line):
         if cells:

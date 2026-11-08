@@ -4,7 +4,9 @@ import ast
 import hashlib
 import json
 import re
+import threading
 import warnings
+from collections import OrderedDict
 from pathlib import Path
 
 from .leakage import Finding
@@ -68,6 +70,17 @@ FUNCS = {
 }
 EVAL = re.compile(r"(^|[_\W])(test|val|valid|validation|eval)([_\W]|$)", re.IGNORECASE)
 SKIP = {".venv", "venv", ".git", "node_modules", "site-packages", "__pycache__"}
+# Process-local parsed-source cache. Keyed by exact content, so edits and file
+# replacements miss; no mtime/size heuristic can return a stale tree. Bounded by
+# entry count and total source characters.
+_PARSE_CACHE_MAX_ENTRIES = 128
+_PARSE_CACHE_MAX_CHARS = 2_000_000
+_PARSE_CACHE_MAX_SOURCE = 1_000_000
+_parse_cache: OrderedDict[
+    str, tuple[ast.AST, dict[int, str], tuple[ast.AST, ...], int]
+] = OrderedDict()
+_parse_cache_chars = 0
+_parse_lock = threading.Lock()
 
 
 def _name(c: ast.Call) -> str:
@@ -158,7 +171,7 @@ def _ast_digest(value, memo: dict[int, str]) -> str:
     return repr(value)
 
 
-def _finding_keys(tree: ast.AST) -> dict[int, str]:
+def _finding_keys(tree: ast.AST, nodes=None) -> dict[int, str]:
     """Line-independent stable keys for findings attached to an AST node.
 
     The key is a structural digest of the node (no source positions) plus the
@@ -179,7 +192,9 @@ def _finding_keys(tree: ast.AST) -> dict[int, str]:
                 scoped(child, prefix)
 
     scoped(tree, "")
-    nodes = [n for n in ast.walk(tree) if isinstance(n, (ast.Call, ast.BinOp))]
+    if nodes is None:
+        nodes = tuple(ast.walk(tree))
+    nodes = [n for n in nodes if isinstance(n, (ast.Call, ast.BinOp))]
     nodes.sort(key=lambda n: (n.lineno, n.col_offset, type(n).__name__))
     memo: dict[int, str] = {}
     keys: dict[int, str] = {}
@@ -191,6 +206,43 @@ def _finding_keys(tree: ast.AST) -> dict[int, str]:
         seen[base] = seen.get(base, 0) + 1
         keys[id(node)] = base if seen[base] == 1 else f"{base}#{seen[base]}"
     return keys
+
+
+def _parse_source(
+    src: str,
+) -> tuple[
+    ast.AST | None, dict[int, str] | None, tuple[ast.AST, ...] | None, str | None
+]:
+    """Parse and index one source once; repeated scans reuse the bounded cache."""
+    global _parse_cache_chars
+    key = hashlib.sha256(src.encode("utf-8")).hexdigest()
+    with _parse_lock:
+        cached = _parse_cache.get(key)
+        if cached is not None:
+            _parse_cache.move_to_end(key)
+            return cached[0], cached[1], cached[2], None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            tree = ast.parse(src)
+    except SyntaxError as exc:
+        return None, None, None, str(exc)
+    nodes = tuple(ast.walk(tree))
+    keys = _finding_keys(tree, nodes)
+    if len(src) <= _PARSE_CACHE_MAX_SOURCE:
+        with _parse_lock:
+            previous = _parse_cache.pop(key, None)
+            if previous is not None:
+                _parse_cache_chars -= previous[3]
+            _parse_cache[key] = (tree, keys, nodes, len(src))
+            _parse_cache_chars += len(src)
+            while _parse_cache and (
+                len(_parse_cache) > _PARSE_CACHE_MAX_ENTRIES
+                or _parse_cache_chars > _PARSE_CACHE_MAX_CHARS
+            ):
+                _, (_, _, _, size) = _parse_cache.popitem(last=False)
+                _parse_cache_chars -= size
+    return tree, keys, nodes, None
 
 
 def _is_tts(v) -> bool:
@@ -224,25 +276,36 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     from .cvcheck import scan_cv
     from .flow import merge, scan_flow
 
+    tree, keys, nodes, error = _parse_source(src)
+    if tree is None or keys is None or nodes is None:
+        return [Finding("low", "parse_error", label, error or "invalid syntax")]
     return merge(
-        _scan_core(src, label, cells),
-        scan_flow(src, label, cells) + scan_cv(src, label, cells),
+        _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes),
+        scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes)
+        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes),
     )
 
 
-def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            tree = ast.parse(src)
-    except SyntaxError as e:
-        return [Finding("low", "parse_error", label, str(e))]
-    keys = _finding_keys(tree)
+def _scan_core(
+    src: str,
+    label: str = "<src>",
+    cells=None,
+    *,
+    tree: ast.AST | None = None,
+    keys: dict[int, str] | None = None,
+    nodes: tuple[ast.AST, ...] | None = None,
+) -> list[Finding]:
+    if tree is None or keys is None:
+        tree, keys, nodes, error = _parse_source(src)
+        if tree is None or keys is None:
+            return [Finding("low", "parse_error", label, error or "invalid syntax")]
+    if nodes is None:
+        nodes = tuple(ast.walk(tree))
     ctor, calls, funcs, assigns = {}, [], set(), []
     # Estimators imported under a local name (`from ... import KBinsDiscretizer as KBD`).
     # Matching a class on its local name only hides it from the hint lists (issue #333).
     sk_aliases: dict[str, str] = {}
-    for n in ast.walk(tree):
+    for n in nodes:
         if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("sklearn"):
             for al in n.names:
                 if al.asname:
@@ -250,7 +313,7 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
 
     pandas_aliases, get_dummies_aliases = set(), set()
 
-    for n in ast.walk(tree):
+    for n in nodes:
         if isinstance(n, ast.Assign):
             assigns.append(n)
             if isinstance(n.value, ast.Call):
@@ -662,12 +725,12 @@ def _scan_core(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     if first is not None:
         inner = {
             id(k)
-            for b in ast.walk(tree)
+            for b in nodes
             if isinstance(b, ast.BinOp)
             for k in (b.left, b.right)
             if isinstance(k, ast.BinOp)
         }
-        binops = [b for b in ast.walk(tree) if isinstance(b, ast.BinOp)]
+        binops = [b for b in nodes if isinstance(b, ast.BinOp)]
         for b in sorted(binops, key=lambda x: (x.lineno, x.col_offset)):
             if id(b) in inner or b.lineno >= first:
                 continue

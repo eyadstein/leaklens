@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Scanner performance: shared parse and bounded source cache
+
+- `scan_source` now parses each input once and shares the AST, its walked node tuple and the stable structural keys across the core, flow and cross-validation passes instead of parsing and walking three times and recomputing the same digests. Direct `scan_cv`/`scan_flow` calls keep their previous public signatures and behavior.
+- Added a process-local, bounded parsed-source cache keyed by the exact SHA-256 of the text, not by mtime or size. Edits and file replacements miss immediately; identical content under different labels reuses only the tree and keys, so locations and findings stay label-aware. The cache is thread-safe, capped at 128 entries / 2,000,000 source characters, skips inputs over 1,000,000 characters, and never caches malformed sources.
+- Measured locally on Windows with Python 3.14.3: cold `scan_path("leaklens")` over 65 files fell from 1.70 s to ~0.68 s (~60%); a repeated scan in the same process fell to ~0.19 s (~89%). A 50k-row dataset scan stays dominated by scikit-learn cross-validation (~0.20 s), while feature and near-duplicate hashing cost ~19 ms and ~16 ms, so the new work targets the measured scanner bottleneck rather than changing dataset detectors.
+- Parallel scanning was measured and rejected: for the same 65 files a 4-worker process pool took 2.84 s and a 4-worker thread pool 1.00 s versus 0.54 s sequential. Windows spawn overhead and the scan's Python-level AST work outweigh the benefit at this granularity, so sequential order and output remain the default.
+- Added regression tests for cache hits/misses, changed and replaced files, unchanged output versus an uncached scan, duplicate content under different labels, malformed and missing files, thread safety, deterministic findings/fingerprints, and entry/source/character limits.
+
 ### Unified baseline intelligence (0.14.0 phase 10 wave 7)
 
 - Evidence identity is now location-neutral: lines, notebook cells, finding indices and rebuilt evidence ids no longer decide identity, so a finding that only moved lines is `unchanged` and reports `changes: ["location"]` with `baseline_location`, `current_location` and `location_changed`. Genuine source, kind, description, support or metadata changes still classify as `changed`; fingerprint-bearing evidence keeps fingerprint identity.
