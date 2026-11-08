@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import sys
+import threading
+import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
@@ -194,6 +196,44 @@ def init(argv) -> int:
     return 0
 
 
+def workspace(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens workspace",
+        description="Serve a local, read-only interactive scanning workspace",
+    )
+    p.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="folder to treat as the workspace root (default: .)",
+    )
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--no-open", action="store_true", help="do not open a browser")
+    a = p.parse_args(argv)
+    root = Path(a.dir).resolve()
+    if not root.is_dir():
+        p.error(f"{root} is not a folder")
+    try:
+        import uvicorn
+
+        from .workspace import create_workspace_app
+    except ImportError:
+        print(
+            'leaklens workspace needs the app extra: pip install -e ".[app]"',
+            file=sys.stderr,
+        )
+        return 2
+    app = create_workspace_app(root)
+    url = f"http://{a.host}:{a.port}/"
+    print(f"LeakLens workspace: {url}  (root: {root})")
+    print("Press Ctrl+C to stop.")
+    if not a.no_open:
+        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
+    uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
+    return 0
+
+
 def images(argv) -> int:
     p = argparse.ArgumentParser(
         prog="leaklens images",
@@ -377,12 +417,15 @@ def main(argv=None) -> int:
         return images(argv[1:])
     if argv and argv[0] == "doctor":
         return doctor(argv[1:])
+    if argv and argv[0] == "workspace":
+        return workspace(argv[1:])
     p = argparse.ArgumentParser(
         prog="leaklens",
         description="Audit datasets and ML code for leakage",
         epilog=(
-            "Run 'leaklens doctor' to check your install, and "
-            "'leaklens init' to write a starter .leaklens.toml config."
+            "Run 'leaklens doctor' to check your install, 'leaklens init' to write "
+            "a starter .leaklens.toml config, and 'leaklens workspace' for a "
+            "local interactive scan view."
         ),
     )
     p.add_argument("--version", action="version", version=__version__)

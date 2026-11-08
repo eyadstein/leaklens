@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Phase 11: interactive scan workspace
+
+- Added `leaklens workspace [DIR]`: a local, read-only FastAPI page (`leaklens/workspace.py`, `leaklens/workspace_ui.py`) that scans a file or folder with live per-file progress, cancellation, severity/kind filters, evidence-cluster grouping, source preview, one HTML report and the raw JSON results.
+- The workspace reuses the existing deterministic layers unchanged: `scanner.scan_targets`/`scan_file` for scope and scanning, `Finding.to_dict(root=...)` for fingerprints, `intelligence.analyze_findings` for clusters/links/confidence/recommendations, `leakage.score` for the trust score and `report.render` for the export.
+- Extracted `scanner.scan_targets()` so `scan_path` and the workspace enumerate exactly the same files.
+- Safety: binds `127.0.0.1` by default, all paths must resolve inside the workspace root, one scan at a time (409 otherwise), at most 5,000 files, 1 MB source previews, and a per-file error is recorded without ending the scan.
+- Added `tests/test_workspace.py` (lifecycle, payload and fingerprint shape, cluster coverage, path escapes, busy refusal, cancellation, source windows, report) and `docs/WORKSPACE.md`.
+
 ### Scanner traversal: grouped AST index
 
 - `_scan_core`, `scan_cv` and `scan_flow` now iterate a type-grouped index of the cached node tuple (`_node_index`) instead of re-checking every node with `isinstance` in each pass. Grouping keeps `ast.walk` order within each node type, so finding order, stable keys/fingerprints and last-assignment-wins behaviour are unchanged. Direct `scan_cv`/`scan_flow` calls keep their public signatures and build the index themselves.

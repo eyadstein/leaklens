@@ -37,6 +37,7 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Opt-in drift diagnostics | `leaklens/drift.py`; benchmark `leaklens/bench_drift.py` + `docs/DRIFT_BENCHMARK.md`; docs `docs/DRIFT.md` |
 | Dataset input dispatch | `leaklens/readers.py` — suffix → pandas reader |
 | Model arena (MLflow) | `leaklens/arena.py`; API `leaklens/api.py`; UI `leaklens/ui.py` |
+| Interactive scan workspace | `leaklens/workspace.py` (FastAPI app + scan session), `leaklens/workspace_ui.py` (page), `leaklens/cli.py` (`workspace` subcommand) |
 | Deterministic intelligence layer | `leaklens/intelligence/` (`orchestrator.py`, `schemas.py`) |
 | Reports / exports | `leaklens/report.py` (HTML), `leaklens/sarif.py` (SARIF), `leaklens/fixes.py` (`--explain`) |
 | Dataset audit + CV check + LLM | `leaklens/audit.py` (class balance etc.), `leaklens/cvcheck.py` (CV misuse, used by scanner), `leaklens/llm.py` (`--llm` explanations, off by default) |

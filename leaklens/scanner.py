@@ -1006,24 +1006,32 @@ def scan_file(path) -> list[Finding]:
     ]
 
 
-def scan_path(path, *, sql=None, target=None) -> list[Finding]:
-    """Scan Python/notebook files, plus ``.sql`` files when enabled or explicit.
+def scan_targets(path, *, sql=None) -> list[Path]:
+    """Files ``scan_path`` would scan, in deterministic order.
 
-    Directories include ``.sql`` only when SQL settings are enabled; an explicit
-    ``.sql`` file is always analyzed because the caller named it.
+    Shared so callers that need progress (or a total count) enumerate exactly
+    the same set the one-shot scan uses.
     """
     p = Path(path)
     suffixes = {".py", ".ipynb"}
     if sql is not None and sql.enabled:
         suffixes.add(".sql")
     if p.is_file():
-        files = [p]
-    else:
-        files = [
-            f
-            for f in sorted(p.rglob("*"))
-            if f.suffix in suffixes and not (SKIP & set(f.parts))
-        ]
+        return [p]
+    return [
+        f
+        for f in sorted(p.rglob("*"))
+        if f.suffix in suffixes and not (SKIP & set(f.parts))
+    ]
+
+
+def scan_path(path, *, sql=None, target=None) -> list[Finding]:
+    """Scan Python/notebook files, plus ``.sql`` files when enabled or explicit.
+
+    Directories include ``.sql`` only when SQL settings are enabled; an explicit
+    ``.sql`` file is always analyzed because the caller named it.
+    """
+    files = scan_targets(path, sql=sql)
     out = []
     for f in files:
         if f.suffix == ".sql":
