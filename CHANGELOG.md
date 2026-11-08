@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Phase 11.4: interactive evidence graph navigation in the workspace
+
+- Added `GET /api/scans/{id}/graph` and `GET /api/datasets/{id}/graph`: read-only projections of the graph `intelligence.analyze_findings` already built. Source results spread `evidence`/`clusters`/`links` at the top level; dataset results nest them under `intelligence`. No graph is reconstructed and no node, edge, provenance or rationale is invented.
+- Nodes keep the engine's stable `evidence_id`, finding index, metadata, cluster anchor, component, degree, `isolated` flag and bidirectional neighbours with the recorded relation, direction and rationale. Invalid, duplicate, self-referencing and dangling records are skipped and counted; missing/malformed payloads return `available: false` with a reason; an empty graph is available with zero nodes.
+- Server-side filters (`kind`, `relation`, `severity`, `status`, `q`), bounded paging (`offset`, default `limit` 100, max 500), `focus` by evidence id and `finding` by index support bidirectional navigation. Unknown focus ids stay null; finding focus prefers primary evidence over detector detail. Source results now expose `graph_links_truncated`; dataset payloads do not carry it, so `relationships_truncated` is `null` (unknown) there.
+- The shared workspace graph panel adds filters, debounced search, paging, node details, neighbour inspection, metadata/observation details and finding-to-evidence / evidence-to-finding navigation for both scan types. It reuses the Phase 11.3 statuses unchanged, keeps suppressed findings and their evidence inspectable, and never changes results, trust score, baselines or suppressions.
+- Extended `tests/test_workspace.py` with graph UI controls, source/dataset serialisation, evidence/link identity and neighbour symmetry, navigation both ways, filters/search/paging, size caps, empty/isolated/malformed/dangling data, 404/409 session boundaries and suppression preservation; updated `docs/WORKSPACE.md` and `README.md`.
+
 ### Phase 11.3: baseline and suppression visibility in the workspace
 
 - Source scans and dataset audits now run findings through the existing `policy.apply_policy()` step. The workspace UI shows the policy engine's real `new`, `unchanged`, `changed` and `suppressed` statuses, previous severity for changed findings, suppression reason/fingerprint/expiry, `requires_attention`, fingerprints and the original evidence. Suppressed findings stay in the results and stop counting toward `score()`, exactly as in the CLI.

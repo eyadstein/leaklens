@@ -14,7 +14,11 @@ from fastapi.testclient import TestClient
 
 from leaklens.baseline import BASELINE_SCHEMA, BASELINE_VERSION
 from leaklens.fingerprint import SCHEMA_VERSION
-from leaklens.workspace import create_workspace_app
+from leaklens.workspace import (
+    GRAPH_MAX_LIMIT,
+    _graph_payload,
+    create_workspace_app,
+)
 
 LEAKY = (
     "from sklearn.preprocessing import StandardScaler\n"
@@ -1040,3 +1044,415 @@ def test_dataset_audit_policy_matches_the_cli(tmp_path, monkeypatch, capsys):
     }
     assert workspace_statuses == cli_statuses, (workspace_statuses, cli_statuses)
     assert workspace["trust_score"] == cli_report["trust_score"]
+
+
+# --- interactive evidence graph navigation --------------------------------
+
+
+def _graph(client, base, item_id, **params):
+    response = client.get(f"/api/{base}/{item_id}/graph", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _assert_graph_integrity(graph, evidence, links):
+    """Every returned node/edge must already exist in the engine's output."""
+    by_id = {item["evidence_id"]: item for item in evidence}
+    node_ids = [node["evidence_id"] for node in graph["nodes"]]
+    assert len(node_ids) == len(set(node_ids))
+    assert set(node_ids) <= set(by_id)
+    for node in graph["nodes"]:
+        assert node["evidence_id"] == by_id[node["evidence_id"]]["evidence_id"]
+        assert node["kind"] == by_id[node["evidence_id"]]["kind"]
+        assert node["source"] == by_id[node["evidence_id"]]["source"]
+
+    expected = {
+        (link["source_id"], link["target_id"], link["relation"], link["rationale"])
+        for link in links
+    }
+    returned = {
+        (edge["source_id"], edge["target_id"], edge["relation"], edge["rationale"])
+        for edge in graph["edges"]
+    }
+    assert returned <= expected
+    nodes = {node["evidence_id"]: node for node in graph["nodes"]}
+    for edge in graph["edges"]:
+        assert edge["source_id"] in nodes and edge["target_id"] in nodes
+        assert edge["source_id"] != edge["target_id"]
+        assert edge["rationale"]
+        assert edge["relation"] in {"supports", "corroborates", "same_anchor"}
+        forward = next(
+            item
+            for item in nodes[edge["source_id"]]["neighbors"]
+            if item["evidence_id"] == edge["target_id"]
+            and item["relation"] == edge["relation"]
+        )
+        backward = next(
+            item
+            for item in nodes[edge["target_id"]]["neighbors"]
+            if item["evidence_id"] == edge["source_id"]
+            and item["relation"] == edge["relation"]
+        )
+        assert forward["direction"] == "out" and backward["direction"] == "in"
+        assert forward["rationale"] == backward["rationale"] == edge["rationale"]
+
+
+def test_page_exposes_the_shared_graph_controls(tmp_path):
+    page = _client(_project(tmp_path)).get("/").text
+    for control in (
+        'id="graph-panel"',
+        'id="g-open-scan"',
+        'id="g-open-dataset"',
+        'id="g-kind"',
+        'id="g-relation"',
+        'id="g-sev"',
+        'id="g-status"',
+        'id="g-q"',
+        'id="g-prev"',
+        'id="g-next"',
+    ):
+        assert control in page
+
+
+def test_source_graph_serialises_the_existing_evidence(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    graph = _graph(client, "scans", scan_id)
+
+    assert graph["available"] is True
+    summary = graph["summary"]
+    assert summary["nodes"] == len(results["evidence"])
+    assert summary["links"] == len(results["links"])
+    assert summary["clusters"] == len(results["clusters"])
+    assert summary["findings"] == len(results["findings"])
+    assert isinstance(results["graph_links_truncated"], bool)
+    assert summary["relationships_truncated"] == results["graph_links_truncated"]
+    assert summary["invalid_nodes"] == 0
+    assert summary["invalid_links"] == 0
+    assert summary["dangling_links"] == 0
+    assert graph["page"] == {
+        "offset": 0,
+        "limit": 100,
+        "total": summary["nodes"],
+        "returned": len(results["evidence"]),
+        "next_offset": None,
+    }
+
+    findings = {finding["index"]: finding for finding in results["findings"]}
+    for node in graph["nodes"]:
+        assert node["finding_index"] in findings
+        assert node["finding"]["index"] == node["finding_index"]
+        assert (
+            node["finding"]["fingerprint"]
+            == findings[node["finding_index"]]["fingerprint"]
+        )
+        assert node["severity"] == findings[node["finding_index"]]["severity"]
+        assert node["role"] in {"primary", "detector"}
+        assert node["status"] == "unclassified"
+        assert node["component"] == 0
+        assert node["degree"] == len(node["neighbors"])
+        assert node["isolated"] is False
+        assert node["metadata"]["severity"] == node["severity"]
+    _assert_graph_integrity(graph, results["evidence"], results["links"])
+
+
+def test_graph_navigates_between_findings_and_evidence(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    graph = _graph(client, "scans", scan_id)
+
+    finding = results["findings"][0]
+    focused = _graph(client, "scans", scan_id, finding=finding["index"])["focus"]
+    assert focused["finding_index"] == finding["index"]
+    assert focused["role"] != "detector"
+    assert focused["finding"]["fingerprint"] == finding["fingerprint"]
+
+    by_id = {node["evidence_id"]: node for node in graph["nodes"]}
+    assert (
+        by_id[focused["evidence_id"]]["finding"]["fingerprint"]
+        == finding["fingerprint"]
+    )
+
+    direct = _graph(client, "scans", scan_id, focus=focused["evidence_id"])["focus"]
+    assert direct["evidence_id"] == focused["evidence_id"]
+    assert direct["neighbors"]
+    for neighbor in direct["neighbors"]:
+        back = _graph(client, "scans", scan_id, focus=neighbor["evidence_id"])["focus"]
+        assert any(
+            item["evidence_id"] == direct["evidence_id"]
+            and item["relation"] == neighbor["relation"]
+            for item in back["neighbors"]
+        )
+
+    for unknown in ("scanner-999999", "../../etc/passwd"):
+        result = _graph(client, "scans", scan_id, focus=unknown)
+        assert result["available"] is True
+        assert result["focus_requested"] == unknown
+        assert result["focus"] is None
+        assert unknown not in {node["evidence_id"] for node in result["nodes"]}
+
+
+def test_graph_filters_search_and_pagination_are_bounded(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    graph = _graph(client, "scans", scan_id)
+
+    picked = graph["filters"]["kinds"][0]
+    filtered = _graph(client, "scans", scan_id, kind=picked)
+    assert filtered["nodes"]
+    assert all(node["kind"] == picked for node in filtered["nodes"])
+    assert filtered["page"]["total"] == len(filtered["nodes"])
+
+    high = _graph(client, "scans", scan_id, severity="high")
+    assert high["nodes"] and all(node["severity"] == "high" for node in high["nodes"])
+    unclassified = _graph(client, "scans", scan_id, status="unclassified")
+    assert unclassified["page"]["total"] == graph["summary"]["nodes"]
+
+    target = graph["nodes"][0]
+    searched = _graph(client, "scans", scan_id, q=target["evidence_id"].upper())
+    assert [node["evidence_id"] for node in searched["nodes"]] == [
+        target["evidence_id"]
+    ]
+
+    relation = next(
+        name for name, count in graph["summary"]["relations"].items() if count
+    )
+    related = _graph(client, "scans", scan_id, relation=relation)
+    assert related["edges"]
+    assert all(edge["relation"] == relation for edge in related["edges"])
+    incident = {
+        evidence_id
+        for edge in related["edges"]
+        for evidence_id in (edge["source_id"], edge["target_id"])
+    }
+    assert {node["evidence_id"] for node in related["nodes"]} == incident
+
+    first = _graph(client, "scans", scan_id, limit=1)
+    assert len(first["nodes"]) == 1
+    assert first["edges"] == []
+    assert first["page"]["next_offset"] == 1
+    second = _graph(client, "scans", scan_id, limit=1, offset=1)
+    assert second["nodes"][0]["evidence_id"] != first["nodes"][0]["evidence_id"]
+    assert _graph(client, "scans", scan_id, limit=100_000)["page"]["limit"] == (
+        GRAPH_MAX_LIMIT
+    )
+    assert _graph(client, "scans", scan_id, limit=0)["page"]["limit"] == 1
+    beyond = _graph(client, "scans", scan_id, offset=10_000)
+    assert beyond["nodes"] == [] and beyond["page"]["next_offset"] is None
+
+
+def test_clean_source_scan_has_an_explicit_empty_graph(tmp_path):
+    client = _client(_project(tmp_path))
+    scan_id, _ = _run(client, path="clean.py")
+    graph = _graph(client, "scans", scan_id)
+
+    assert graph["available"] is True
+    assert graph["nodes"] == [] and graph["edges"] == []
+    assert graph["summary"]["nodes"] == 0
+    assert graph["summary"]["isolated"] == 0
+    assert graph["filters"]["kinds"] == []
+    assert graph["page"]["total"] == 0
+
+
+def test_graph_skips_missing_and_malformed_records_without_inventing():
+    results = {
+        "evidence": [
+            {
+                "evidence_id": "a",
+                "kind": "k",
+                "source": "scanner",
+                "description": "detail",
+                "location": "file.py:1",
+                "finding_index": 0,
+                "metadata": [["severity", "high"], ["role", "primary"]],
+            },
+            {"kind": "missing id"},
+            {"evidence_id": "a"},
+            "not a record",
+        ],
+        "links": [
+            {
+                "source_id": "a",
+                "target_id": "ghost",
+                "relation": "supports",
+                "rationale": "missing endpoint",
+            },
+            {
+                "source_id": "a",
+                "target_id": "a",
+                "relation": "supports",
+                "rationale": "self",
+            },
+            {
+                "source_id": "a",
+                "target_id": "a",
+                "relation": "invented",
+                "rationale": "x",
+            },
+            {"source_id": "a", "target_id": "a", "relation": "supports"},
+            "not a link",
+        ],
+        "clusters": [],
+        "findings": [
+            {
+                "index": 0,
+                "kind": "k",
+                "severity": "high",
+                "column": "c",
+                "detail": "detail",
+                "fingerprint": "f" * 64,
+            }
+        ],
+    }
+    payload = _graph_payload(results)
+    assert payload["available"] is True
+    assert payload["summary"]["nodes"] == 1
+    assert payload["summary"]["links"] == 0
+    assert payload["summary"]["invalid_nodes"] == 3
+    assert payload["summary"]["invalid_links"] == 4
+    assert payload["summary"]["dangling_links"] == 1
+    node = payload["nodes"][0]
+    assert node["evidence_id"] == "a"
+    assert node["isolated"] is True and node["neighbors"] == []
+    assert node["status"] == "unclassified"
+
+    for missing in ({}, {"evidence": "nope"}, {"evidence": [], "links": "nope"}):
+        payload = _graph_payload(missing)
+        assert payload["available"] is False
+        assert isinstance(payload["reason"], str) and payload["reason"]
+    invalid = _graph_payload({"evidence": [{"kind": "x"}], "links": [], "clusters": []})
+    assert invalid["available"] is False
+    assert "no valid evidence nodes" in invalid["reason"]
+
+
+def test_graph_endpoints_use_session_boundaries(tmp_path, monkeypatch):
+    from leaklens import workspace
+
+    root = _project(tmp_path)
+    _dataset(tmp_path)
+    client = _client(root)
+    assert client.get("/api/scans/missing/graph").status_code == 404
+    assert client.get("/api/datasets/missing/graph").status_code == 404
+
+    entered, release = threading.Event(), threading.Event()
+
+    def blocking_scan(path):
+        entered.set()
+        release.wait(timeout=15)
+        return []
+
+    monkeypatch.setattr(workspace, "scan_file", blocking_scan)
+    scan_id = client.post("/api/scans", json={"path": "."}).json()["scan_id"]
+    assert entered.wait(timeout=10)
+    assert client.get(f"/api/scans/{scan_id}/graph").status_code == 409
+    release.set()
+    assert _wait(client, scan_id)["state"] == "done"
+
+    audit_entered, audit_release = threading.Event(), threading.Event()
+    real_audit = workspace.run_audit_job
+
+    def blocking_audit(*args, **kwargs):
+        audit_entered.set()
+        audit_release.wait(timeout=15)
+        return real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(workspace, "run_audit_job", blocking_audit)
+    response = client.post("/api/datasets", json={"path": "train.csv", "target": "y"})
+    assert response.status_code == 202, response.text
+    dataset_id = response.json()["dataset_id"]
+    assert audit_entered.wait(timeout=10)
+    assert client.get(f"/api/datasets/{dataset_id}/graph").status_code == 409
+    audit_release.set()
+    assert _wait_dataset(client, dataset_id)["state"] == "done"
+
+
+def test_graph_preserves_suppression_status_and_evidence(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    initial = client.get(f"/api/scans/{scan_id}/results").json()
+    target = initial["findings"][0]
+    _write_baseline(tmp_path / "baseline.json", _baseline_entries(initial["findings"]))
+    _write_config(
+        tmp_path,
+        baseline="baseline.json",
+        suppressions=[
+            {"fingerprint": target["fingerprint"], "reason": "accepted risk"}
+        ],
+    )
+
+    scan_id, _ = _run(client)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    graph = _graph(client, "scans", scan_id)
+    suppressed = next(
+        finding
+        for finding in results["findings"]
+        if finding["fingerprint"] == target["fingerprint"]
+    )
+    assert suppressed["status"] == "suppressed"
+    assert suppressed["suppression"]["reason"] == "accepted risk"
+    assert suppressed["evidence"] == target["evidence"]
+
+    node = next(
+        node
+        for node in graph["nodes"]
+        if node["finding_index"] == suppressed["index"] and node["role"] == "primary"
+    )
+    assert node["status"] == "suppressed"
+    assert node["finding"]["fingerprint"] == target["fingerprint"]
+    assert node["finding"]["requires_attention"] is False
+    assert graph["summary"]["statuses"]["suppressed"] >= 1
+
+    only_suppressed = _graph(client, "scans", scan_id, status="suppressed")
+    assert only_suppressed["nodes"]
+    assert all(node["status"] == "suppressed" for node in only_suppressed["nodes"])
+    assert suppressed["index"] in {
+        node["finding_index"] for node in only_suppressed["nodes"]
+    }
+
+    # Reading the graph changed neither policy output nor the trust score.
+    assert client.get(f"/api/scans/{scan_id}/results").json() == results
+    assert results["trust_score"] == _trust_without(
+        results["findings"], target["fingerprint"]
+    )
+
+
+def test_dataset_graph_reuses_nested_intelligence_and_policy(tmp_path):
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    dataset_id, _ = _run_dataset(client, test_path="test.csv")
+    results = client.get(f"/api/datasets/{dataset_id}/results").json()
+    intelligence = results["intelligence"]
+    graph = _graph(client, "datasets", dataset_id)
+
+    assert graph["available"] is True
+    assert graph["summary"]["nodes"] == len(intelligence["evidence"])
+    assert graph["summary"]["links"] == len(intelligence["links"])
+    assert graph["summary"]["relationships_truncated"] is None
+    _assert_graph_integrity(graph, intelligence["evidence"], intelligence["links"])
+
+    anchors = {cluster["cluster_id"] for cluster in intelligence["clusters"]}
+    anchored = [node for node in graph["nodes"] if node["cluster_id"]]
+    assert anchored
+    assert {node["cluster_id"] for node in anchored} <= anchors
+    assert any(node["anchor"] for node in anchored)
+
+    finding = results["findings"][0]
+    focused = _graph(client, "datasets", dataset_id, finding=finding["index"])["focus"]
+    assert focused["finding_index"] == finding["index"]
+    assert focused["finding"]["fingerprint"] == finding["fingerprint"]
+
+    _write_config(
+        tmp_path,
+        suppressions=[{"fingerprint": finding["fingerprint"], "reason": "accepted"}],
+    )
+    dataset_id, _ = _run_dataset(client, test_path="test.csv")
+    rerun = client.get(f"/api/datasets/{dataset_id}/results").json()
+    graph = _graph(client, "datasets", dataset_id)
+    suppressed = next(
+        item for item in graph["nodes"] if item["finding_index"] == finding["index"]
+    )
+    assert suppressed["status"] == "suppressed"
+    assert suppressed["finding"]["suppression"]["reason"] == "accepted"
+    assert rerun["findings"][finding["index"]]["status"] == "suppressed"

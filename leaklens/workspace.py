@@ -48,6 +48,8 @@ MAX_SCANS = 20
 MAX_DATASETS = 20
 MAX_ERRORS = 200
 SOURCE_CONTEXT = 8
+GRAPH_DEFAULT_LIMIT = 100
+GRAPH_MAX_LIMIT = 500
 _CELL = re.compile(r"\[cell (\d+)\]")
 # Result states that still hold the single activity slot.
 ACTIVE_STATES = frozenset({"running", "queued", "auditing"})
@@ -298,6 +300,377 @@ def _report_policy(policy: dict[str, Any]) -> dict[str, Any] | None:
     return policy if policy.get("baseline") or policy.get("suppressions") else None
 
 
+def _graph_metadata(value: Any) -> dict[str, str]:
+    pairs: dict[str, str] = {}
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if (
+                isinstance(item, (list, tuple))
+                and len(item) == 2
+                and isinstance(item[0], str)
+                and isinstance(item[1], str)
+            ):
+                pairs[item[0]] = item[1]
+    return pairs
+
+
+def _graph_finding(
+    node: dict[str, Any], by_index: dict[int, dict[str, Any]]
+) -> dict[str, Any] | None:
+    index = node.get("finding_index")
+    if not isinstance(index, int):
+        return None
+    finding = by_index.get(index)
+    if not isinstance(finding, dict):
+        return None
+    return {
+        key: finding.get(key)
+        for key in (
+            "index",
+            "kind",
+            "severity",
+            "column",
+            "detail",
+            "file",
+            "line",
+            "status",
+            "fingerprint",
+            "requires_attention",
+            "suppression",
+            "previous",
+        )
+        if key in finding
+    }
+
+
+def _graph_payload(
+    results: dict[str, Any],
+    *,
+    kind: str | None = None,
+    relation: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    query: str | None = None,
+    offset: int = 0,
+    limit: int = GRAPH_DEFAULT_LIMIT,
+    focus: str | None = None,
+    finding: int | None = None,
+) -> dict[str, Any]:
+    """Project the already-built evidence graph into a bounded, filterable view.
+
+    This does not build a graph: every node is an existing serialized
+    ``Evidence`` record and every edge is an existing serialized
+    ``EvidenceLink``. Invalid records are skipped and reported, never repaired
+    into an invented relationship.
+    """
+    try:
+        offset = max(0, int(offset))
+    except (TypeError, ValueError):
+        offset = 0
+    try:
+        limit = max(1, min(int(limit), GRAPH_MAX_LIMIT))
+    except (TypeError, ValueError):
+        limit = GRAPH_DEFAULT_LIMIT
+
+    intelligence = results.get("intelligence")
+    if not isinstance(intelligence, dict):
+        # Source-scan results spread the intelligence report at the top level;
+        # dataset results nest it under "intelligence".
+        intelligence = (
+            results if isinstance(results.get("evidence"), (list, tuple)) else None
+        )
+    if not isinstance(intelligence, dict):
+        return {
+            "available": False,
+            "reason": "this result has no evidence graph",
+        }
+    raw_evidence = intelligence.get("evidence")
+    raw_links = intelligence.get("links", [])
+    raw_clusters = intelligence.get("clusters", [])
+    if not isinstance(raw_evidence, (list, tuple)):
+        return {
+            "available": False,
+            "reason": "the evidence graph is malformed: evidence is not a list",
+        }
+    if not isinstance(raw_links, (list, tuple)) or not isinstance(
+        raw_clusters, (list, tuple)
+    ):
+        return {
+            "available": False,
+            "reason": "the evidence graph is malformed: links or clusters are not lists",
+        }
+
+    nodes: dict[str, dict[str, Any]] = {}
+    invalid_nodes = 0
+    for item in raw_evidence:
+        if not isinstance(item, dict):
+            invalid_nodes += 1
+            continue
+        evidence_id = item.get("evidence_id")
+        if not isinstance(evidence_id, str) or not evidence_id or evidence_id in nodes:
+            invalid_nodes += 1
+            continue
+        nodes[evidence_id] = item
+    if raw_evidence and not nodes:
+        return {
+            "available": False,
+            "reason": "the evidence graph is malformed: no valid evidence nodes",
+        }
+
+    findings = results.get("findings")
+    by_index: dict[int, dict[str, Any]] = {}
+    if isinstance(findings, list):
+        for item in findings:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get("index"), int)
+                and item["index"] not in by_index
+            ):
+                by_index[item["index"]] = item
+
+    cluster_by_evidence: dict[str, dict[str, Any]] = {}
+    cluster_rows: list[dict[str, Any]] = []
+    for cluster in raw_clusters:
+        if not isinstance(cluster, dict):
+            continue
+        cluster_id = cluster.get("cluster_id")
+        if not isinstance(cluster_id, str) or not cluster_id:
+            continue
+        cluster_rows.append(cluster)
+        evidence_ids = cluster.get("evidence_ids")
+        if isinstance(evidence_ids, (list, tuple)):
+            for evidence_id in evidence_ids:
+                if isinstance(evidence_id, str):
+                    cluster_by_evidence.setdefault(evidence_id, cluster)
+
+    valid_links: list[dict[str, str]] = []
+    dangling = 0
+    invalid_links = 0
+    for link in raw_links:
+        if not isinstance(link, dict):
+            invalid_links += 1
+            continue
+        source_id = link.get("source_id")
+        target_id = link.get("target_id")
+        link_relation = link.get("relation")
+        rationale = link.get("rationale")
+        if not all(
+            isinstance(value, str) and value
+            for value in (source_id, target_id, link_relation, rationale)
+        ):
+            invalid_links += 1
+            continue
+        if source_id not in nodes or target_id not in nodes:
+            dangling += 1
+            continue
+        if source_id == target_id:
+            invalid_links += 1
+            continue
+        valid_links.append(
+            {
+                "source_id": source_id,
+                "target_id": target_id,
+                "relation": link_relation,
+                "rationale": rationale,
+            }
+        )
+
+    neighbors: dict[str, list[dict[str, Any]]] = {eid: [] for eid in nodes}
+    for link in valid_links:
+        source_id = link["source_id"]
+        target_id = link["target_id"]
+        neighbors[source_id].append(
+            {
+                "evidence_id": target_id,
+                "kind": str(nodes[target_id].get("kind") or ""),
+                "relation": link["relation"],
+                "direction": "out",
+                "rationale": link["rationale"],
+            }
+        )
+        neighbors[target_id].append(
+            {
+                "evidence_id": source_id,
+                "kind": str(nodes[source_id].get("kind") or ""),
+                "relation": link["relation"],
+                "direction": "in",
+                "rationale": link["rationale"],
+            }
+        )
+    for items in neighbors.values():
+        items.sort(key=lambda item: (item["evidence_id"], item["relation"]))
+
+    component_of: dict[str, int] = {}
+    component_count = 0
+    for evidence_id in nodes:
+        if evidence_id in component_of:
+            continue
+        stack = [evidence_id]
+        component_of[evidence_id] = component_count
+        while stack:
+            current = stack.pop()
+            for item in neighbors[current]:
+                other = item["evidence_id"]
+                if other not in component_of:
+                    component_of[other] = component_count
+                    stack.append(other)
+        component_count += 1
+
+    views: dict[str, dict[str, Any]] = {}
+    haystacks: dict[str, str] = {}
+    for evidence_id, item in nodes.items():
+        metadata = _graph_metadata(item.get("metadata"))
+        finding_view = _graph_finding(item, by_index)
+        node_severity = (finding_view or {}).get("severity") or metadata.get("severity")
+        node_status = (finding_view or {}).get("status") or "unclassified"
+        cluster = cluster_by_evidence.get(evidence_id)
+        views[evidence_id] = {
+            "evidence_id": evidence_id,
+            "kind": str(item.get("kind") or ""),
+            "source": str(item.get("source") or ""),
+            "description": str(item.get("description") or ""),
+            "location": item.get("location"),
+            "finding_index": (
+                item.get("finding_index")
+                if isinstance(item.get("finding_index"), int)
+                else None
+            ),
+            "metadata": metadata,
+            "role": metadata.get("role", "primary"),
+            "finding": finding_view,
+            "severity": node_severity or "low",
+            "status": node_status,
+            "cluster_id": cluster.get("cluster_id") if cluster else None,
+            "anchor": cluster.get("anchor") if cluster else None,
+            "anchor_kind": cluster.get("anchor_kind") if cluster else None,
+            "component": component_of.get(evidence_id),
+            "degree": len(neighbors[evidence_id]),
+            "isolated": not neighbors[evidence_id],
+            "neighbors": neighbors[evidence_id],
+        }
+        haystacks[evidence_id] = " ".join(
+            str(value)
+            for value in (
+                evidence_id,
+                item.get("kind"),
+                item.get("source"),
+                item.get("description"),
+                item.get("location"),
+                (finding_view or {}).get("kind"),
+                (finding_view or {}).get("column"),
+                (finding_view or {}).get("detail"),
+                (finding_view or {}).get("file"),
+                (finding_view or {}).get("fingerprint"),
+            )
+            if value is not None
+        ).lower()
+
+    kind_filter = (kind or "").strip()
+    severity_filter = (severity or "").strip()
+    status_filter = (status or "").strip().lower()
+    relation_filter = (relation or "").strip()
+    text_filter = (query or "").strip().lower()
+
+    def matches(view: dict[str, Any]) -> bool:
+        if kind_filter and view["kind"] != kind_filter:
+            return False
+        if severity_filter and view["severity"] != severity_filter:
+            return False
+        if status_filter:
+            if status_filter in {"none", "unclassified"}:
+                if view["status"] != "unclassified":
+                    return False
+            elif view["status"] != status_filter:
+                return False
+        return not text_filter or text_filter in haystacks[view["evidence_id"]]
+
+    matching = [views[eid] for eid in nodes if matches(views[eid])]
+    matching_ids = {view["evidence_id"] for view in matching}
+    match_edges = [
+        link
+        for link in valid_links
+        if link["source_id"] in matching_ids
+        and link["target_id"] in matching_ids
+        and (not relation_filter or link["relation"] == relation_filter)
+    ]
+    if relation_filter:
+        incident = {
+            evidence_id
+            for link in match_edges
+            for evidence_id in (link["source_id"], link["target_id"])
+        }
+        matching = [view for view in matching if view["evidence_id"] in incident]
+
+    page_nodes = matching[offset : offset + limit]
+    page_ids = {view["evidence_id"] for view in page_nodes}
+    page_edges = [
+        link
+        for link in match_edges
+        if link["source_id"] in page_ids and link["target_id"] in page_ids
+    ]
+
+    requested_focus = (focus or "").strip() or None
+    if requested_focus is None and isinstance(finding, int):
+        for evidence_id, view in views.items():
+            if view["finding_index"] == finding and view["role"] != "detector":
+                requested_focus = evidence_id
+                break
+    focus_view = views.get(requested_focus) if requested_focus else None
+
+    def count(values: Any) -> dict[str, int]:
+        return dict(sorted(Counter(values).items()))
+
+    relation_counts = dict(
+        sorted(Counter(link["relation"] for link in valid_links).items())
+    )
+
+    summary = {
+        "nodes": len(nodes),
+        "links": len(valid_links),
+        "clusters": len(cluster_rows),
+        "components": component_count,
+        "isolated": sum(1 for view in views.values() if view["isolated"]),
+        "findings": len(by_index),
+        "relations": relation_counts,
+        "kinds": count(view["kind"] for view in views.values()),
+        "sources": count(view["source"] for view in views.values()),
+        "anchor_kinds": count(
+            view["anchor_kind"] or "unclustered" for view in views.values()
+        ),
+        "severities": count(view["severity"] for view in views.values()),
+        "statuses": count(view["status"] for view in views.values()),
+        "invalid_nodes": invalid_nodes,
+        "invalid_links": invalid_links,
+        "dangling_links": dangling,
+        "relationships_truncated": results.get("graph_links_truncated"),
+        "matching_nodes": len(matching),
+        "matching_edges": len(match_edges),
+    }
+    return {
+        "available": True,
+        "summary": summary,
+        "filters": {
+            "kinds": sorted(summary["kinds"]),
+            "sources": sorted(summary["sources"]),
+            "relations": sorted(relation_counts),
+            "severities": sorted(summary["severities"]),
+            "statuses": sorted(summary["statuses"]),
+            "anchor_kinds": sorted(summary["anchor_kinds"]),
+        },
+        "nodes": page_nodes,
+        "edges": page_edges,
+        "page": {
+            "offset": offset,
+            "limit": limit,
+            "total": len(matching),
+            "returned": len(page_nodes),
+            "next_offset": (offset + limit if offset + limit < len(matching) else None),
+        },
+        "focus_requested": requested_focus,
+        "focus": focus_view,
+    }
+
+
 class WorkspaceScanManager:
     """Owns the workspace root and the single active scan or audit thread."""
 
@@ -459,6 +832,7 @@ class WorkspaceScanManager:
             **intelligence,
             "policy": policy,
             "findings": items,
+            "graph_links_truncated": report.links_truncated,
         }
         if resolved:
             payload["resolved"] = resolved
@@ -757,6 +1131,38 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             raise HTTPException(409, "scan has not finished")
         return session.results
 
+    @app.get("/api/scans/{scan_id}/graph")
+    def scan_graph(
+        scan_id: str,
+        kind: str | None = None,
+        relation: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        offset: int = 0,
+        limit: int = GRAPH_DEFAULT_LIMIT,
+        focus: str | None = None,
+        finding: int | None = None,
+    ) -> dict[str, Any]:
+        try:
+            session = manager.get(scan_id)
+        except KeyError:
+            raise HTTPException(404, "unknown scan") from None
+        if session.results is None:
+            raise HTTPException(409, "scan has not finished")
+        return _graph_payload(
+            session.results,
+            kind=kind,
+            relation=relation,
+            severity=severity,
+            status=status,
+            query=q,
+            offset=offset,
+            limit=limit,
+            focus=focus,
+            finding=finding,
+        )
+
     @app.get("/api/scans/{scan_id}/report", response_class=HTMLResponse)
     def scan_report(scan_id: str) -> str:
         try:
@@ -822,6 +1228,38 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
         if session.results is None:
             raise HTTPException(409, _unfinished(session))
         return session.results
+
+    @app.get("/api/datasets/{dataset_id}/graph")
+    def dataset_graph(
+        dataset_id: str,
+        kind: str | None = None,
+        relation: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        q: str | None = None,
+        offset: int = 0,
+        limit: int = GRAPH_DEFAULT_LIMIT,
+        focus: str | None = None,
+        finding: int | None = None,
+    ) -> dict[str, Any]:
+        try:
+            session = manager.get_dataset(dataset_id)
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+        if session.results is None:
+            raise HTTPException(409, _unfinished(session))
+        return _graph_payload(
+            session.results,
+            kind=kind,
+            relation=relation,
+            severity=severity,
+            status=status,
+            query=q,
+            offset=offset,
+            limit=limit,
+            focus=focus,
+            finding=finding,
+        )
 
     @app.get("/api/datasets/{dataset_id}/report", response_class=HTMLResponse)
     def dataset_report(dataset_id: str) -> str:

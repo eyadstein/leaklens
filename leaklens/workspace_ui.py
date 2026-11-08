@@ -65,6 +65,16 @@ h3{font-size:13px;margin:16px 0 6px}
 .recs{margin:0;padding-left:20px;font-size:13px}
 .recs>li{margin-bottom:12px}
 .recs ul{margin:4px 0 0;padding-left:18px}
+.graph-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(340px,440px);gap:16px;align-items:start}
+@media(max-width:1000px){.graph-layout{grid-template-columns:1fr}}
+.node-list{list-style:none;margin:0;padding:0}
+button.node{display:block;width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:6px;padding:8px;color:var(--fg)}
+button.node:hover,button.node:focus-visible{border-color:var(--line);background:#1c2128;outline:none}
+button.node[aria-current=true]{border-color:var(--accent);background:#1c2128}
+.node-arrow{color:var(--muted);margin:0 6px}
+.node-relation{font-size:12px;color:var(--accent)}
+.pager{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+.finding-highlight{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
 footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
 </style></head><body>
 <header>
@@ -128,6 +138,7 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
         <span><label for="f-kind">Kind</label><select id="f-kind"><option value="">all</option></select></span>
         <span><label for="f-status">Status</label><select id="f-status"><option value="">all</option></select></span>
         <span><label for="f-q">Search</label><input id="f-q" type="text" placeholder="kind, file, detail" style="min-width:200px"></span>
+        <span><button id="g-open-scan" type="button">Evidence graph</button></span>
       </div>
       <p class="meta" id="summary"></p>
       <p class="meta" id="policy-notes"></p>
@@ -199,6 +210,7 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
         <span class="grow"></span>
         <span><label for="ds-status">Status</label>
           <select id="ds-status"><option value="">all</option></select></span>
+        <span><button id="g-open-dataset" type="button">Evidence graph</button></span>
         <span id="ds-links"></span>
       </div>
       <p class="meta" id="ds-summary"></p>
@@ -223,6 +235,44 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
       </aside>
     </div>
   </section>
+
+  <section id="graph-panel" hidden aria-labelledby="graph-title">
+    <div class="card">
+      <div class="row">
+        <h2 id="graph-title" style="font-size:14px;margin:0">Evidence graph</h2>
+        <span class="grow"></span>
+        <span id="graph-source" class="badge">result</span>
+        <button id="graph-close" type="button">Hide</button>
+      </div>
+      <p class="meta">Nodes are evidence records the engine already produced; relationships are the
+        engine's recorded links. Nothing on this page is inferred or added.</p>
+      <div class="row">
+        <span><label for="g-kind">Node type</label><select id="g-kind"><option value="">all</option></select></span>
+        <span><label for="g-relation">Relationship</label><select id="g-relation"><option value="">all</option></select></span>
+        <span><label for="g-sev">Severity</label><select id="g-sev">
+          <option value="">all</option><option value="high">high</option>
+          <option value="medium">medium</option><option value="low">low</option></select></span>
+        <span><label for="g-status">Status</label><select id="g-status"><option value="">all</option></select></span>
+        <span class="grow"><label for="g-q">Search</label><input id="g-q" type="text" placeholder="evidence id, kind, description, finding" spellcheck="false" autocomplete="off"></span>
+      </div>
+      <p class="meta" id="g-summary" role="status" aria-live="polite"></p>
+      <p class="meta high" id="g-error"></p>
+    </div>
+    <div class="graph-layout">
+      <div class="card">
+        <h3 style="margin-top:0">Nodes</h3>
+        <div id="g-nodes"><p class="empty">Open a scan or dataset result to browse its evidence graph.</p></div>
+        <div class="pager">
+          <button id="g-prev" type="button" disabled>Previous</button>
+          <span class="meta" id="g-page"></span>
+          <button id="g-next" type="button" disabled>Next</button>
+        </div>
+      </div>
+      <aside class="card" id="g-detail" aria-live="polite">
+        <p class="empty">Select a node to inspect its evidence and relationships.</p>
+      </aside>
+    </div>
+  </section>
 </main>
 <footer>
   <p><a id="report-link" href="#" hidden>Download HTML report</a>
@@ -233,6 +283,8 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
 "use strict";
 const $ = (id) => document.getElementById(id);
 const state = {id: null, info: null, results: null, selected: null};
+const graph = {context: null, id: null, data: null, selected: null,
+  offset: 0, limit: 50, focus: null, finding: null, request: 0, timer: null};
 
 function el(tag, attrs, ...kids) {
   const node = document.createElement(tag);
@@ -274,6 +326,13 @@ function counts(c) {
 function statusChip(finding) {
   return finding.status ? el("span", {class: "chip status " + finding.status,
     text: finding.status}) : null;
+}
+
+function graphButton(context, index) {
+  const button = el("button", {type: "button", text: "Explore in evidence graph"});
+  button.addEventListener("click", () => openGraph(context,
+    context === "scan" ? state.id : ds.id, index));
+  return el("div", {}, button);
 }
 
 function policyText(policy) {
@@ -453,6 +512,7 @@ function findingNode(finding) {
     el("span", {class: "meta", text: " · " + where}),
     el("div", {class: "meta", text: finding.detail}));
   row.addEventListener("click", () => select(finding, row));
+  row.setAttribute("data-index", String(finding.index));
   if (state.selected === finding.index) row.setAttribute("aria-current", "true");
   return el("li", {}, row);
 }
@@ -490,6 +550,7 @@ async function select(finding, row) {
     finding.advice ? el("div", {},
       el("label", {text: "Suggested fix"}),
       el("p", {text: finding.advice})) : null,
+    graphButton("scan", finding.index),
     el("div", {},
       el("label", {text: "Fingerprint"}),
       el("p", {class: "kv", text: finding.fingerprint})),
@@ -540,6 +601,7 @@ $("scan-form").addEventListener("submit", async (event) => {
     });
     state.id = started.scan_id;
     state.selected = null;
+    closeGraph();
     setState("running");
     $("cancel").disabled = false;
     poll();
@@ -677,7 +739,7 @@ function kvRows(box, pairs) {
 }
 
 function datasetFinding(finding) {
-  return el("li", {},
+  return el("li", {"data-index": String(finding.index)},
     el("span", {class: "chip " + finding.severity, text: finding.severity}),
     statusChip(finding),
     el("strong", {text: finding.kind}),
@@ -687,7 +749,8 @@ function datasetFinding(finding) {
       finding.previous.severity}) : null,
     finding.suppression ? el("div", {class: "meta", text: "suppressed: " +
       finding.suppression.reason + " (" + finding.suppression.fingerprint.slice(0, 12) + ")"}) : null,
-    finding.advice ? el("div", {class: "meta", text: "fix: " + finding.advice}) : null);
+    finding.advice ? el("div", {class: "meta", text: "fix: " + finding.advice}) : null,
+    graphButton("dataset", finding.index));
 }
 
 function dsVisibleFindings(data) {
@@ -849,6 +912,7 @@ $("ds-run").addEventListener("click", async () => {
     });
     ds.id = started.dataset_id;
     ds.results = null;
+    closeGraph();
     dsState("queued");
     pollDataset();
   } catch (error) {
@@ -872,6 +936,342 @@ $("ds-cancel").addEventListener("click", async () => {
 
 $("ds-status").addEventListener("input", () => {
   if (ds.results) datasetClusters(ds.results);
+});
+
+// --- evidence graph -------------------------------------------------------
+
+function closeGraph() {
+  graph.context = null;
+  graph.id = null;
+  graph.data = null;
+  graph.selected = null;
+  graph.offset = 0;
+  graph.focus = null;
+  graph.finding = null;
+  $("graph-panel").hidden = true;
+}
+
+async function openGraph(context, id, finding) {
+  if (!id) return;
+  graph.context = context;
+  graph.id = id;
+  graph.data = null;
+  graph.selected = null;
+  graph.offset = 0;
+  graph.focus = null;
+  graph.finding = typeof finding === "number" ? finding : null;
+  graph.limit = 50;
+  $("graph-source").textContent = context === "scan" ? "source scan" : "dataset audit";
+  $("g-kind").value = "";
+  $("g-relation").value = "";
+  $("g-sev").value = "";
+  $("g-status").value = "";
+  $("g-q").value = "";
+  $("graph-panel").hidden = false;
+  $("graph-panel").scrollIntoView({behavior: "smooth", block: "start"});
+  await loadGraph();
+}
+
+function fillGraphSelect(select, values, allLabel, labels) {
+  const current = select.value;
+  select.replaceChildren(el("option", {value: "", text: allLabel}),
+    ...values.map((value) => el("option", {value: value,
+      text: labels && labels[value] ? labels[value] : value})));
+  if (values.includes(current)) select.value = current;
+}
+
+function renderGraphFilters(filters) {
+  fillGraphSelect($("g-kind"), filters.kinds || [], "all");
+  fillGraphSelect($("g-relation"), filters.relations || [], "all");
+  const statuses = filters.statuses || [];
+  fillGraphSelect($("g-status"), statuses, "all",
+    {unclassified: "not compared"});
+  const severity = $("g-sev").value;
+  if (severity && !(filters.severities || []).includes(severity)) $("g-sev").value = "";
+}
+
+function renderGraphSummary(data) {
+  const s = data.summary;
+  const p = data.page;
+  const parts = [
+    s.nodes + " evidence node(s)",
+    s.links + " relationship(s)",
+    s.clusters + " cluster(s)",
+    s.components + " component(s)",
+    s.isolated + " isolated",
+  ];
+  if (p.total !== s.nodes) parts.push(p.total + " node(s) match these filters");
+  if (s.relationships_truncated === true) {
+    parts.push("the engine truncated relationships at its limit");
+  } else if (s.relationships_truncated === null) {
+    parts.push("relationship completeness is not reported for this result");
+  }
+  if (s.dangling_links) {
+    parts.push(s.dangling_links + " relationship(s) referenced missing evidence and were ignored");
+  }
+  if (s.invalid_nodes || s.invalid_links) {
+    parts.push("some malformed graph records were skipped");
+  }
+  $("g-summary").textContent = parts.join(" · ");
+  $("g-page").textContent = p.total
+    ? "Showing " + (p.offset + 1) + "-" + (p.offset + p.returned) + " of " + p.total
+    : "No matching nodes";
+  $("g-prev").disabled = p.offset <= 0;
+  $("g-next").disabled = p.next_offset == null;
+}
+
+function graphNodeButton(node) {
+  const severity = (node.finding && node.finding.severity) || node.severity;
+  const row = el("button", {class: "node", type: "button"},
+    el("span", {class: "chip " + severity, text: severity}),
+    statusChip(node.finding || {}),
+    el("strong", {text: node.kind}),
+    el("span", {class: "meta", text: " · " + node.source +
+      (node.location ? " · " + node.location : "")}),
+    el("div", {class: "meta", text: node.description}),
+    el("div", {class: "meta", text: node.degree + " relationship(s) · component " +
+      node.component + (node.isolated ? " · isolated" : "")}));
+  row.addEventListener("click", () => selectGraphNode(node.evidence_id));
+  if (graph.selected === node.evidence_id) row.setAttribute("aria-current", "true");
+  return el("li", {}, row);
+}
+
+function renderGraphNodes(data) {
+  const box = $("g-nodes");
+  box.replaceChildren();
+  const nodes = data.nodes || [];
+  if (!nodes.length) {
+    box.append(el("p", {class: "empty", text: data.summary.nodes
+      ? "No evidence nodes match these filters."
+      : "This result has no evidence records."}));
+    return;
+  }
+  box.append(el("ul", {class: "node-list"}, ...nodes.map(graphNodeButton)));
+}
+
+function renderGraphDetail(node, data) {
+  const panel = $("g-detail");
+  panel.replaceChildren();
+  if (!node) {
+    panel.append(el("p", {class: "empty",
+      text: "Select a node to inspect its evidence and relationships."}));
+    return;
+  }
+  const severity = (node.finding && node.finding.severity) || node.severity;
+  const blocks = [
+    el("div", {},
+      el("span", {class: "chip " + severity, text: severity}),
+      statusChip(node.finding || {}),
+      el("strong", {text: node.kind}),
+      el("span", {class: "meta", text: " · " + node.source})),
+    el("p", {text: node.description}),
+    el("p", {class: "kv", text: node.evidence_id +
+      (node.location ? " · " + node.location : "")}),
+    el("p", {class: "meta", text: "component " + node.component +
+      (node.isolated ? " · isolated: no recorded relationship"
+        : " · " + node.degree + " relationship(s)")}),
+    node.cluster_id ? el("p", {class: "meta", text: "cluster " +
+      node.cluster_id + (node.anchor ? " · " + node.anchor : "")}) : null,
+  ];
+  if (node.finding) {
+    const finding = node.finding;
+    const show = el("button", {type: "button", text: "Show finding"});
+    show.addEventListener("click", () => focusFinding(graph.context, finding.index));
+    blocks.push(el("div", {},
+      el("label", {text: "Affected finding"}),
+      el("p", {}, el("span", {class: "chip " + finding.severity,
+        text: finding.severity}), statusChip(finding),
+        el("strong", {text: finding.kind})),
+      el("p", {class: "meta", text: (finding.column || "") +
+        (finding.detail ? " · " + finding.detail : "")}),
+      finding.previous ? el("p", {class: "meta", text: "previous baseline severity: " +
+        finding.previous.severity}) : null,
+      finding.suppression ? el("p", {class: "meta", text: "suppressed: " +
+        finding.suppression.reason + " (" +
+        finding.suppression.fingerprint.slice(0, 12) + ")"}) : null,
+      finding.fingerprint ? el("p", {class: "kv", text: finding.fingerprint}) : null,
+      show));
+  }
+  const metadata = Object.entries(node.metadata || {});
+  if (metadata.length) {
+    blocks.push(el("details", {},
+      el("summary", {class: "meta", text: "Evidence metadata"}),
+      el("div", {class: "kv"}, ...metadata.map(([key, value]) => el("div", {},
+        el("b", {text: key + ": "}), el("span", {text: String(value)}))))));
+  }
+  const neighbors = node.neighbors || [];
+  if (!neighbors.length) {
+    blocks.push(el("div", {},
+      el("label", {text: "Relationships"}),
+      el("p", {class: "empty",
+        text: "No relationship is recorded for this evidence node; it is isolated in this graph."})));
+  } else {
+    const items = neighbors.map((item) => {
+      const inspect = el("button", {type: "button", text: "Inspect"});
+      inspect.addEventListener("click", () => selectGraphNode(item.evidence_id));
+      return el("li", {},
+        el("span", {class: "node-relation", text: item.relation}),
+        el("span", {class: "node-arrow", text: item.direction === "out" ? "→" : "←"}),
+        el("strong", {text: item.evidence_id}),
+        el("span", {class: "meta", text: " · " + item.kind}),
+        el("div", {class: "meta", text: item.rationale}),
+        inspect);
+    });
+    blocks.push(el("div", {},
+      el("label", {text: "Relationships (" + neighbors.length + ")"}),
+      el("ul", {class: "evidence"}, ...items)));
+    if (data && data.summary.relationships_truncated === true) {
+      blocks.push(el("p", {class: "meta",
+        text: "The engine truncated this result's relationship list; some links may be absent."}));
+    }
+  }
+  panel.append(...blocks.filter(Boolean));
+}
+
+async function selectGraphNode(evidenceId) {
+  const data = graph.data;
+  if (!data) return;
+  let node = (data.nodes || []).find((item) => item.evidence_id === evidenceId);
+  if (!node && data.focus && data.focus.evidence_id === evidenceId) node = data.focus;
+  if (!node) {
+    graph.focus = evidenceId;
+    graph.selected = evidenceId;
+    await loadGraph();
+    return;
+  }
+  graph.selected = evidenceId;
+  renderGraphDetail(node, data);
+  renderGraphNodes(data);
+}
+
+async function loadGraph() {
+  if (!graph.id) return;
+  const token = ++graph.request;
+  $("g-error").textContent = "";
+  $("g-nodes").replaceChildren(el("p", {class: "empty", text: "Loading evidence graph…"}));
+  $("g-detail").replaceChildren(el("p", {class: "empty", text: "Loading evidence…"}));
+  const params = new URLSearchParams();
+  for (const [key, id] of [["kind", "g-kind"], ["relation", "g-relation"],
+    ["severity", "g-sev"], ["status", "g-status"]]) {
+    const value = $(id).value;
+    if (value) params.set(key, value);
+  }
+  const query = $("g-q").value.trim();
+  if (query) params.set("q", query);
+  params.set("offset", String(graph.offset));
+  params.set("limit", String(graph.limit));
+  if (graph.focus) params.set("focus", graph.focus);
+  if (graph.finding != null) params.set("finding", String(graph.finding));
+  const base = graph.context === "scan" ? "scans" : "datasets";
+  try {
+    const data = await api("/api/" + base + "/" + graph.id + "/graph?" + params.toString());
+    if (token !== graph.request) return;
+    graph.focus = null;
+    graph.finding = null;
+    graph.data = data;
+    if (!data.available) {
+      $("g-summary").textContent = "";
+      $("g-page").textContent = "";
+      $("g-prev").disabled = true;
+      $("g-next").disabled = true;
+      $("g-nodes").replaceChildren(el("p", {class: "empty",
+        text: "No evidence graph is available for this result: " +
+          (data.reason || "unknown reason") + "."}));
+      $("g-detail").replaceChildren(el("p", {class: "empty",
+        text: "Nothing to inspect."}));
+      return;
+    }
+    renderGraphFilters(data.filters);
+    renderGraphSummary(data);
+    renderGraphNodes(data);
+    const selected = data.focus || (data.nodes || [])
+      .find((item) => item.evidence_id === graph.selected);
+    if (selected) {
+      graph.selected = selected.evidence_id;
+      renderGraphDetail(selected, data);
+      renderGraphNodes(data);
+    } else {
+      graph.selected = null;
+      renderGraphDetail(null, data);
+    }
+  } catch (error) {
+    if (token !== graph.request) return;
+    $("g-error").textContent = error.message;
+    $("g-nodes").replaceChildren(el("p", {class: "empty",
+      text: "The evidence graph could not be loaded."}));
+    $("g-detail").replaceChildren(el("p", {class: "empty", text: error.message}));
+  }
+}
+
+async function focusFinding(context, index) {
+  if (context === "scan") {
+    if (!state.results) return;
+    const finding = state.results.findings.find((item) => item.index === index);
+    if (!finding) return;
+    let row = document.querySelector(
+      '#clusters button.finding[data-index="' + index + '"]');
+    if (!row) {
+      $("f-sev").value = "";
+      $("f-kind").value = "";
+      $("f-status").value = "";
+      $("f-q").value = "";
+      renderFindings();
+      row = document.querySelector(
+        '#clusters button.finding[data-index="' + index + '"]');
+    }
+    if (row) {
+      row.scrollIntoView({behavior: "smooth", block: "center"});
+      await select(finding, row);
+    }
+    return;
+  }
+  if (!ds.results) return;
+  const finding = ds.results.findings.find((item) => item.index === index);
+  if (!finding) return;
+  $("ds-status").value = "";
+  datasetClusters(ds.results);
+  const row = document.querySelector('#ds-clusters li[data-index="' + index + '"]');
+  if (row) {
+    row.scrollIntoView({behavior: "smooth", block: "center"});
+    row.classList.add("finding-highlight");
+    setTimeout(() => row.classList.remove("finding-highlight"), 2000);
+  }
+}
+
+$("g-open-scan").addEventListener("click", () => {
+  if (state.id) openGraph("scan", state.id);
+});
+$("g-open-dataset").addEventListener("click", () => {
+  if (ds.id) openGraph("dataset", ds.id);
+});
+$("graph-close").addEventListener("click", closeGraph);
+
+for (const id of ["g-kind", "g-relation", "g-sev", "g-status"]) {
+  $(id).addEventListener("input", () => {
+    graph.offset = 0;
+    graph.focus = null;
+    graph.finding = null;
+    loadGraph();
+  });
+}
+$("g-q").addEventListener("input", () => {
+  clearTimeout(graph.timer);
+  graph.offset = 0;
+  graph.focus = null;
+  graph.finding = null;
+  graph.timer = setTimeout(loadGraph, 250);
+});
+$("g-prev").addEventListener("click", () => {
+  graph.offset = Math.max(0, graph.offset - graph.limit);
+  graph.focus = null;
+  graph.finding = null;
+  loadGraph();
+});
+$("g-next").addEventListener("click", () => {
+  graph.offset += graph.limit;
+  graph.focus = null;
+  graph.finding = null;
+  loadGraph();
 });
 
 api("/api/info").then((info) => {

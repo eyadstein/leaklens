@@ -277,6 +277,10 @@ inspect its columns, then run the same engine as `leaklens FILE --target COL`
 the CLI's baseline and suppression policy: choose a baseline in the page or set
 `[baseline].path` in `.leaklens.toml`, and the UI shows `new`, `unchanged`,
 `changed` and `suppressed` findings, suppression reasons and resolved entries.
+Both scan types also have an evidence-graph view: inspect the engine's evidence
+nodes and recorded relationships, filter and search them, and jump between a
+finding and its evidence. The view is bounded and read-only; it never rebuilds
+the graph or invents relationships.
 The workspace never writes a baseline. Nothing else is written to disk, no code
 is executed, and one activity runs at a time. See
 [docs/WORKSPACE.md](docs/WORKSPACE.md).

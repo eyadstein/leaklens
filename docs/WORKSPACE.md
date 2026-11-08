@@ -64,6 +64,45 @@ its own status or suppression semantics.
   or updates one. Use `leaklens --scan . --write-baseline` or
   `--update-baseline`; those writes stay atomic and explicit.
 
+## Evidence graph
+
+Both scan types expose the evidence graph that `intelligence` already built for
+their findings. The workspace projects that graph; it never builds a second one
+and never adds a node, edge, rationale or provenance record.
+
+- `GET /api/scans/{id}/graph` reads the source result's top-level
+  `evidence`/`clusters`/`links`; `GET /api/datasets/{id}/graph` reads the same
+  fields from the dataset result's nested `intelligence` payload. Both support
+  the same filters and paging.
+- Nodes keep the engine's `evidence_id`, kind, source, description, location,
+  metadata, `finding_index` and cluster anchor. Each node carries its finding
+  view (including fingerprint, severity and policy `status`), its connected
+  component, degree, `isolated` flag and bidirectional neighbour list with the
+  recorded relation, direction and rationale.
+- Filters are server-side: `kind`, `relation`, `severity`, `status`,
+  `q` (evidence id, kind, source, description, location, finding fields),
+  `offset`, `limit` (default 100, capped at 500), plus `focus` (an evidence id)
+  and `finding` (a finding index). `relation` keeps only nodes incident to that
+  relation.
+- `focus` returns the selected node even when it is outside the current page;
+  an unknown id is reported as `focus: null`, never fabricated. A finding focus
+  prefers the finding's primary evidence over detector detail records.
+- Invalid nodes/links are skipped and counted (`invalid_nodes`, `invalid_links`,
+  `dangling_links`); duplicate and self-referencing links are not repaired.
+  Missing or malformed graph data returns `available: false` with a reason, and
+  an empty graph is `available: true` with zero nodes.
+- `relationships_truncated` mirrors the engine's link limit for source results.
+  Dataset intelligence does not serialise that flag, so it is `null` there
+  (shown as unknown, not as complete). The UI explains both cases.
+- Policy is untouched: graph responses use the findings' existing `status`
+  values, suppressed findings remain inspectable with their evidence, and no
+  graph read changes results, trust score, baselines or suppressions.
+- The UI shares one graph panel for both scan types: filters, search, paging,
+  node details, neighbour inspection, meta/observation details, and
+  finding-to-evidence / evidence-to-finding navigation. Reading the graph has no
+  path input, so it cannot read files outside the workspace root; unknown
+  sessions return 404 and unfinished sessions 409.
+
 ## What one dataset audit does
 
 A dataset audit is not a source scan with a different label: it is the public
@@ -112,6 +151,7 @@ baseline and suppression controls described above are shared with source scans.
 | `GET /api/scans/{id}` | state, `done`, `total`, `current`, counts, errors, elapsed |
 | `POST /api/scans/{id}/cancel` | request cancellation (409 if not running) |
 | `GET /api/scans/{id}/results` | findings + statuses + policy + clusters + links + next actions (409 until finished) |
+| `GET /api/scans/{id}/graph` | bounded evidence-graph page with filters, search, focus and finding navigation (409 until finished) |
 | `GET /api/scans/{id}/report` | the static HTML report |
 | `GET /api/source?path=...&line=N` | read-only source window around a line |
 | `POST /api/datasets/inspect` | `{"path": "train.csv"}` → columns, preview, target candidates |
@@ -119,6 +159,7 @@ baseline and suppression controls described above are shared with source scans.
 | `GET /api/datasets/{id}` | state, echoed request, error, elapsed |
 | `POST /api/datasets/{id}/cancel` | cancel before the engine starts (409 once it runs) |
 | `GET /api/datasets/{id}/results` | the audit payload (409 until finished, or with the failure message) |
+| `GET /api/datasets/{id}/graph` | bounded evidence-graph page from the audit's nested `intelligence` (409 until finished) |
 | `GET /api/datasets/{id}/report` | the static HTML report for the audit |
 
 Scan states are `running`, `done`, `cancelled` and `failed`. Audit states are
@@ -166,4 +207,8 @@ Baseline coverage adds config and explicit selection, valid/missing/invalid/
 non-UTF-8 baselines, traversal for both scan types, all four finding statuses,
 suppression reason/rule identity, count consistency, resolved entries, source
 and dataset parity with the CLI policy result, and suppression-only scans that
-do not invent baseline statuses.
+do not invent baseline statuses. Graph coverage adds shared UI controls, source
+and dataset serialisation, evidence/link identity and neighbour symmetry,
+finding/evidence navigation in both directions, filters, search, paging and
+size caps, empty and isolated nodes, malformed/missing/dangling records,
+session boundaries (404/409), and preserved suppression status/evidence.
