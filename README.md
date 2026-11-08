@@ -262,17 +262,20 @@ It prints the pre-commit hook snippet (below).
 
 ### `leaklens workspace [DIR]`
 
-Serve a local, read-only page for scanning a project with visible progress and
-navigable results (findings grouped by evidence cluster, source preview,
-cancellation, HTML report). Needs the `app` extra.
+Serve a local, read-only page for scanning a project or auditing a dataset with
+visible progress and navigable results (findings grouped by evidence cluster,
+source preview, HTML report). Needs the `app` extra.
 
 ```sh
 leaklens workspace                 # root: current folder, http://127.0.0.1:8765/
 leaklens workspace notebooks/ --port 9000 --no-open
 ```
 
-It scans the same files as `--scan DIR`, one at a time, and never writes to disk
-or executes the code. See [docs/WORKSPACE.md](docs/WORKSPACE.md).
+Source scans cover the same files as `--scan DIR`. Dataset audits pick a file,
+inspect its columns, then run the same engine as `leaklens FILE --target COL`
+(target, threshold, optional held-out file, time and group columns). Nothing is
+written to disk, no code is executed, and one activity runs at a time. See
+[docs/WORKSPACE.md](docs/WORKSPACE.md).
 
 ## Missingness audit
 

@@ -20,8 +20,8 @@ main{padding:16px 20px 40px;max-width:1400px;margin:0 auto}
 .muted{color:var(--muted)}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:16px}
 label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
-input[type=text],select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;min-width:0}
-input[type=text]{width:100%}
+input[type=text],input[type=number],select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;min-width:0}
+input[type=text],input[type=number]{width:100%}
 .row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .row>.grow{flex:1 1 260px}
 button{font:inherit;border-radius:6px;border:1px solid var(--line);padding:8px 14px;cursor:pointer;background:#21262d;color:var(--fg)}
@@ -53,6 +53,14 @@ pre .ln{color:var(--muted);display:inline-block;width:3.2em;user-select:none}
 .kv{font-size:12px;color:var(--muted);word-break:break-all}
 a{color:var(--accent)}
 .empty{color:var(--muted);font-size:14px;padding:10px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px 12px;margin-top:12px}
+h3{font-size:13px;margin:16px 0 6px}
+.table{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.table th,.table td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.table th{color:var(--muted);font-weight:600}
+.recs{margin:0;padding-left:20px;font-size:13px}
+.recs>li{margin-bottom:12px}
+.recs ul{margin:4px 0 0;padding-left:18px}
 footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
 </style></head><body>
 <header>
@@ -113,6 +121,82 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
       </aside>
     </div>
   </section>
+
+  <section class="card" aria-labelledby="ds-title">
+    <h2 id="ds-title" style="font-size:14px;margin:0 0 10px">Audit a dataset</h2>
+    <p class="meta">Reads a dataset from the workspace root and runs the same audit engine as
+      <code>leaklens FILE --target COL</code>. Nothing is uploaded or written to disk.</p>
+    <p class="meta" id="ds-formats"></p>
+    <form id="ds-form" class="row">
+      <div class="grow">
+        <label for="ds-path">Dataset file, relative to the workspace root</label>
+        <input id="ds-path" type="text" placeholder="train.csv" spellcheck="false" autocomplete="off">
+      </div>
+      <div>
+        <button id="ds-inspect" type="submit">Inspect</button>
+      </div>
+    </form>
+    <p id="ds-notice" class="meta" role="status" aria-live="polite"></p>
+    <div id="ds-config" hidden>
+      <div id="ds-preview"></div>
+      <div class="grid">
+        <div>
+          <label for="ds-target">Target column (required)</label>
+          <select id="ds-target"></select>
+        </div>
+        <div>
+          <label for="ds-threshold">Threshold (0.5 to 1.0)</label>
+          <input id="ds-threshold" type="number" min="0.5" max="1" step="0.01" value="0.95">
+        </div>
+        <div>
+          <label for="ds-time">Time column (optional)</label>
+          <select id="ds-time"></select>
+        </div>
+        <div>
+          <label for="ds-group">Group column (optional)</label>
+          <select id="ds-group"></select>
+        </div>
+        <div>
+          <label for="ds-test">Held-out dataset (optional)</label>
+          <input id="ds-test" type="text" placeholder="test.csv" spellcheck="false" autocomplete="off">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="ds-run" class="primary" type="button">Audit</button>
+        <button id="ds-cancel" type="button" disabled>Cancel</button>
+        <span id="ds-state" class="badge">idle</span>
+        <span class="muted" id="ds-elapsed"></span>
+      </div>
+    </div>
+  </section>
+
+  <section id="ds-results" hidden>
+    <div class="card">
+      <div class="row">
+        <span><label>Trust score</label><b id="ds-trust" style="font-size:22px">-</b></span>
+        <span class="grow"></span>
+        <span id="ds-links"></span>
+      </div>
+      <p class="meta" id="ds-summary"></p>
+      <p class="meta high" id="ds-error"></p>
+    </div>
+    <div class="layout">
+      <div>
+        <h2 style="font-size:14px">Findings by evidence cluster</h2>
+        <div id="ds-clusters"></div>
+        <h2 style="font-size:14px">Recommended next actions</h2>
+        <div id="ds-recs"></div>
+      </div>
+      <aside class="card" aria-live="polite">
+        <h3 style="margin-top:0">Dataset</h3>
+        <div id="ds-audit" class="kv"></div>
+        <h3>Held-out impact</h3>
+        <div id="ds-impact" class="kv"></div>
+        <h3>Run</h3>
+        <div id="ds-request" class="kv"></div>
+      </aside>
+    </div>
+  </section>
 </main>
 <footer>
   <p><a id="report-link" href="#" hidden>Download HTML report</a>
@@ -141,7 +225,9 @@ async function api(path, opts) {
   const type = response.headers.get("content-type") || "";
   const body = type.includes("json") ? await response.json() : await response.text();
   if (!response.ok) {
-    const message = body && body.detail ? body.detail : String(body || response.status);
+    const detail = body && body.detail;
+    const message = typeof detail === "string" ? detail
+      : detail ? JSON.stringify(detail) : String(body || response.status);
     throw new Error(message);
   }
   return body;
@@ -372,11 +458,299 @@ for (const id of ["f-sev", "f-kind", "f-q"]) {
   $(id).addEventListener("input", renderFindings);
 }
 
+// --- dataset audits -------------------------------------------------------
+
+const ds = {id: null, columns: [], results: null};
+
+function dsState(name) {
+  const badge = $("ds-state");
+  badge.textContent = name;
+  badge.className = "badge " + name;
+}
+
+function dsBusy(busy) {
+  $("ds-run").disabled = busy;
+  $("ds-inspect").disabled = busy;
+  $("ds-cancel").disabled = !busy;
+}
+
+function selectOptions(names, withEmpty) {
+  const items = withEmpty ? [el("option", {value: "", text: "none"})] : [];
+  return items.concat(names.map((name) => el("option", {value: name, text: name})));
+}
+
+function previewTable(data) {
+  const names = data.columns.map((column) => column.name);
+  return el("table", {class: "table"},
+    el("thead", {}, el("tr", {}, ...names.map((name) => el("th", {text: name})))),
+    el("tbody", {}, ...data.preview.map((row) => el("tr", {},
+      ...names.map((name) => el("td", {text: row[name] == null ? "-" : String(row[name])}))))));
+}
+
+async function inspectDataset() {
+  const path = $("ds-path").value.trim();
+  $("ds-notice").textContent = "";
+  $("ds-config").hidden = true;
+  $("ds-results").hidden = true;
+  if (!path) {
+    $("ds-notice").textContent = "Enter a dataset path first.";
+    return;
+  }
+  dsBusy(true);
+  $("ds-notice").textContent = "Reading " + path + "...";
+  try {
+    const data = await api("/api/datasets/inspect", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({path: path}),
+    });
+    ds.columns = data.columns.map((column) => column.name);
+    $("ds-target").replaceChildren(...selectOptions(ds.columns, false));
+    $("ds-time").replaceChildren(...selectOptions(ds.columns, true));
+    $("ds-group").replaceChildren(...selectOptions(ds.columns, true));
+    if (data.target_candidates.length) $("ds-target").value = data.target_candidates[0];
+    $("ds-preview").replaceChildren(previewTable(data));
+    $("ds-notice").textContent = data.rows + " rows x " + ds.columns.length +
+      " columns read from " + data.file + ". Pick a target and audit.";
+    $("ds-config").hidden = false;
+    dsState("ready");
+  } catch (error) {
+    $("ds-notice").textContent = error.message;
+  } finally {
+    dsBusy(false);
+  }
+}
+
+async function pollDataset() {
+  if (!ds.id) return;
+  let status;
+  try {
+    status = await api("/api/datasets/" + ds.id);
+  } catch (error) {
+    $("ds-notice").textContent = error.message;
+    dsBusy(false);
+    return;
+  }
+  dsState(status.state);
+  $("ds-elapsed").textContent = (status.elapsed_ms / 1000).toFixed(1) + "s";
+  if (status.state === "queued" || status.state === "auditing") {
+    $("ds-notice").textContent = "Auditing " + status.request.file + " (target " +
+      status.request.target + ")...";
+    setTimeout(pollDataset, 400);
+    return;
+  }
+  dsBusy(false);
+  if (status.state === "done") {
+    await loadDatasetResults();
+    return;
+  }
+  if (status.state === "failed" && status.error) {
+    $("ds-notice").textContent = status.error.message + " (" + status.error.code + ")";
+    renderDatasetError(status.error);
+    return;
+  }
+  $("ds-notice").textContent = "Audit " + status.state + ".";
+}
+
+async function loadDatasetResults() {
+  try {
+    const data = await api("/api/datasets/" + ds.id + "/results");
+    ds.results = data;
+    renderDataset(data);
+  } catch (error) {
+    $("ds-notice").textContent = error.message;
+  }
+}
+
+function kvRows(box, pairs) {
+  box.replaceChildren(...pairs
+    .filter(([, value]) => value !== null && value !== undefined && value !== "")
+    .map(([label, value]) => el("div", {},
+      el("b", {text: label + ": "}), el("span", {text: String(value)}))));
+}
+
+function datasetFinding(finding) {
+  return el("li", {},
+    el("span", {class: "chip " + finding.severity, text: finding.severity}),
+    el("strong", {text: finding.kind}),
+    el("span", {class: "meta", text: " · " + finding.column}),
+    el("div", {class: "meta", text: finding.detail}),
+    finding.advice ? el("div", {class: "meta", text: "fix: " + finding.advice}) : null);
+}
+
+function datasetClusters(data) {
+  const box = $("ds-clusters");
+  box.replaceChildren();
+  const findings = data.findings || [];
+  if (!findings.length) {
+    box.append(el("p", {class: "empty", text: "No leakage found."}));
+    return;
+  }
+  const byIndex = new Map(findings.map((finding) => [finding.index, finding]));
+  const grouped = new Set();
+  for (const cluster of data.intelligence.clusters || []) {
+    const members = cluster.finding_indices
+      .map((index) => byIndex.get(index)).filter(Boolean);
+    if (!members.length) continue;
+    members.forEach((finding) => grouped.add(finding.index));
+    const confidence = Math.round((cluster.confidence.score || 0) * 100);
+    box.append(el("details", {class: "cluster", open: ""},
+      el("summary", {},
+        el("span", {class: "chip " + cluster.priority, text: cluster.priority}),
+        el("strong", {text: cluster.anchor}),
+        el("span", {class: "muted", text: " · " + members.length + " finding(s) · " +
+          cluster.anchor_kind + " · confidence " + confidence + "%"})),
+      el("ul", {class: "files"}, ...members.map(datasetFinding))));
+  }
+  const rest = findings.filter((finding) => !grouped.has(finding.index));
+  if (rest.length) {
+    box.append(el("details", {class: "cluster", open: ""},
+      el("summary", {text: "Other findings (" + rest.length + ")"}),
+      el("ul", {class: "files"}, ...rest.map(datasetFinding))));
+  }
+}
+
+function datasetRecommendations(data) {
+  const box = $("ds-recs");
+  box.replaceChildren();
+  const items = data.intelligence.recommendations || [];
+  if (!items.length) {
+    box.append(el("p", {class: "empty", text: "No recommendations."}));
+    return;
+  }
+  box.append(el("ol", {class: "recs"}, ...items.map((item) => el("li", {},
+    el("span", {class: "chip " + item.priority, text: item.priority}),
+    el("strong", {text: item.title}),
+    el("div", {class: "meta", text: item.description}),
+    el("ul", {}, ...(item.actions || []).map((action) => el("li", {text: action})))))));
+}
+
+function datasetSidebar(data) {
+  const audit = data.audit || {};
+  kvRows($("ds-audit"), [
+    ["rows", audit.rows], ["columns", audit.cols],
+    ["duplicate rows", audit.duplicate_rows], ["minority rate", audit.minority_rate],
+  ]);
+  const impact = data.impact;
+  if (!impact) {
+    $("ds-impact").replaceChildren(el("p", {class: "empty",
+      text: "Add a held-out dataset to measure train/test impact."}));
+  } else {
+    kvRows($("ds-impact"), [
+      ["train rows", impact.train_rows], ["held-out rows", impact.test_rows],
+      ["duplicate held-out rows", impact.duplicate_test_rows],
+      ["duplicate held-out %", impact.duplicate_test_pct],
+      ["shared groups", impact.group_column ? impact.shared_group_count : null],
+      ["shared group held-out %", impact.group_column ? impact.shared_group_test_pct : null],
+      ["temporal overlap", impact.temporal_overlap === null ? null : String(impact.temporal_overlap)],
+      ["train max time", impact.train_max_time], ["held-out min time", impact.test_min_time],
+    ]);
+  }
+  const request = data.request || {};
+  kvRows($("ds-request"), [
+    ["file", request.file], ["held-out", request.test], ["target", request.target],
+    ["threshold", request.threshold], ["time", request.time_column],
+    ["group", request.group_column],
+  ]);
+}
+
+function renderDataset(data) {
+  $("ds-results").hidden = false;
+  $("ds-error").textContent = "";
+  $("ds-trust").textContent = data.trust_score + "/100";
+  const counts = data.counts;
+  const summary = data.summary;
+  $("ds-summary").textContent = summary.file + " · target " + summary.target +
+    " · threshold " + summary.threshold + " · " + summary.rows + " rows x " +
+    summary.columns + " columns" +
+    (summary.test_rows != null ? " · held-out " + summary.test_rows + " rows" : "") +
+    " · " + (data.elapsed_ms / 1000).toFixed(1) + "s" +
+    " · high " + (counts.high || 0) + " · medium " + (counts.medium || 0) +
+    " · low " + (counts.low || 0);
+  $("ds-links").replaceChildren(
+    el("a", {href: "/api/datasets/" + ds.id + "/report", text: "HTML report"}),
+    el("a", {href: "/api/datasets/" + ds.id + "/results", text: "Raw results (JSON)",
+      style: "margin-left:16px"}));
+  datasetClusters(data);
+  datasetRecommendations(data);
+  datasetSidebar(data);
+}
+
+function renderDatasetError(error) {
+  $("ds-results").hidden = false;
+  $("ds-trust").textContent = "-";
+  $("ds-summary").textContent = "";
+  $("ds-links").replaceChildren();
+  $("ds-error").textContent = error.message + " [" + error.code + "]";
+  datasetClusters({findings: [], intelligence: {clusters: []}});
+  datasetRecommendations({intelligence: {recommendations: []}});
+  kvRows($("ds-audit"), []);
+  kvRows($("ds-impact"), []);
+  kvRows($("ds-request"), []);
+}
+
+$("ds-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  inspectDataset();
+});
+
+$("ds-run").addEventListener("click", async () => {
+  const body = {
+    path: $("ds-path").value.trim(),
+    target: $("ds-target").value,
+    threshold: Number($("ds-threshold").value),
+    test_path: $("ds-test").value.trim() || null,
+    time_col: $("ds-time").value || null,
+    group_col: $("ds-group").value || null,
+  };
+  $("ds-notice").textContent = "";
+  $("ds-results").hidden = true;
+  dsBusy(true);
+  try {
+    const started = await api("/api/datasets", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    ds.id = started.dataset_id;
+    ds.results = null;
+    dsState("queued");
+    pollDataset();
+  } catch (error) {
+    dsState("failed");
+    $("ds-notice").textContent = error.message;
+    dsBusy(false);
+  }
+});
+
+$("ds-cancel").addEventListener("click", async () => {
+  if (!ds.id) return;
+  try {
+    const status = await api("/api/datasets/" + ds.id + "/cancel", {method: "POST"});
+    dsState(status.state);
+    $("ds-notice").textContent = "Audit cancelled before the engine started.";
+    dsBusy(false);
+  } catch (error) {
+    $("ds-notice").textContent = error.message;
+  }
+});
+
 api("/api/info").then((info) => {
   state.info = info;
   $("sql").disabled = !info.sql_available;
   if (!info.sql_available) $("sql").parentElement.title = "requires the sql extra";
   $("root").textContent = info.root;
+  const formats = info.dataset_formats.filter((item) => item.enabled)
+    .map((item) => item.extension);
+  const missing = info.dataset_formats
+    .filter((item) => !item.enabled && item.configured)
+    .map((item) => item.extension + " (needs " + item.extra + ")");
+  const limits = info.dataset_limits;
+  $("ds-formats").textContent = "Accepts " + formats.join(", ") +
+    (missing.length ? "; unavailable here: " + missing.join(", ") : "") +
+    ". Limits: " + (limits.max_bytes / (1024 * 1024)) + " MiB, " +
+    limits.max_rows + " rows, " + limits.max_columns + " columns, " +
+    limits.max_cells + " cells.";
 });
 </script>
 </body></html>

@@ -1,12 +1,14 @@
 """Local, read-only interactive scan workspace.
 
-One bounded scan session at a time: start a scan of a file or folder, poll
-progress, browse findings grouped by the existing evidence graph, and read the
-source around a finding.  Nothing is written to disk, nothing is executed, and
-every path stays inside the workspace root supplied at startup.
+One bounded activity at a time: start a source scan of a file or folder, or a
+dataset audit of a CSV/JSON/... file, poll progress, browse findings grouped by
+the existing evidence graph, and read the source around a finding.  Nothing is
+written to disk, nothing is executed, and every path stays inside the workspace
+root supplied at startup.
 
 This is a thin orchestration layer: findings, fingerprints, trust score,
-clusters and fixes all come from the existing deterministic modules.
+clusters and fixes all come from the existing deterministic modules, and
+dataset audits go through the public API's ``run_audit_job``.
 """
 
 from __future__ import annotations
@@ -28,17 +30,24 @@ from .fingerprint import LOCATION, normalize_path
 from .fixes import advice
 from .intelligence import analyze_findings
 from .leakage import Finding, score
+from .public_api import GuardLimits, _threshold, run_audit_job, run_inspect_job
 from .report import render
 from .scanner import scan_file, scan_targets
 from .sqlscan import SqlSettings, scan_sql_file
 from .sqlscan import available as sql_available
+from .upload_guard import UploadRejected, available_formats, guard_upload
 
 MAX_FILES = 5_000
 MAX_SOURCE_BYTES = 1_000_000
 MAX_SCANS = 20
+MAX_DATASETS = 20
 MAX_ERRORS = 200
 SOURCE_CONTEXT = 8
 _CELL = re.compile(r"\[cell (\d+)\]")
+# Result states that still hold the single activity slot.
+ACTIVE_STATES = frozenset({"running", "queued", "auditing"})
+# The same hard limits the public audit API applies to an uploaded dataset.
+DATASET_LIMITS = GuardLimits()
 
 
 class WorkspacePathError(ValueError):
@@ -46,7 +55,21 @@ class WorkspacePathError(ValueError):
 
 
 class WorkspaceBusy(RuntimeError):
-    """A scan is already running; this workspace runs one at a time."""
+    """A scan or audit is already running; this workspace runs one at a time."""
+
+
+def _trim(order: list[str], sessions: dict[str, Any], limit: int) -> None:
+    """Drop the oldest finished session so memory stays bounded."""
+    while len(order) > limit:
+        for key in list(order):
+            session = sessions.get(key)
+            if session is not None and session.state in ACTIVE_STATES:
+                continue
+            order.remove(key)
+            sessions.pop(key, None)
+            break
+        else:  # pragma: no cover - only reachable with `limit` active sessions
+            return
 
 
 @dataclass
@@ -104,6 +127,53 @@ class ScanSession:
             }
 
 
+@dataclass
+class DatasetSession:
+    """One dataset audit: its request, stage and final engine payload.
+
+    Stage-based rather than item-based progress: the engine call is a single
+    opaque ``run_audit_job``, so there is no finer signal to report honestly.
+    """
+
+    dataset_id: str
+    path: Path
+    target: str
+    threshold: float
+    test_path: Path | None = None
+    time_col: str | None = None
+    group_col: str | None = None
+    cancel: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    started_at: float = field(default_factory=time.perf_counter)
+    state: str = "queued"
+    error: dict[str, Any] | None = None
+    results: dict[str, Any] | None = None
+    report_html: str | None = None
+
+    def elapsed_ms(self) -> float:
+        return round((time.perf_counter() - self.started_at) * 1000, 1)
+
+    def request(self) -> dict[str, Any]:
+        return {
+            "file": self.path.name,
+            "test": self.test_path.name if self.test_path is not None else None,
+            "target": self.target,
+            "threshold": self.threshold,
+            "time_column": self.time_col,
+            "group_column": self.group_col,
+        }
+
+    def snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "dataset_id": self.dataset_id,
+                "state": self.state,
+                "request": self.request(),
+                "error": dict(self.error) if self.error else None,
+                "elapsed_ms": self.elapsed_ms(),
+            }
+
+
 def _relative(path: Path, root: Path) -> str:
     try:
         return path.resolve().relative_to(root).as_posix()
@@ -138,13 +208,15 @@ def _report_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 class WorkspaceScanManager:
-    """Owns the workspace root and the single active scan thread."""
+    """Owns the workspace root and the single active scan or audit thread."""
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root).resolve()
         self._scans: dict[str, ScanSession] = {}
         self._order: list[str] = []
-        self._active: ScanSession | None = None
+        self._datasets: dict[str, DatasetSession] = {}
+        self._dataset_order: list[str] = []
+        self._active: ScanSession | DatasetSession | None = None
         self._lock = threading.Lock()
 
     def resolve(self, value: str) -> Path:
@@ -157,6 +229,12 @@ class WorkspaceScanManager:
         if target != self.root and not target.is_relative_to(self.root):
             raise WorkspacePathError("path is outside the workspace root")
         return target
+
+    def _claim(self, session) -> None:
+        """Take the one activity slot; callers already hold ``self._lock``."""
+        if self._active is not None and self._active.state in ACTIVE_STATES:
+            raise WorkspaceBusy("a scan or audit is already running")
+        self._active = session
 
     def start(self, path: str = ".", *, sql: bool = False) -> ScanSession:
         target = self.resolve(path)
@@ -177,17 +255,15 @@ class WorkspaceScanManager:
                 f"too many files ({len(files)}); scan a folder with fewer than {MAX_FILES}"
             )
         with self._lock:
-            if self._active is not None and self._active.state == "running":
-                raise WorkspaceBusy("a scan is already running")
             session = ScanSession(
                 scan_id=secrets.token_hex(6),
                 files=files,
                 include_sql=sql,
             )
+            self._claim(session)
             self._scans[session.scan_id] = session
             self._order.append(session.scan_id)
-            self._active = session
-            self._trim()
+            _trim(self._order, self._scans, MAX_SCANS)
         threading.Thread(
             target=self._run,
             args=(session,),
@@ -195,18 +271,6 @@ class WorkspaceScanManager:
             daemon=True,
         ).start()
         return session
-
-    def _trim(self) -> None:
-        while len(self._order) > MAX_SCANS:
-            for scan_id in list(self._order):
-                session = self._scans.get(scan_id)
-                if session is not None and session.state == "running":
-                    continue
-                self._order.remove(scan_id)
-                self._scans.pop(scan_id, None)
-                break
-            else:  # pragma: no cover - only reachable with MAX_SCANS running
-                return
 
     def get(self, scan_id: str) -> ScanSession:
         session = self._scans.get(scan_id)
@@ -280,10 +344,163 @@ class WorkspaceScanManager:
             session.results = payload
             session.report_html = report_html
 
+    def _dataset_bytes(self, path: Path, label: str) -> bytes:
+        if not path.is_file():
+            raise WorkspacePathError(f"not a dataset file: {label}")
+        if path.stat().st_size > DATASET_LIMITS.max_bytes:
+            mib = DATASET_LIMITS.max_bytes / (1024 * 1024)
+            raise UploadRejected(
+                f"The dataset is larger than the {mib:.1f} MiB workspace limit.",
+                413,
+                "upload_too_large",
+            )
+        return path.read_bytes()
+
+    def open_dataset(self, value: str):
+        """Resolve a workspace file and run the public upload guard on it."""
+        target = self.resolve(value)
+        return guard_upload(
+            target.name, self._dataset_bytes(target, value), DATASET_LIMITS
+        )
+
+    def inspect_dataset(self, value: str) -> dict[str, Any]:
+        return run_inspect_job(self.open_dataset(value), DATASET_LIMITS)
+
+    def start_dataset(
+        self,
+        *,
+        path: str,
+        target: str,
+        threshold: float = 0.95,
+        test_path: str | None = None,
+        time_col: str | None = None,
+        group_col: str | None = None,
+    ) -> DatasetSession:
+        threshold = _threshold(threshold)
+        upload = self.open_dataset(path)
+        test_upload = self.open_dataset(test_path) if test_path else None
+        name = (target or "").strip()
+        if not name:
+            raise UploadRejected(
+                "Choose a target column before scanning.", 422, "missing_target"
+            )
+        with self._lock:
+            session = DatasetSession(
+                dataset_id=secrets.token_hex(6),
+                path=self.resolve(path),
+                target=name,
+                threshold=threshold,
+                test_path=self.resolve(test_path) if test_path else None,
+                time_col=(time_col or "").strip() or None,
+                group_col=(group_col or "").strip() or None,
+            )
+            self._claim(session)
+            self._datasets[session.dataset_id] = session
+            self._dataset_order.append(session.dataset_id)
+            _trim(self._dataset_order, self._datasets, MAX_DATASETS)
+        threading.Thread(
+            target=self._run_dataset,
+            args=(session, upload, test_upload),
+            name=f"leaklens-dataset-{session.dataset_id}",
+            daemon=True,
+        ).start()
+        return session
+
+    def get_dataset(self, dataset_id: str) -> DatasetSession:
+        session = self._datasets.get(dataset_id)
+        if session is None:
+            raise KeyError(dataset_id)
+        return session
+
+    def cancel_dataset(self, dataset_id: str) -> DatasetSession:
+        session = self.get_dataset(dataset_id)
+        with session.lock:
+            if session.state == "queued":
+                session.cancel.set()
+                session.state = "cancelled"
+                return session
+            if session.state == "auditing":
+                raise WorkspaceBusy(
+                    "the audit engine is already running and cannot be interrupted"
+                )
+        raise WorkspaceBusy("audit is not running")
+
+    def _run_dataset(self, session: DatasetSession, upload, test_upload) -> None:
+        with session.lock:
+            if session.cancel.is_set():
+                return
+            session.state = "auditing"
+        try:
+            # The public audit job is the whole engine: parse, validate, scan,
+            # impact, intelligence payload and HTML report.
+            payload = run_audit_job(
+                upload,
+                DATASET_LIMITS,
+                session.target,
+                session.threshold,
+                test_upload,
+                session.time_col,
+                session.group_col,
+                include_intelligence=True,
+            )
+        except UploadRejected as exc:
+            with session.lock:
+                session.state = "failed"
+                session.error = {
+                    "status": exc.status_code,
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            return
+        except Exception as exc:  # noqa: BLE001 - report, never crash the server
+            with session.lock:
+                session.state = "failed"
+                session.error = {
+                    "status": 500,
+                    "code": "audit_failed",
+                    "message": str(exc)[:300],
+                }
+            return
+        report_html = payload.pop("report_html", None)
+        for index, finding in enumerate(payload["findings"]):
+            finding["index"] = index
+            finding["advice"] = advice(finding["kind"]) or None
+        results = {
+            "dataset_id": session.dataset_id,
+            "state": "done",
+            "request": session.request(),
+            "elapsed_ms": session.elapsed_ms(),
+            **payload,
+        }
+        with session.lock:
+            session.state = "done"
+            session.results = results
+            session.report_html = report_html
+
+
+def _unfinished(session: DatasetSession) -> str:
+    """Why a finished-but-empty audit has no results, without hiding the reason."""
+    if session.error:
+        return str(session.error.get("message", "the audit failed"))
+    return f"audit is {session.state}; results are not available"
+
 
 class ScanRequest(BaseModel):
     path: str = Field(default=".", max_length=1000)
     sql: bool = Field(default=False)
+
+
+class DatasetPathRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+
+
+class DatasetRequest(BaseModel):
+    path: str = Field(min_length=1, max_length=1000)
+    target: str = Field(default="", max_length=200)
+    threshold: float = Field(default=0.95)
+    test_path: str | None = Field(default=None, max_length=1000)
+    time_col: str | None = Field(default=None, max_length=200)
+    group_col: str | None = Field(default=None, max_length=200)
 
 
 def create_workspace_app(root: str | Path | None = None) -> FastAPI:
@@ -313,6 +530,10 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             "max_source_bytes": MAX_SOURCE_BYTES,
             "source_context": SOURCE_CONTEXT,
             "sql_available": sql_available(),
+            "dataset_limits": DATASET_LIMITS.to_public_dict(),
+            "dataset_formats": available_formats(DATASET_LIMITS),
+            "threshold_range": [0.5, 1.0],
+            "default_threshold": 0.95,
         }
 
     @app.post("/api/scans", status_code=202)
@@ -360,6 +581,71 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             raise HTTPException(404, "unknown scan") from None
         if session.report_html is None:
             raise HTTPException(409, "scan has not finished")
+        return session.report_html
+
+    @app.post("/api/datasets/inspect")
+    def inspect_dataset(req: DatasetPathRequest) -> dict[str, Any]:
+        try:
+            return manager.inspect_dataset(req.path)
+        except WorkspacePathError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except UploadRejected as exc:
+            raise HTTPException(exc.status_code, exc.message) from None
+
+    @app.post("/api/datasets", status_code=202)
+    def start_dataset(req: DatasetRequest) -> dict[str, str]:
+        try:
+            session = manager.start_dataset(
+                path=req.path,
+                target=req.target,
+                threshold=req.threshold,
+                test_path=req.test_path,
+                time_col=req.time_col,
+                group_col=req.group_col,
+            )
+        except WorkspacePathError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except UploadRejected as exc:
+            raise HTTPException(exc.status_code, exc.message) from None
+        except WorkspaceBusy as exc:
+            raise HTTPException(409, str(exc)) from None
+        return {"dataset_id": session.dataset_id}
+
+    @app.get("/api/datasets/{dataset_id}")
+    def dataset_status(dataset_id: str) -> dict[str, Any]:
+        try:
+            return manager.get_dataset(dataset_id).snapshot()
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+
+    @app.post("/api/datasets/{dataset_id}/cancel")
+    def cancel_dataset(dataset_id: str) -> dict[str, Any]:
+        try:
+            session = manager.cancel_dataset(dataset_id)
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+        except WorkspaceBusy as exc:
+            raise HTTPException(409, str(exc)) from None
+        return session.snapshot()
+
+    @app.get("/api/datasets/{dataset_id}/results")
+    def dataset_results(dataset_id: str) -> dict[str, Any]:
+        try:
+            session = manager.get_dataset(dataset_id)
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+        if session.results is None:
+            raise HTTPException(409, _unfinished(session))
+        return session.results
+
+    @app.get("/api/datasets/{dataset_id}/report", response_class=HTMLResponse)
+    def dataset_report(dataset_id: str) -> str:
+        try:
+            session = manager.get_dataset(dataset_id)
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+        if session.report_html is None:
+            raise HTTPException(409, _unfinished(session))
         return session.report_html
 
     @app.get("/api/source")

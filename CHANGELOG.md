@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Phase 11.2: dataset audits in the workspace
+
+- `leaklens workspace` now audits datasets too: `POST /api/datasets/inspect` lists columns, preview rows and target candidates, and `POST /api/datasets` runs a background audit of a file under the workspace root with the target, threshold, optional held-out dataset, and optional time/group columns.
+- No audit logic was added to `workspace.py`: the request is resolved and guarded with `upload_guard.guard_upload` under the public API's `GuardLimits`, then handed to `public_api.run_audit_job` (or `run_inspect_job` for the preview), so parsing, target validation, detectors, impact, `score()`, the intelligence payload and `report.render` all stay the existing code paths. Results carry two presentation-only additions per finding (`index`, `advice`).
+- The dataset UI is a second panel in the same page: path → inspect → target/threshold/time/group/held-out → audit → trust score, findings grouped by evidence cluster, recommendations, dataset summary, held-out impact, HTML report and raw JSON. Formats the installed parsers cannot read are listed with the reason instead of being offered.
+- A source scan and a dataset audit share one activity slot, so either returns 409 while the other runs. Audit stages are `queued` → `auditing` → `done`/`failed`/`cancelled`; cancellation is honoured while queued and refused with an explicit 409 once `run_audit_job` is running.
+- Engine failures (unknown target/option column, parse errors, oversized frames) keep their `code` and message on the status, results and report endpoints and in the UI instead of being swallowed.
+- Extended `tests/test_workspace.py` with the dataset workflow (engine parity with `run_audit_job` and the CLI trust score, target/threshold validation, held-out impact, formats, traversal, empty/malformed files, serialisation, failures, cross-kind locking, cancellation) and updated `docs/WORKSPACE.md`.
+
 ### Phase 11: interactive scan workspace
 
 - Added `leaklens workspace [DIR]`: a local, read-only FastAPI page (`leaklens/workspace.py`, `leaklens/workspace_ui.py`) that scans a file or folder with live per-file progress, cancellation, severity/kind filters, evidence-cluster grouping, source preview, one HTML report and the raw JSON results.
