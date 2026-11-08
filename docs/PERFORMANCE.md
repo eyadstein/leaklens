@@ -1,7 +1,8 @@
 # Scanner performance
 
 LeakLens optimizes only measured bottlenecks. This page records the scanner
-baseline, the shared-parse/cache change, and why parallel scanning is not enabled.
+baseline, the shared-parse/cache change, the grouped node index, and why parallel
+scanning is not enabled.
 
 ## Method
 
@@ -55,16 +56,50 @@ change findings. The cache is protected by a lock, capped at 128 entries and
 2,000,000 source characters, skips sources over 1,000,000 characters, and does
 not store malformed input.
 
+### Grouped node index
+
+With parsing shared, the remaining warm cost was the per-pass loop over every
+node checking `isinstance` against the few types that pass cares about. Profiling
+of 125,304 nodes across the package showed 2.36 million `isinstance` calls per
+scan, and a filtered loop over all nodes cost ~13 ms per pass.
+
+`_node_index(nodes)` groups the already-walked nodes by exact type once per
+`scan_source` call. Each pass then iterates only its own node types, in the same
+`ast.walk` order, so per-type ordering, "last assignment wins" behaviour and
+finding order are unchanged. The index is transient: it is rebuilt from the
+cached node tuple for each file and is not stored in the source cache.
+
 ## Result
 
-| Workload | Before | After |
-|---|---:|---:|
-| Cold `scan_path("leaklens")` | 1.70 s | 0.68 s |
-| Repeated `scan_path("leaklens")` in one process | 1.70 s | 0.19 s |
-| 50k-row `scan(df, target)` | 0.20 s | 0.20 s |
+| Workload | Original | Shared parse | + grouped index |
+|---|---:|---:|---:|
+| Cold `scan_path("leaklens")` | 1.70 s | 0.68 s | 0.66 s |
+| Repeated `scan_path("leaklens")`, one process | 1.70 s | 0.20 s | 0.15 s |
+| 50k-row `scan(df, target)` | 0.20 s | 0.20 s | 0.20 s |
 
-The code-scan improvement is roughly 60% cold and 89% warm. Dataset results are
-unchanged because the change does not touch dataset detectors.
+The shared parse is the main win; the grouped index adds ~22% on warm scans
+(from 0.192–0.203 s to 0.150–0.158 s). Cold time is dominated by `ast.parse`, so
+the index does not change it measurably. Per-pass timings with instrumented
+wrappers:
+
+| Pass | Before | After |
+|---|---:|---:|
+| `_scan_core` | 110 ms | 57 ms |
+| `scan_cv` | 78 ms | 54 ms |
+| `scan_flow` | 19 ms | 5 ms |
+| index build | — | 10 ms |
+
+Warm peak memory stayed at ~0.42 MiB with `tracemalloc`, because the index is
+released after each file. Dataset results are unchanged because the change does
+not touch dataset detectors.
+
+### Rejected
+
+- Caching the index in the source cache: it would save ~10 ms per warm scan but
+  keep an extra reference per node for up to 128 cached sources.
+- A descendant index for `_all_names`/`_strings`: those helpers walk small
+  per-expression subtrees, and storing a descendant list per node would cost far
+  more memory than the ~45 ms it could save.
 
 ## Parallel scanning
 

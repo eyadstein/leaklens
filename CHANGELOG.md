@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Scanner traversal: grouped AST index
+
+- `_scan_core`, `scan_cv` and `scan_flow` now iterate a type-grouped index of the cached node tuple (`_node_index`) instead of re-checking every node with `isinstance` in each pass. Grouping keeps `ast.walk` order within each node type, so finding order, stable keys/fingerprints and last-assignment-wins behaviour are unchanged. Direct `scan_cv`/`scan_flow` calls keep their public signatures and build the index themselves.
+- Measured locally on Windows with Python 3.14.3: repeated `scan_path("leaklens")` over 65 files fell from 0.192–0.203 s to 0.150–0.158 s (~22%). Cold scans stay ~0.66 s because `ast.parse` dominates, and warm peak memory stays ~0.42 MiB because the index is transient per file.
+- The index is deliberately not stored in the source cache: it would save ~10 ms per warm scan but retain an extra reference per cached node. A descendant index for `_all_names`/`_strings` was also rejected because per-node descendant lists would cost far more memory than the ~45 ms they could save.
+- Added tests for index-versus-walk equivalence, indexed versus plain pass output, cached AST immutability, deterministic ordering and fingerprints, nested scopes and malformed sources.
+
 ### Scanner performance: shared parse and bounded source cache
 
 - `scan_source` now parses each input once and shares the AST, its walked node tuple and the stable structural keys across the core, flow and cross-validation passes instead of parsing and walking three times and recomputing the same digests. Direct `scan_cv`/`scan_flow` calls keep their previous public signatures and behavior.

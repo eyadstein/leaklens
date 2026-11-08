@@ -208,6 +208,19 @@ def _finding_keys(tree: ast.AST, nodes=None) -> dict[int, str]:
     return keys
 
 
+def _node_index(nodes) -> dict[type, list[ast.AST]]:
+    """Nodes grouped by exact type, keeping ``ast.walk`` order within each group.
+
+    The scanner passes only filter the tree by node type, so one grouped pass
+    replaces a full ``isinstance`` scan per pass. Subclasses are not folded in:
+    every loop below matches exact AST classes, as before.
+    """
+    index: dict[type, list[ast.AST]] = {}
+    for node in nodes:
+        index.setdefault(type(node), []).append(node)
+    return index
+
+
 def _parse_source(
     src: str,
 ) -> tuple[
@@ -279,10 +292,11 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     tree, keys, nodes, error = _parse_source(src)
     if tree is None or keys is None or nodes is None:
         return [Finding("low", "parse_error", label, error or "invalid syntax")]
+    index = _node_index(nodes)
     return merge(
-        _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes),
-        scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes)
-        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes),
+        _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
+        scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
+        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
     )
 
 
@@ -294,6 +308,7 @@ def _scan_core(
     tree: ast.AST | None = None,
     keys: dict[int, str] | None = None,
     nodes: tuple[ast.AST, ...] | None = None,
+    index: dict[type, list[ast.AST]] | None = None,
 ) -> list[Finding]:
     if tree is None or keys is None:
         tree, keys, nodes, error = _parse_source(src)
@@ -301,41 +316,40 @@ def _scan_core(
             return [Finding("low", "parse_error", label, error or "invalid syntax")]
     if nodes is None:
         nodes = tuple(ast.walk(tree))
+    if index is None:
+        index = _node_index(nodes)
     ctor, calls, funcs, assigns = {}, [], set(), []
     # Estimators imported under a local name (`from ... import KBinsDiscretizer as KBD`).
     # Matching a class on its local name only hides it from the hint lists (issue #333).
     sk_aliases: dict[str, str] = {}
-    for n in nodes:
-        if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("sklearn"):
+    for n in index.get(ast.ImportFrom, ()):
+        if (n.module or "").startswith("sklearn"):
             for al in n.names:
                 if al.asname:
                     sk_aliases[al.asname] = al.name
 
     pandas_aliases, get_dummies_aliases = set(), set()
 
-    for n in nodes:
-        if isinstance(n, ast.Assign):
-            assigns.append(n)
-            if isinstance(n.value, ast.Call):
-                for t in n.targets:
-                    if isinstance(t, ast.Name):
-                        ctor[t.id] = _step(n.value, sk_aliases)
-        elif isinstance(n, ast.Call):
-            calls.append(n)
-        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
-            "sklearn.preprocessing"
-        ):
+    for n in index.get(ast.Assign, ()):
+        assigns.append(n)
+        if isinstance(n.value, ast.Call):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    ctor[t.id] = _step(n.value, sk_aliases)
+    calls = list(index.get(ast.Call, ()))
+    for n in index.get(ast.ImportFrom, ()):
+        if (n.module or "").startswith("sklearn.preprocessing"):
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
-        elif isinstance(n, ast.Import):
-            for al in n.names:
-                if al.name == "pandas":
-                    pandas_aliases.add(al.asname or "pandas")
-        elif isinstance(n, ast.ImportFrom) and n.module == "pandas":
+        elif n.module == "pandas":
             for al in n.names:
                 if al.name == "get_dummies":
                     get_dummies_aliases.add(al.asname or al.name)
+    for n in index.get(ast.Import, ()):
+        for al in n.names:
+            if al.name == "pandas":
+                pandas_aliases.add(al.asname or "pandas")
 
     assigns.sort(key=lambda n: n.lineno)
 

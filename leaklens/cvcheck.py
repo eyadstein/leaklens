@@ -13,6 +13,7 @@ from .scanner import (
     _all_names,
     _finding_keys,
     _name,
+    _node_index,
     _sev,
     _tnames,
 )
@@ -114,6 +115,7 @@ def scan_cv(
     tree: ast.AST | None = None,
     keys: dict[int, str] | None = None,
     nodes: tuple[ast.AST, ...] | None = None,
+    index: dict[type, list[ast.AST]] | None = None,
 ) -> list[Finding]:
     """Tuning, cross-validation, and preprocessing misused around validation folds."""
     if tree is None:
@@ -125,21 +127,20 @@ def scan_cv(
             return []
     if nodes is None:
         nodes = tuple(ast.walk(tree))
+    if index is None:
+        index = _node_index(nodes)
     if keys is None:
         keys = _finding_keys(tree, nodes)
     ctor, assigns, calls, funcs = {}, [], [], set()
-    for n in nodes:
-        if isinstance(n, ast.Assign):
-            assigns.append(n)
-            if isinstance(n.value, ast.Call):
-                for t in n.targets:
-                    if isinstance(t, ast.Name):
-                        ctor[t.id] = _name(n.value)
-        elif isinstance(n, ast.Call):
-            calls.append(n)
-        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
-            "sklearn.preprocessing"
-        ):
+    for n in index.get(ast.Assign, ()):
+        assigns.append(n)
+        if isinstance(n.value, ast.Call):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    ctor[t.id] = _name(n.value)
+    calls = list(index.get(ast.Call, ()))
+    for n in index.get(ast.ImportFrom, ()):
+        if (n.module or "").startswith("sklearn.preprocessing"):
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
@@ -354,9 +355,7 @@ def scan_cv(
         g["n"] += 1
 
     # Custom hyperparameter loops: for C in [...]: model.fit(X_test, y_test).
-    for node in nodes:
-        if not isinstance(node, ast.For):
-            continue
+    for node in index.get(ast.For, ()):
         grid = isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)) or (
             isinstance(node.iter, ast.Call) and _name(node.iter) in PARAM_GRID_FUNCS
         )

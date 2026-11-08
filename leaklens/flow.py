@@ -14,6 +14,7 @@ from .scanner import (
     _all_names,
     _finding_keys,
     _name,
+    _node_index,
     _sev,
 )
 
@@ -82,6 +83,7 @@ def scan_flow(
     tree: ast.AST | None = None,
     keys: dict[int, str] | None = None,
     nodes: tuple[ast.AST, ...] | None = None,
+    index: dict[type, list[ast.AST]] | None = None,
 ) -> list[Finding]:
     """Transformed data that later feeds a split, wherever the transform sits in the source."""
     if tree is None:
@@ -93,20 +95,19 @@ def scan_flow(
             return []
     if nodes is None:
         nodes = tuple(ast.walk(tree))
+    if index is None:
+        index = _node_index(nodes)
     ctor, node_of, assigns, calls, funcs = {}, {}, [], [], set()
-    for n in nodes:
-        if isinstance(n, ast.Assign):
-            assigns.append(n)
-            if isinstance(n.value, ast.Call):
-                for t in n.targets:
-                    if isinstance(t, ast.Name):
-                        ctor[t.id] = _name(n.value)
-                        node_of[t.id] = n.value
-        elif isinstance(n, ast.Call):
-            calls.append(n)
-        elif isinstance(n, ast.ImportFrom) and (n.module or "").startswith(
-            "sklearn.preprocessing"
-        ):
+    for n in index.get(ast.Assign, ()):
+        assigns.append(n)
+        if isinstance(n.value, ast.Call):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    ctor[t.id] = _name(n.value)
+                    node_of[t.id] = n.value
+    calls = list(index.get(ast.Call, ()))
+    for n in index.get(ast.ImportFrom, ()):
+        if (n.module or "").startswith("sklearn.preprocessing"):
             for al in n.names:
                 if al.name in FUNCS:
                     funcs.add(al.asname or al.name)
