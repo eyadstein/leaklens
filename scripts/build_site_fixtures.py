@@ -25,6 +25,7 @@ import pandas as pd  # noqa: E402
 
 from leaklens import __version__  # noqa: E402
 from leaklens.ai import analyze_code  # noqa: E402
+from leaklens.ai.learned import artifact_fallback_reason, get_model  # noqa: E402
 from leaklens.ai.semantics import CodeSource  # noqa: E402
 from leaklens.fixes import advice  # noqa: E402
 from leaklens.leakage import (  # noqa: E402
@@ -80,6 +81,18 @@ def _counts(findings) -> dict:
         "medium": sum(f.severity == "medium" for f in findings),
         "low": sum(f.severity == "low" for f in findings),
     }
+
+
+def serves_shipped_artifact() -> bool:
+    """Whether the AI layer loads the checked-in artifact in this environment.
+
+    The artifact is only loadable on the scikit-learn minor that fitted it; other
+    minors refit and re-derive the threshold, so recorded AI text cannot be
+    reproduced byte for byte there.
+    """
+
+    get_model(compare_candidates=False)
+    return artifact_fallback_reason() is None
 
 
 def _ai_fixture(filename: str, source: str, findings) -> dict:

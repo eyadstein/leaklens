@@ -21,7 +21,12 @@ from leaklens.ai.corpus_realworld import (
     repositories,
 )
 from leaklens.ai.features import MODEL_FEATURE_NAMES, model_features
-from leaklens.ai.learned import MODEL_VERSION, _metrics, get_model
+from leaklens.ai.learned import (
+    MODEL_VERSION,
+    _metrics,
+    artifact_fallback_reason,
+    get_model,
+)
 from leaklens.ai.realworld import public_notebook_cases
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,15 +149,28 @@ def test_h1_stays_the_single_reviewed_phase6_record():
 
 
 def test_shipped_model_identity_is_pinned_for_any_future_h2_run():
-    _evaluation, model = get_model(compare_candidates=False)
+    payload = json.loads(
+        (ROOT / "leaklens" / "ai" / "model.json").read_text(encoding="utf-8")
+    )
 
-    assert model.card.version == MODEL_VERSION == "leaklens-ai-p7-2026.11"
-    assert len(MODEL_FEATURE_NAMES) == 108
+    # A future H2 run scores with the checked-in artifact, so its identity is
+    # pinned from the file rather than from a re-fit in this environment.
+    assert payload["model"]["version"] == MODEL_VERSION == "leaklens-ai-p7-2026.11"
+    assert len(payload["model"]["features"]) == 108
     # M6 added four hard negatives, so the same validation-only selection rule
     # now returns 0.60; the rule itself and the feature catalogue are unchanged.
-    assert model.threshold == 0.60
-    # The card digest is only populated when the build matches the artifact's
-    # library minor version (see test_ai_artifact.py), so it is not pinned here.
+    assert payload["model"]["threshold"] == 0.60
+
+    _evaluation, model = get_model(compare_candidates=False)
+    assert len(MODEL_FEATURE_NAMES) == 108
+    if artifact_fallback_reason() is None:
+        assert model.threshold == payload["model"]["threshold"]
+        assert model.card.artifact_digest == payload["artifact_digest"]
+    else:
+        # A different scikit-learn minor refuses the artifact and fits in memory
+        # (see test_ai_artifact.py); the selection rule is unchanged.
+        assert "scikit-learn" in (artifact_fallback_reason() or "")
+        assert 0.5 <= model.threshold <= 0.7
 
 
 def test_metric_denominators_match_an_independently_checked_example():

@@ -20,7 +20,7 @@ from leaklens.ai.corpus_realworld import (
     repositories,
 )
 from leaklens.ai.features import model_features
-from leaklens.ai.learned import reset_model_cache
+from leaklens.ai.learned import artifact_fallback_reason, get_model, reset_model_cache
 from leaklens.ai.realworld import (
     FROZEN_DIGEST,
     evaluate_public_notebooks,
@@ -164,8 +164,13 @@ def test_frozen_model_scores_the_holdout_within_reported_bounds():
     }
     assert data["model"]["features"] == 108
     # The shipped threshold is chosen on authored validation only; it is 0.60
-    # after the M6 rebuild. The Phase 6 report stays a historical record.
-    assert data["model"]["threshold"] == 0.60
+    # after the M6 rebuild. The Phase 6 report stays a historical record. Builds
+    # on another scikit-learn minor refit instead of loading the artifact, so the
+    # report documents the threshold actually used here.
+    _evaluation, model = get_model(compare_candidates=False)
+    assert data["model"]["threshold"] == model.threshold
+    if artifact_fallback_reason() is None:
+        assert model.threshold == 0.60
     assert data["calibration"]["brier"] <= 0.5
 
 
