@@ -17,6 +17,8 @@ from leaklens.fingerprint import SCHEMA_VERSION
 from leaklens.workspace import (
     GRAPH_MAX_LIMIT,
     ScanSession,
+    WorkspacePathError,
+    WorkspaceScanManager,
     _graph_payload,
     create_workspace_app,
 )
@@ -605,11 +607,43 @@ def test_dataset_paths_outside_the_root_are_rejected(tmp_path):
     outside.write_text("x,y\n1,0\n", encoding="utf-8")
     client = _client(root)
 
-    for path in ("../outside.csv", outside.as_posix(), "..\\outside.csv"):
+    for path in (
+        "../outside.csv",
+        outside.as_posix(),
+        "..\\outside.csv",
+        "..\\..\\outside.csv",
+    ):
         for endpoint in ("/api/datasets/inspect", "/api/datasets"):
             response = client.post(endpoint, json={"path": path, "target": "y"})
             assert response.status_code == 422, (path, endpoint)
             assert "outside the workspace root" in response.json()["detail"]
+
+
+def test_dataset_paths_with_windows_separators_resolve_inside_the_root(tmp_path):
+    root = tmp_path / "root"
+    (root / "nested").mkdir(parents=True)
+    _dataset(root / "nested")
+    client = _client(root)
+
+    inspected = client.post("/api/datasets/inspect", json={"path": "nested\\train.csv"})
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json()["rows"] == 120
+
+    started = client.post(
+        "/api/datasets", json={"path": "nested\\train.csv", "target": "y"}
+    )
+    assert started.status_code == 202, started.text
+
+
+def test_workspace_resolve_normalizes_windows_separators(tmp_path):
+    root = tmp_path / "root"
+    (root / "nested").mkdir(parents=True)
+    manager = WorkspaceScanManager(root)
+
+    expected = (root / "nested" / "train.csv").resolve()
+    assert manager.resolve("nested\\train.csv") == expected
+    with pytest.raises(WorkspacePathError, match="outside the workspace root"):
+        manager.resolve("..\\outside.csv")
 
 
 def test_dataset_empty_and_malformed_files_are_rejected(tmp_path):

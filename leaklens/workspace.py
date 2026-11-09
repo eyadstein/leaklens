@@ -1097,7 +1097,10 @@ class WorkspaceScanManager:
         text = (value or "").strip()
         if not text:
             raise WorkspacePathError("a path is required")
-        candidate = Path(text)
+        # POSIX reads "..\outside.csv" as one filename, so a Windows separator must be
+        # normalized before parsing or the traversal never reaches the containment check.
+        # shortcut: a POSIX file whose name contains "\" is unreachable from the workspace.
+        candidate = Path(text.replace("\\", "/"))
         target = candidate if candidate.is_absolute() else self.root / candidate
         target = target.resolve()
         if target != self.root and not target.is_relative_to(self.root):
