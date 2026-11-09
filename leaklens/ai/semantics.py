@@ -251,6 +251,8 @@ class _Builder:
             location=clean_location,
             detector="semantics",
             severity_hint=severity_hint,
+            confidence_basis="heuristic_weight",
+            sufficiency="weak",
             column=_clean(column, 160) if column else None,
             corroborates=corroborates,
             limitations=tuple(_clean(item, 260) for item in limitations)

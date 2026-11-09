@@ -525,6 +525,14 @@ def test_learned_hypotheses_are_optional_evidence_bound_and_not_certain():
     assert item.title.endswith(")") or item.title.endswith("[needs review]")
 
 
+def test_learned_hypotheses_record_a_calibrated_probability_basis():
+    item = learned_hypotheses((CodeSource(label="model.py", source=LEAKY),))[0]
+
+    assert item.detector == "learned"
+    assert item.confidence_basis == "calibrated_probability"
+    assert item.sufficiency == "supported"
+
+
 def test_learned_hypotheses_can_corroborate_a_deterministic_finding():
     from leaklens.leakage import Finding
 
@@ -651,6 +659,8 @@ def test_uncertain_units_are_labelled_for_review_with_lower_confidence():
     assert item.title.endswith("[needs review]")
     assert "uncertain" in item.explanation
     assert "margin" in item.explanation
+    assert item.confidence_basis == "calibrated_probability"
+    assert item.sufficiency == "weak"
     assert item.confidence <= 0.70
     assert item.severity_hint == "low"
 

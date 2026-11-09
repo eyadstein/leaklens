@@ -14,6 +14,13 @@ import {
   fixtureMeta,
 } from "./demo-engine.mjs";
 
+const CONFIDENCE_BASIS_LABELS = {
+  calibrated_probability: "uncalibrated ranking score",
+  heuristic_weight: "heuristic rule strength",
+  unavailable: "unavailable",
+};
+const confidenceLabel = (basis) => CONFIDENCE_BASIS_LABELS[basis] || "unavailable";
+
 const root = document.querySelector("[data-demo]");
 if (root) {
   const groupTabs = root.querySelector("[data-group-tabs]");
@@ -456,7 +463,7 @@ if (root) {
           ),
           el("p", {
             class: "ai-meta",
-            text: `confidence ${hypothesis.confidence.toFixed(2)} · ${hypothesis.concept} · ${hypothesis.location}`,
+            text: `confidence (${confidenceLabel(hypothesis.confidenceBasis)}) ${hypothesis.confidence.toFixed(2)} · ${hypothesis.concept} · ${hypothesis.location}`,
           }),
           el("p", { text: hypothesis.explanation })
         );

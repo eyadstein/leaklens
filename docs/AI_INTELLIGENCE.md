@@ -173,6 +173,27 @@ Metrics can vary slightly between scikit-learn releases because a refit is not b
 [AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory on the holdout and on a
 representative project scan.
 
+## Confidence semantics
+
+Every hypothesis now carries a machine-readable `confidence_basis` so the number is never
+read as more than it is:
+
+| `confidence_basis` | Human label | Produced by | Meaning |
+|---|---|---|---|
+| `calibrated_probability` | uncalibrated ranking score | learned detector | The fitted model's calibrated probability, exposed through a monotone ranking transform. Calibration does not transfer to the real-world holdout, so the displayed value is a ranking score, not a risk estimate. |
+| `heuristic_weight` | heuristic rule strength | semantic rules | A hand-assigned weight with bounded corroboration bonuses. It encodes rule strength, not a measured frequency. |
+| `unavailable` | unavailable | legacy or unknown payloads | No provenance was recorded. The default keeps older payloads valid. |
+
+`sufficiency` (`supported|weak`) records whether the observation is strong enough to act on:
+semantic rules are always `weak`; the learned detector is `supported` only on a clear margin
+and `weak` for moderate or uncertain units. Root-cause groups do not have a hypothesis basis;
+they carry a derived score and are labelled `Confidence (derived group score)`.
+
+JSON keeps the machine values in `confidence_basis` and `sufficiency` (schema `1.1`), while
+HTML, the console and the website print the human label. The schema rejects an unknown basis
+and rejects `calibrated_probability` unless the `learned` detector backs it. Confidence values
+themselves are unchanged.
+
 ## Limitations
 
 - The development corpus is small, authored and Python-only; the locked test has 47 cases,

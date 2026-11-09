@@ -1036,12 +1036,21 @@ def main(argv=None) -> int:
             for recommendation in intelligence_report["recommendations"]:
                 print(f"    Recommendation: {recommendation['title']}")
         if ai_report is not None:
+            from .ai.schemas import confidence_label
+
             hypotheses = ai_report["hypotheses"]
             groups = ai_report["plan"]["root_causes"]
             print(
                 f"AI (experimental): {len(hypotheses)} hypothesis(es), "
                 f"{len(groups)} root-cause group(s); deterministic findings unchanged."
             )
+            bases: list[str] = []
+            for hypothesis in hypotheses:
+                label = confidence_label(hypothesis.get("confidence_basis"))
+                if label not in bases:
+                    bases.append(label)
+            if bases:
+                print(f"    AI confidence bases: {', '.join(bases)}")
             for group in groups[:3]:
                 print(
                     f"    AI root cause [{group['priority']}]: {group['title']} "
@@ -1051,7 +1060,9 @@ def main(argv=None) -> int:
                 print(f"    AI summary: {ai_report['plan']['llm_summary']}")
             for hypothesis in hypotheses[:3]:
                 print(
-                    f"    AI hypothesis [{hypothesis['confidence']:.2f}]: "
+                    f"    AI hypothesis "
+                    f"[{confidence_label(hypothesis.get('confidence_basis'))}: "
+                    f"{hypothesis['confidence']:.2f}]: "
                     f"{hypothesis['title']} :: {hypothesis['location']}"
                 )
         for index, f in enumerate(fs):

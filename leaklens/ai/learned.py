@@ -1327,6 +1327,8 @@ def learned_hypotheses(
                     severity_hint=(
                         "medium" if probability >= 0.85 and margin >= 0.20 else "low"
                     ),
+                    confidence_basis="calibrated_probability",
+                    sufficiency="supported" if uncertainty == "clear" else "weak",
                     corroborates=corroborating,
                     limitations=MODEL_LIMITATIONS[:3],
                 )

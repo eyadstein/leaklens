@@ -119,6 +119,46 @@ def test_evidence_ids_must_be_unique_within_a_hypothesis():
         hypothesis(evidence=(evidence(), evidence()))
 
 
+def test_confidence_basis_defaults_keep_legacy_hypotheses_valid():
+    item = hypothesis()
+
+    assert item.confidence_basis == "unavailable"
+    assert item.sufficiency == "weak"
+    payload = item.to_dict()
+    assert payload["confidence_basis"] == "unavailable"
+    assert payload["sufficiency"] == "weak"
+
+
+def test_confidence_basis_and_sufficiency_are_validated():
+    assert (
+        hypothesis(confidence_basis="heuristic_weight").confidence_basis
+        == "heuristic_weight"
+    )
+    assert hypothesis(confidence_basis="unavailable").confidence_basis == "unavailable"
+    assert (
+        hypothesis(
+            detector="learned", confidence_basis="calibrated_probability"
+        ).confidence_basis
+        == "calibrated_probability"
+    )
+    assert hypothesis(sufficiency="supported").sufficiency == "supported"
+
+    with pytest.raises(ValueError, match="confidence basis"):
+        hypothesis(confidence_basis="certainty")
+
+    with pytest.raises(ValueError, match="sufficiency"):
+        hypothesis(sufficiency="certain")
+
+    # A calibrated probability may only be claimed when the learned detector
+    # (the only producer with a fitted model) backs it.
+    with pytest.raises(ValueError, match="calibrated_probability"):
+        hypothesis(detector="semantics", confidence_basis="calibrated_probability")
+
+
+def test_schema_version_carries_the_confidence_contract():
+    assert SCHEMA_VERSION == "1.1"
+
+
 def test_group_and_plan_must_stay_internally_consistent():
     remediation = Remediation(
         title="Fix the split",

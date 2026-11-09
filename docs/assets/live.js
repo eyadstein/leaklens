@@ -22,6 +22,13 @@ import {
   validateFile,
 } from "./live-engine.mjs";
 
+const CONFIDENCE_BASIS_LABELS = {
+  calibrated_probability: "uncalibrated ranking score",
+  heuristic_weight: "heuristic rule strength",
+  unavailable: "unavailable",
+};
+const confidenceLabel = (basis) => CONFIDENCE_BASIS_LABELS[basis] || "unavailable";
+
 const doc = document;
 const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 const CONFIG = window.LEAKLENS_LIVE_CONFIG || {};
@@ -933,7 +940,7 @@ const renderAI = (data) => {
     card.append(
       el("p", {
         className: "live-note",
-        textContent: `Priority: ${String(group.priority || "unknown")} · Confidence: ${String(group.confidence ?? "—")} · Source: ${String(group.source || "unknown")}`,
+        textContent: `Priority: ${String(group.priority || "unknown")} · Confidence (derived group score): ${String(group.confidence ?? "—")} · Source: ${String(group.source || "unknown")}`,
       })
     );
     if (aiText(group.explanation)) card.append(el("p", { textContent: aiText(group.explanation) }));
@@ -966,7 +973,7 @@ const renderAI = (data) => {
     card.append(
       el("p", {
         className: "live-note",
-        textContent: `Concept: ${String(hypothesis.concept || "unknown")} · Confidence: ${String(hypothesis.confidence ?? "—")} · Severity hint: ${String(hypothesis.severity_hint || "info")} · Location: ${String(hypothesis.location || "—")}`,
+        textContent: `Concept: ${String(hypothesis.concept || "unknown")} · Confidence (${confidenceLabel(hypothesis.confidence_basis)}): ${String(hypothesis.confidence ?? "—")} · Severity hint: ${String(hypothesis.severity_hint || "info")} · Location: ${String(hypothesis.location || "—")}`,
       })
     );
     if (aiText(hypothesis.explanation)) {

@@ -81,7 +81,7 @@ export const fixtures = {
       "trustScore": 0,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.0",
+        "schemaVersion": "1.1",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -95,6 +95,8 @@ export const fixtures = {
             "concept": "target_derived_feature",
             "title": "Feature is derived from the target",
             "confidence": 0.68,
+            "confidenceBasis": "heuristic_weight",
+            "sufficiency": "weak",
             "severityHint": "medium",
             "location": "advanced_leaks.py:16",
             "corroborates": null,
@@ -113,6 +115,8 @@ export const fixtures = {
             "concept": "global_statistic_before_split",
             "title": "Global statistics computed before the split",
             "confidence": 0.5,
+            "confidenceBasis": "heuristic_weight",
+            "sufficiency": "weak",
             "severityHint": "low",
             "location": "advanced_leaks.py:15",
             "corroborates": null,
@@ -131,6 +135,8 @@ export const fixtures = {
             "concept": "learned_leakage_pattern",
             "title": "Learned model sees a leakage-like code pattern (fit_on_test_frame)",
             "confidence": 0.8994,
+            "confidenceBasis": "calibrated_probability",
+            "sufficiency": "supported",
             "severityHint": "medium",
             "location": "advanced_leaks.py:29",
             "corroborates": "feature_selection_before_split",
@@ -267,7 +273,7 @@ export const fixtures = {
       "trustScore": 25,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.0",
+        "schemaVersion": "1.1",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -281,6 +287,8 @@ export const fixtures = {
             "concept": "learned_leakage_pattern",
             "title": "Learned model sees a leakage-like code pattern (unsafe_resampling)",
             "confidence": 0.8994,
+            "confidenceBasis": "calibrated_probability",
+            "sufficiency": "supported",
             "severityHint": "medium",
             "location": "bad_pipeline.py:6",
             "corroborates": "preprocess_before_split",
@@ -391,7 +399,7 @@ export const fixtures = {
       "trustScore": 100,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.0",
+        "schemaVersion": "1.1",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",

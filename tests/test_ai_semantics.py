@@ -38,6 +38,8 @@ def test_detects_dangerous_code_flows_with_evidence():
     } <= found
     for item in hypotheses:
         assert item.detector == "semantics"
+        assert item.confidence_basis == "heuristic_weight"
+        assert item.sufficiency == "weak"
         assert 0.0 <= item.confidence <= 0.95
         assert item.evidence
         assert item.location.startswith("pipeline.py:")

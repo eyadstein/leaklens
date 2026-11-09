@@ -16,8 +16,30 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 ENGINE_NAME = "leaklens.ai.experimental"
+
+_CONFIDENCE_BASES = frozenset(
+    {"calibrated_probability", "heuristic_weight", "unavailable"}
+)
+_SUFFICIENCY = frozenset({"supported", "weak"})
+
+# One canonical mapping from the machine value to the words a user reads.
+# A calibrated model probability is exposed through a monotone ranking
+# transform, so the displayed number is labelled as a ranking score even
+# though its provenance is a calibrated probability.
+CONFIDENCE_BASIS_LABELS = {
+    "calibrated_probability": "uncalibrated ranking score",
+    "heuristic_weight": "heuristic rule strength",
+    "unavailable": "unavailable",
+}
+
+
+def confidence_label(basis: object) -> str:
+    """Human label for a confidence basis; unknown values read as unavailable."""
+
+    return CONFIDENCE_BASIS_LABELS.get(str(basis), "unavailable")
+
 
 _EVIDENCE_SOURCES = frozenset(
     {"code", "schema", "relationship", "statistic", "model", "finding"}
@@ -110,6 +132,8 @@ class Hypothesis:
     location: str
     detector: str
     severity_hint: str = "medium"
+    confidence_basis: str = "unavailable"
+    sufficiency: str = "weak"
     column: str | None = None
     corroborates: str | None = None
     limitations: tuple[str, ...] = ()
@@ -134,6 +158,14 @@ class Hypothesis:
             raise ValueError(f"unsupported detector: {self.detector}")
         if self.severity_hint not in _SEVERITY_HINTS:
             raise ValueError("AI hypotheses may only use info, low or medium severity")
+        if self.confidence_basis not in _CONFIDENCE_BASES:
+            raise ValueError(f"unsupported confidence basis: {self.confidence_basis}")
+        if self.sufficiency not in _SUFFICIENCY:
+            raise ValueError(f"unsupported sufficiency: {self.sufficiency}")
+        if self.confidence_basis == "calibrated_probability" and (
+            self.detector != "learned"
+        ):
+            raise ValueError("calibrated_probability requires a fitted model behind it")
         if self.column is not None:
             _text(self.column, "column", 200)
         if self.corroborates is not None:
@@ -494,6 +526,7 @@ GLOBAL_LIMITATIONS = (
 
 
 __all__ = [
+    "CONFIDENCE_BASIS_LABELS",
     "ENGINE_NAME",
     "GLOBAL_LIMITATIONS",
     "SCHEMA_VERSION",
@@ -506,4 +539,5 @@ __all__ = [
     "ReasoningPlan",
     "Remediation",
     "RootCauseGroup",
+    "confidence_label",
 ]

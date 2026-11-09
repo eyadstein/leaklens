@@ -333,6 +333,8 @@ def _ai_section(data: dict) -> str:
     """Render the optional experimental AI layer with every value escaped."""
     if not data:
         return ""
+    from .ai.schemas import confidence_label
+
     hypotheses = data.get("hypotheses", [])
     plan = data.get("plan", {}) or {}
     groups = plan.get("root_causes", [])
@@ -434,7 +436,8 @@ def _ai_section(data: dict) -> str:
                 )
             sections.append(
                 f'<div class="card"><h3>{title}</h3>'
-                f"<p><b>Priority:</b> {priority} · <b>Confidence:</b> {confidence} · "
+                f"<p><b>Priority:</b> {priority} · "
+                f"<b>Confidence (derived group score): {confidence}</b> · "
                 f"<b>Source:</b> {source}</p>"
                 f"<p>{explanation}</p>"
                 f"<b>Remediation</b><ul>{actions}</ul>"
@@ -448,6 +451,7 @@ def _ai_section(data: dict) -> str:
             title = html.escape(str(item.get("title", "")))
             concept = html.escape(str(item.get("concept", "")))
             confidence = html.escape(str(item.get("confidence", "")))
+            basis = html.escape(confidence_label(item.get("confidence_basis")))
             severity = html.escape(str(item.get("severity_hint", "")))
             location = html.escape(str(item.get("location", "")))
             corroborates = item.get("corroborates")
@@ -464,7 +468,8 @@ def _ai_section(data: dict) -> str:
             )
             sections.append(
                 f'<div class="card"><h3>{title}</h3>'
-                f"<p><b>Concept:</b> {concept} · <b>Confidence:</b> {confidence} · "
+                f"<p><b>Concept:</b> {concept} · "
+                f"<b>Confidence ({basis}): {confidence}</b> · "
                 f"<b>Severity hint:</b> {severity} · <b>Location:</b> {location}</p>"
                 + (
                     f"<p><b>Corroborates deterministic finding:</b> "

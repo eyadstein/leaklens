@@ -105,6 +105,8 @@ def _ai_fixture(filename: str, source: str, findings) -> dict:
                 "concept": hypothesis["concept"],
                 "title": hypothesis["title"],
                 "confidence": hypothesis["confidence"],
+                "confidenceBasis": hypothesis["confidence_basis"],
+                "sufficiency": hypothesis["sufficiency"],
                 "severityHint": hypothesis["severity_hint"],
                 "location": hypothesis["location"],
                 "corroborates": hypothesis["corroborates"],
