@@ -161,7 +161,15 @@ is reported rather than tuned away.
 validation or the locked test, plus a small smoke check on eight real public notebooks with
 definitive hand labels. The measured holdout result is accuracy 0.833, precision 0.767,
 recall 0.958, F1 0.852 and FPR 0.292; the report lists every false positive and miss,
-repository-cluster intervals and calibration. It is not a production-accuracy claim.
+repository-cluster intervals and calibration. It is the Phase 6 record at threshold 0.50,
+not a production-accuracy claim.
+
+[AI_REALWORLD_H2.md](AI_REALWORLD_H2.md) records the H2 attempt. There is no second
+independent holdout: 0 of the required 48 units from 12 new repositories exist, the notebook
+corpus has only 8 definitive labels in 60, and H1 is a single-review corpus. Per the roadmap,
+H2 is therefore published as a documented shortfall rather than a number. A diagnostic
+re-score of the shipped P7 model on H1 (explicitly not independent and not H2) gives accuracy
+0.833, precision 0.786, recall 0.917, F1 0.846, FPR 0.250, Brier 0.150 at threshold 0.53.
 
 The shipped threshold is chosen on validation only (0.53 for the current model) and
 probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at

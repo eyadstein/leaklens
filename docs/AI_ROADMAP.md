@@ -6,7 +6,9 @@ model artifact and provenance) shipped in `leaklens/ai/artifact.py`, `leaklens/a
 and `leaklens/ai/learned.py`. **M3** (explicit confidence semantics) shipped in
 `leaklens/ai/schemas.py`, `ai/semantics.py`, `ai/learned.py`, `report.py` and `cli.py`.
 **M4** (AI evidence anchored to the deterministic evidence graph) shipped in
-`leaklens/ai/schemas.py` and `ai/analysis.py`. **M5–M8 remain proposals** and none of them is
+`leaklens/ai/schemas.py` and `ai/analysis.py`. **M5** (independent real-world re-score) closed
+as a **documented shortfall** in `docs/AI_REALWORLD_H2.md`: no H2 corpus exists, so no H2 number
+is published and H1 remains the Phase 6 record. **M6–M8 remain proposals** and none of them is
 implemented.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
@@ -372,6 +374,8 @@ fingerprints, baselines, suppressions, policy, or the AI-off output of any comma
 - **New modules:** none.
 - **Integration:** reuses the existing frozen-manifest, cluster-bootstrap and calibration
   reporting path.
+- **Status:** closed as a documented shortfall. No H2 corpus exists, so
+  `docs/AI_REALWORLD_H2.md` publishes the shortfall and no H2 number.
 - **Compatibility:** H1 stays published as the Phase 6 record; H2 is added, never substituted.
 - **Evaluation and acceptance:** H2 has ≥48 units from ≥12 repositories disjoint from the
   authored corpus and H1; provenance per unit; every cited path verified against a pinned
