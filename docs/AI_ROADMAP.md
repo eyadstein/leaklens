@@ -8,8 +8,9 @@ and `leaklens/ai/learned.py`. **M3** (explicit confidence semantics) shipped in
 **M4** (AI evidence anchored to the deterministic evidence graph) shipped in
 `leaklens/ai/schemas.py` and `ai/analysis.py`. **M5** (independent real-world re-score) closed
 as a **documented shortfall** in `docs/AI_REALWORLD_H2.md`: no H2 corpus exists, so no H2 number
-is published and H1 remains the Phase 6 record. **M6–M8 remain proposals** and none of them is
-implemented.
+is published and H1 remains the Phase 6 record. **M6** (false-positive reduction) shipped in
+`ai/features.py`, `ai/corpus.py` and the regenerated `ai/model.json`; it is a diagnostic
+improvement, not an H2 score. **M7–M8 remain proposals** and none of them is implemented.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
 roadmap derived from its measured gaps. It exists so the next phase starts from evidence
@@ -47,7 +48,7 @@ measured yet, and **not adopted** means considered and rejected with the reason.
 | Default | Off. Every entry point is opt-in; nothing runs unless asked |
 | Model | Class-balanced logistic regression over 108 model-eligible features; `MODEL_VERSION = "leaklens-ai-p7-2026.11"` (`ai/learned.py:56`) |
 | Training | Fitted at request time from the authored corpus, grouped CV, calibration from out-of-fold probabilities, threshold from validation only (`ai/learned.py`) |
-| Threshold | 0.53, `validation_midpoint` rule |
+| Threshold | 0.60, `validation_midpoint` rule (unchanged rule; the M6 corpus rebuild moved the value from 0.53) |
 | Serialization | None. The fitted model lives in a process-local cache; there is no artifact to load, inspect or pin |
 | Deterministic counterpart | `ai/features.py` indicator extraction, `ai/semantics.py` name/flow rules, `ai/reasoning.py` grouping and remediation |
 | LLM | Optional, local Ollama by default, findings-only prompt, schema-validated output, deterministic fallback with a recorded reason |
@@ -82,9 +83,9 @@ These are enforced in code and tests today, and every milestone below inherits t
 | Whole-project scan | 49 files / 713 KB → 3.386 s feature extraction | AI_PERFORMANCE.md |
 
 The H1 numbers were produced with the Phase 6 model at threshold 0.50. The shipped Phase 7
-model (threshold 0.53, changed corpus, extraction guards, local evidence, runtime gate) has
-**no independent real-world re-score**. That single fact is the largest credibility gap in
-this document.
+model (threshold 0.60 after the M6 rebuild, changed corpus, extraction guards, local evidence,
+runtime gate) has **no independent real-world re-score**. That single fact is the largest
+credibility gap in this document.
 
 ---
 
@@ -393,6 +394,14 @@ fingerprints, baselines, suppressions, policy, or the AI-off output of any comma
 
 ### M6 — Reduce real-world false positives on the four known families
 
+- **Status:** shipped as four deterministic extraction guards plus four hard negatives.
+  The H1 diagnostic (not an H2 score) moved from TP/FP/FN/TN 22/6/2/18 to 22/0/2/24:
+  precision 0.7857 → 1.0000, recall 0.9167 → 0.9167, FPR 0.25 → 0.00. The locked test is
+  unchanged at 24/0/1/22 (accuracy 0.9787, precision 1.000) and the Phase 7 holdout at
+  6/1/0/5. The unchanged validation rule now selects threshold 0.60. One H1 case
+  (`xgboost_early_stopping_on_test`) lost a spurious target-feature signal and is now a known
+  false negative; an early-stopping indicator is deferred because M6 must not tune on H1. H2
+  remains unavailable, so the precision ≥0.80 at recall ≥0.93 target is still unscored.
 - **Objective:** raise precision on the measured holdout without giving back recall.
 - **User capability:** fewer false accusations on safe CV, temporal splits, CatBoost `Pool`
   and EDA-only notebooks.
@@ -557,7 +566,7 @@ Metrics that must not silently regress: locked-test accuracy 0.979, precision 1.
 - **LLM-written fixes applied to user code.** The layer produces suggestions; auto-editing
   user pipelines is out of scope and unsafe.
 - **Croissant or datasheet export.** New product surface with no detector benefit.
-- **A neural or transformer detector.** The corpus is 259 development cases; a larger model
+- **A neural or transformer detector.** The corpus is 263 development cases; a larger model
   would overfit it and break the CPU and memory budget.
 - **Non-Python pipeline languages.** `collect_code_sources` reads `.py`/`.ipynb`. Extending it
   is a scanner project (SQL already has its own module), not an AI project.

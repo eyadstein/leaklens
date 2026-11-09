@@ -303,6 +303,7 @@ _add(
     True,
     "kfold over accounts",
     "from sklearn.model_selection import KFold, cross_val_score\n"
+    "X = df[['spend', 'visits', 'account_id']]\n"
     "scores = cross_val_score(model, X, df['churn'], cv=KFold(5, shuffle=True))\n",
 )
 _add(
@@ -336,7 +337,9 @@ _add(
     True,
     "cross validation across time",
     "from sklearn.model_selection import cross_val_score\n"
-    "scores = cross_val_score(model, X, y, cv=5)\n",
+    "ordered = df.sort_values('timestamp')\n"
+    "X = ordered[['month', 'orders']]\n"
+    "scores = cross_val_score(model, X, ordered['sales'], cv=5)\n",
 )
 _add(
     "tuning_before_split",
@@ -741,6 +744,55 @@ _add(
     + "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
     "# all transformers are fitted on X_train only, never on the test split\n"
     "train_stats = X_train.describe()\n",
+)
+# M6 hard negatives: the same fold-local CV, positional time split, label
+# carrier and EDA shapes that leaky cases use, but with no boundary crossed.
+_add(
+    "safe_plain_cv",
+    "tuning",
+    False,
+    "plain fold local cross validation",
+    "from sklearn.model_selection import KFold, cross_val_score\n"
+    "cv = KFold(n_splits=5, shuffle=True, random_state=0)\n"
+    "scores = cross_val_score(model, features, labels, cv=cv)\n",
+)
+_add(
+    "safe_plain_cv",
+    "tuning",
+    False,
+    "plain cross validation inside an objective",
+    "def objective(trial):\n"
+    "    depth = trial.suggest_int('depth', 2, 16)\n"
+    "    model = RandomForestClassifier(max_depth=depth)\n"
+    "    scores = cross_val_score(model, features, labels, cv=5)\n"
+    "    return scores.mean()\n",
+)
+_add(
+    "safe_temporal_split",
+    "temporal",
+    False,
+    "positional time split into catboost pools",
+    "from catboost import CatBoostRegressor, Pool\n"
+    "ordered = df.sort_values('week').reset_index(drop=True)\n"
+    "cutoff = int(len(ordered) * 0.7)\n"
+    "train = ordered.iloc[:cutoff]\n"
+    "test = ordered.iloc[cutoff:]\n"
+    "train_pool = Pool(train[features], train['demand'])\n"
+    "test_pool = Pool(test[features], test['demand'])\n"
+    "model = CatBoostRegressor(iterations=200)\n"
+    "model.fit(train_pool)\n"
+    "model.score(test_pool)\n",
+)
+_add(
+    "safe_eda",
+    "preprocessing",
+    False,
+    "scaling for a diagnostic scatter",
+    "import matplotlib.pyplot as plt\n"
+    "subset = df[['income', 'age']]\n"
+    "projected = scaler.fit_transform(subset)\n"
+    "plt.scatter(projected[:, 0], projected[:, 1])\n"
+    "plt.show()\n",
 )
 
 

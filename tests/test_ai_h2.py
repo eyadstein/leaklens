@@ -148,7 +148,9 @@ def test_shipped_model_identity_is_pinned_for_any_future_h2_run():
 
     assert model.card.version == MODEL_VERSION == "leaklens-ai-p7-2026.11"
     assert len(MODEL_FEATURE_NAMES) == 108
-    assert model.threshold == 0.53
+    # M6 added four hard negatives, so the same validation-only selection rule
+    # now returns 0.60; the rule itself and the feature catalogue are unchanged.
+    assert model.threshold == 0.60
     # The card digest is only populated when the build matches the artifact's
     # library minor version (see test_ai_artifact.py), so it is not pinned here.
 

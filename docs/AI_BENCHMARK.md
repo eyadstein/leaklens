@@ -5,13 +5,13 @@ This benchmark measures the **optional, experimental AI layer** only. It is not 
 ## Protocol and data provenance
 
 - Model: `logistic_regression_balanced` (leaklens-ai-p7-2026.11), 108 features.
-- Training: 219 authored cases from 15 scenario sources, including 40 Phase 7 hard-positive/hard-negative development cases.
+- Training: 223 authored cases from 15 scenario sources, including 40 Phase 7 hard-positive/hard-negative development cases.
 - Validation: 40 authored cases from 4 disjoint sources.
 - Locked test: 47 authored cases from 4 further disjoint sources.
 - Phase 7 holdout: 12 authored cases from 5 further source families, frozen before the final fit and scored once.
-- Groups: 174 template groups across the development corpus; grouped folds never split a family.
-- Threshold: 0.53 (chosen on validation only).
-- train=219 cases/15 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; candidate selection frozen after validation; threshold rule=validation_midpoint; runtime hypotheses also require at least one semantic risk indicator.
+- Groups: 176 template groups across the development corpus; grouped folds never split a family.
+- Threshold: 0.60 (chosen on validation only).
+- train=223 cases/15 sources; validation=40 cases/4 sources; locked test imported only by the benchmark; candidate selection frozen after validation; threshold rule=validation_midpoint; runtime hypotheses also require at least one semantic risk indicator.
 
 Splits are by **scenario source and template family**, not by random row. The locked test is imported only by this benchmark and its tests; training, feature selection, calibration and threshold selection never import it.
 
@@ -40,17 +40,17 @@ Selection uses grouped CV on training cases followed by validation, with the sam
 
 | Candidate | CV F1 | Validation F1 | Validation FPR |
 |---|---:|---:|---:|
-| `gradient_boosting_depth2` | 0.907 | 0.977 | 0.053 |
-| `gradient_boosting_depth1` | 0.835 | 0.977 | 0.053 |
-| `random_forest_depth6` | 0.822 | 0.930 | 0.105 |
-| `random_forest_unbounded` | 0.836 | 0.927 | 0.053 |
-| `extra_trees_depth8` | 0.858 | 0.930 | 0.105 |
-| `extra_trees_unbounded` | 0.846 | 0.976 | 0.000 |
-| `hist_gradient_boosting` | 0.790 | 0.766 | 0.421 |
-| `logistic_regression` | 0.943 | 1.000 | 0.000 |
-| `logistic_regression_l1` | 0.942 | 1.000 | 0.000 |
-| `logistic_regression_balanced` **(selected)** | 0.943 | 1.000 | 0.000 |
-| `random_forest_depth4` | 0.783 | 0.864 | 0.210 |
+| `gradient_boosting_depth2` | 0.911 | 0.977 | 0.053 |
+| `gradient_boosting_depth1` | 0.850 | 0.977 | 0.053 |
+| `random_forest_depth6` | 0.845 | 0.930 | 0.105 |
+| `random_forest_unbounded` | 0.842 | 0.952 | 0.053 |
+| `extra_trees_depth8` | 0.875 | 0.930 | 0.105 |
+| `extra_trees_unbounded` | 0.861 | 0.976 | 0.000 |
+| `hist_gradient_boosting` | 0.803 | 0.766 | 0.421 |
+| `logistic_regression` | 0.931 | 1.000 | 0.000 |
+| `logistic_regression_l1` | 0.906 | 1.000 | 0.000 |
+| `logistic_regression_balanced` **(selected)** | 0.931 | 1.000 | 0.000 |
+| `random_forest_depth4` | 0.798 | 0.864 | 0.210 |
 
 ## Development results (not the independent test)
 
@@ -58,13 +58,13 @@ Selection uses grouped CV on training cases followed by validation, with the sam
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.941 |
-| Precision | 0.955 |
-| Recall | 0.930 |
-| F1 | 0.943 |
-| Specificity | 0.952 |
-| False-positive rate | 0.048 |
-| TP / FP / FN / TN | 107 / 5 / 8 / 99 |
+| Accuracy | 0.937 |
+| Precision | 0.981 |
+| Recall | 0.896 |
+| F1 | 0.936 |
+| Specificity | 0.982 |
+| False-positive rate | 0.018 |
+| TP / FP / FN / TN | 103 / 2 / 12 / 106 |
 
 ### Validation metrics
 
@@ -84,9 +84,9 @@ Validation is used for architecture selection and threshold choice. Because the 
 
 | Metric | Value |
 |---|---:|
-| `brier` | 0.0018 |
-| `expected_calibration_error` | 0.0251 |
-| `mean_probability` | 0.5243 |
+| `brier` | 0.0017 |
+| `expected_calibration_error` | 0.0158 |
+| `mean_probability` | 0.5368 |
 | `observed_rate` | 0.5250 |
 
 ## Locked independent test (evaluated once)
@@ -107,9 +107,9 @@ The frozen model and frozen threshold are applied to 47 cases from four scenario
 
 | Metric | Value |
 |---|---:|
-| `brier` | 0.0219 |
-| `expected_calibration_error` | 0.0331 |
-| `mean_probability` | 0.5300 |
+| `brier` | 0.0212 |
+| `expected_calibration_error` | 0.0317 |
+| `mean_probability` | 0.5293 |
 | `observed_rate` | 0.5319 |
 
 ### Locked-test metrics by category
@@ -138,13 +138,13 @@ The frozen model and frozen threshold are applied to 47 cases from four scenario
 ### Locked-test mistakes
 
 - No false positives on the locked test.
-- Missed leak: `random split over repeated applicants` (test:credit, p=0.046; signals: fit_on_train_frame, train_only_fit, safe_boundary_ratio, target_reference)
+- Missed leak: `random split over repeated applicants` (test:credit, p=0.054; signals: fit_on_train_frame, train_only_fit, safe_boundary_ratio, target_reference)
 
 ## Phase 7 frozen holdout (authored, evaluated once)
 
 Authored synthetic pairs, frozen before the final fit; grouped by template pair and source family; never used for training or tuning.
 
-Cases: 12 (6 leaky, 6 legitimate) from 5 source families. Threshold: 0.53, frozen before the final fit.
+Cases: 12 (6 leaky, 6 legitimate) from 5 source families. Threshold: 0.60, frozen before the final fit.
 
 | Metric | Value |
 |---|---:|
@@ -160,9 +160,9 @@ Cases: 12 (6 leaky, 6 legitimate) from 5 source families. Threshold: 0.53, froze
 
 | Metric | Value |
 |---|---:|
-| `brier` | 0.0865 |
-| `expected_calibration_error` | 0.1108 |
-| `mean_probability` | 0.6108 |
+| `brier` | 0.0938 |
+| `expected_calibration_error` | 0.1339 |
+| `mean_probability` | 0.6339 |
 | `observed_rate` | 0.5000 |
 
 ### Phase 7 holdout by source family
@@ -177,7 +177,7 @@ Cases: 12 (6 leaky, 6 legitimate) from 5 source families. Threshold: 0.53, froze
 
 ### Phase 7 holdout mistakes
 
-- False positive: `scaler fitted on each training fold` (holdout:p7-order, p=0.992; local signals: fit_before_split (+1.42), unsafe_preprocessing (+1.08), transformer_before_split (+1.08), unsafe_transformer_count_before_split (+1.03))
+- False positive: `scaler fitted on each training fold` (holdout:p7-order, p=0.973; local signals: fit_before_split (+1.44), unsafe_preprocessing (+1.12), transformer_before_split (+1.12), unsafe_transformer_count_before_split (+1.07))
 - No missed leaks on the Phase 7 holdout.
 
 ## Runtime hypothesis gate (development)
@@ -186,16 +186,16 @@ Hypothesis-level output. A leaky unit with no emitted hint is still scored by th
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 0.981 |
+| Accuracy | 0.989 |
 | Precision | 1.000 |
-| Recall | 0.963 |
-| F1 | 0.981 |
+| Recall | 0.978 |
+| F1 | 0.989 |
 | Specificity | 1.000 |
 | False-positive rate | 0.000 |
-| TP / FP / FN / TN | 131 / 0 / 5 / 123 |
+| TP / FP / FN / TN | 133 / 0 / 3 / 127 |
 
-- Units with an emitted hint: 131 of 259
-- Units scored but suppressed: 128
+- Units with an emitted hint: 133 of 263
+- Units scored but suppressed: 130
 
 No hint was emitted on a legitimate development case.
 
@@ -207,8 +207,8 @@ Contributions are signed local log-odds for this unit, not global feature import
 
 | Variant | Label | p | Predicted | Supporting local signals | Opposing local signals |
 |---|---|---:|---|---|---|
-| `scaler fitted before a manual fold loop` | leaky | 0.998 | True | `plain_kfold` (+2.34), `fit_before_split` (+1.42), `transformer_before_split` (+1.08), `unsafe_preprocessing` (+1.08) | `fold_local_fit` (-3.72) |
-| `scaler fitted inside a manual fold loop` | legitimate | 0.059 | False | `plain_kfold` (+2.34), `has_shuffle` (+1.02), `target_reference` (+0.31) | `fold_local_fit` (-3.72), `scaler` (-0.38) |
+| `scaler fitted before a manual fold loop` | leaky | 0.996 | True | `plain_kfold` (+3.05), `fit_before_split` (+1.44), `transformer_before_split` (+1.12), `unsafe_preprocessing` (+1.12) | `fold_local_fit` (-3.41) |
+| `scaler fitted inside a manual fold loop` | legitimate | 0.070 | False | `plain_kfold` (+3.05), `has_shuffle` (+0.70), `target_reference` (+0.35) | `fold_local_fit` (-3.41), `scaler` (-0.30) |
 
 ## External transfer to existing scanner cases (development)
 
@@ -251,8 +251,8 @@ This sweep is diagnostic only. The shipped threshold was chosen on validation, n
 
 | Threshold | Precision | Recall | F1 | FPR |
 |---:|---:|---:|---:|---:|
-| 0.30 | 0.974 | 1.000 | 0.987 | 0.030 |
-| 0.40 | 1.000 | 1.000 | 1.000 | 0.000 |
+| 0.30 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.40 | 0.987 | 1.000 | 0.993 | 0.015 |
 | 0.50 | 1.000 | 1.000 | 1.000 | 0.000 |
 | 0.60 | 1.000 | 1.000 | 1.000 | 0.000 |
 | 0.63 | 1.000 | 1.000 | 1.000 | 0.000 |
@@ -271,17 +271,17 @@ This sweep is diagnostic only. The shipped threshold was chosen on validation, n
 
 | Feature | Importance |
 |---|---:|
-| `target_feature_risk` | 0.0349 |
-| `group_boundary_ignored` | 0.0346 |
-| `future_feature_risk` | 0.0318 |
-| `group_aggregate_before_split` | 0.0280 |
-| `group_columns_used` | 0.0259 |
-| `identifier_feature_risk` | 0.0252 |
-| `cv_on_full_data` | 0.0241 |
+| `group_boundary_ignored` | 0.0364 |
+| `target_feature_risk` | 0.0353 |
+| `future_feature_risk` | 0.0308 |
+| `group_aggregate_before_split` | 0.0288 |
+| `identifier_feature_risk` | 0.0274 |
 | `target_relabel_safe` | 0.0240 |
-| `default_shuffle_after_sort` | 0.0230 |
-| `fit_before_split` | 0.0206 |
-| `duplicates_after_split` | 0.0194 |
+| `cv_on_full_data` | 0.0222 |
+| `fit_before_split` | 0.0209 |
+| `duplicates_after_split` | 0.0203 |
+| `manual_full_data_stats` | 0.0199 |
+| `group_columns_used` | 0.0195 |
 | `frequency_encoding_before_split` | 0.0193 |
 
 Global importance is not a causal explanation for any single prediction.
@@ -291,6 +291,37 @@ Global importance is not a causal explanation for any single prediction.
 - No clean external cases were flagged at the selected threshold.
 
 No leaky external cases were missed at the selected threshold.
+
+## M6 false-positive reduction
+
+Four deterministic extraction guards replace shape-only signals with boundary-aware ones. They
+change emitted features, not the model class or the feature catalogue (108 model features).
+
+| Family | Guard | Development hard negative | H1 FPs before → after |
+|---|---|---|---:|
+| Safe CV | `plain_cv_safe` emits `cv_full_data_safe` and drops `cv_on_full_data`, `plain_kfold`, `has_shuffle` only when nothing is fitted outside the folds, no time/group/identifier feature is used, and no group-aware splitter is present | `plain fold local cross validation`; `plain cross validation inside an objective` | 2 → 0 |
+| Temporal split | `sort_values(time)` + `.iloc[:cut]` / `.iloc[cut:]` is a split boundary; label carriers after it are exempt | `positional time split into catboost pools` | 2 → 0 |
+| CatBoost `Pool` / label carriers | `label=`, target-vector arguments and `Pool(...)` targets are carriers, exempt only when no boundary exists or they are built after it | existing safe pool cases; `positional time split into catboost pools` | 1 → 0 |
+| EDA-only | A full-frame fit with no split, CV or held-out scoring that only feeds a plot is `eda_summary_only` | `scaling for a diagnostic scatter` | 1 → 0 |
+
+Two development snippets (`cross validation across time`, `kfold over accounts`) were completed
+with the time and account columns their labels already depended on; their labels did not change.
+The development corpus grew from 259 to 263 cases (127 legitimate, 176 groups); the validation
+slice is unchanged at TP/FP/FN/TN 21/0/0/19. The runtime hypothesis gate on the development set
+moved from 131/0/5/123 to 133/0/3/127, recovering `kfold over accounts` (identifier used as a CV
+feature) and `borderline smote before cross validation` (prefixed resampler name); it still emits
+no hint on a legitimate development case.
+
+The H1 diagnostic moved from TP/FP/FN/TN 22/6/2/18 to 22/0/2/24: precision 0.7857 → 1.0000,
+recall 0.9167 → 0.9167, F1 0.8462 → 0.9565, accuracy 0.8333 → 0.9583. The locked test is
+unchanged at 24/0/1/22 (accuracy 0.9787, precision 1.000) and the Phase 7 holdout at 6/1/0/5.
+The unchanged validation-only rule now selects threshold **0.60** (it was 0.53); the rule itself
+was not edited.
+
+Known limitation: `xgboost_early_stopping_on_test` previously scored as leaky only because
+`label=y_train` was misread as a target feature. The carrier guard removes that spurious signal,
+leaving a genuine false negative with no existing early-stopping indicator. Recall on H1 is
+unchanged at 0.9167. Adding such an indicator is deferred because M6 must not tune on H1.
 
 ## Overfitting checks
 

@@ -86,7 +86,7 @@ export const fixtures = {
         "model": {
           "name": "leaklens-ai-p7",
           "version": "leaklens-ai-p7-2026.11",
-          "threshold": 0.53,
+          "threshold": 0.6,
           "features": 108
         },
         "hypotheses": [
@@ -140,13 +140,13 @@ export const fixtures = {
             "severityHint": "medium",
             "location": "advanced_leaks.py:29",
             "corroborates": "feature_selection_before_split",
-            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.53, margin +0.469, clear). Supporting local signals: fit_on_test_frame (+6.51), default_shuffle_after_sort (+4.97), group_kfold_without_groups (+4.64). The strongest cited line is `search.fit(X_test, y_test)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
+            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.60, margin +0.399, clear). Supporting local signals: fit_on_test_frame (+6.58), group_kfold_without_groups (+5.48), group_aggregate_before_split (+4.19). The strongest cited line is `search.fit(X_test, y_test)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
             "evidence": [
               {
                 "source": "model",
                 "kind": "probability",
                 "location": "advanced_leaks.py:29",
-                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.53; margin=+0.469; uncertainty=clear; model=leaklens-ai-p7-2026.11"
+                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.60; margin=+0.399; uncertainty=clear; model=leaklens-ai-p7-2026.11"
               },
               {
                 "source": "model",
@@ -163,20 +163,20 @@ export const fixtures = {
               {
                 "source": "code",
                 "kind": "pattern",
-                "location": "advanced_leaks.py:25",
-                "excerpt": "ordered = df.sort_values(\"event_date\")"
+                "location": "advanced_leaks.py:32",
+                "excerpt": "kf = GroupKFold(n_splits=5)"
               },
               {
                 "source": "model",
                 "kind": "feature",
                 "location": "advanced_leaks.py:29",
-                "excerpt": "fit_on_test_frame=1.00; local supports log-odds +6.515"
+                "excerpt": "fit_on_test_frame=1.00; local supports log-odds +6.582"
               },
               {
                 "source": "model",
                 "kind": "feature",
                 "location": "advanced_leaks.py:29",
-                "excerpt": "default_shuffle_after_sort=1.00; local supports log-odds +4.967"
+                "excerpt": "group_kfold_without_groups=1.00; local supports log-odds +5.476"
               }
             ]
           }
@@ -278,7 +278,7 @@ export const fixtures = {
         "model": {
           "name": "leaklens-ai-p7",
           "version": "leaklens-ai-p7-2026.11",
-          "threshold": 0.53,
+          "threshold": 0.6,
           "features": 108
         },
         "hypotheses": [
@@ -292,13 +292,13 @@ export const fixtures = {
             "severityHint": "medium",
             "location": "bad_pipeline.py:6",
             "corroborates": "preprocess_before_split",
-            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.53, margin +0.469, clear). Supporting local signals: unsafe_resampling (+3.33), fit_before_split (+1.42), log_split_position (+1.32). The strongest cited line is `X = sc.fit_transform(X)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
+            "explanation": "A calibrated local model trained on labeled authored pipelines gives this unit p=0.999 for a leakage-like pattern (threshold 0.60, margin +0.399, clear). Supporting local signals: unsafe_resampling (+3.33), fit_before_split (+1.44), log_split_position (+1.38). The strongest cited line is `X = sc.fit_transform(X)`. Contributions are local log-odds for this unit, not a causal explanation. The hint is emitted only when a semantic risk indicator is active (score alone is not enough). This is a statistical hint, not a verified finding.",
             "evidence": [
               {
                 "source": "model",
                 "kind": "probability",
                 "location": "bad_pipeline.py:6",
-                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.53; margin=+0.469; uncertainty=clear; model=leaklens-ai-p7-2026.11"
+                "excerpt": "calibrated p(leaky pattern)=0.999; threshold=0.60; margin=+0.399; uncertainty=clear; model=leaklens-ai-p7-2026.11"
               },
               {
                 "source": "model",
@@ -322,13 +322,13 @@ export const fixtures = {
                 "source": "model",
                 "kind": "feature",
                 "location": "bad_pipeline.py:6",
-                "excerpt": "unsafe_resampling=1.00; local supports log-odds +3.333"
+                "excerpt": "unsafe_resampling=1.00; local supports log-odds +3.326"
               },
               {
                 "source": "model",
                 "kind": "feature",
                 "location": "bad_pipeline.py:6",
-                "excerpt": "fit_before_split=1.00; local supports log-odds +1.421"
+                "excerpt": "fit_before_split=1.00; local supports log-odds +1.444"
               }
             ]
           }
@@ -404,7 +404,7 @@ export const fixtures = {
         "model": {
           "name": "leaklens-ai-p7",
           "version": "leaklens-ai-p7-2026.11",
-          "threshold": 0.53,
+          "threshold": 0.6,
           "features": 108
         },
         "hypotheses": [],

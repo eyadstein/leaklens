@@ -36,7 +36,7 @@ The layer has three parts:
    hard-negative guards (fold-local fit detection, target-only encoder fits, sort position
    relative to a real time column, group boundaries that require an id in the modelling
    frame, and forward-label columns that are explicitly dropped). The development corpus is
-   split by *scenario source and template family* into 219 training cases (15 sources) and
+   split by *scenario source and template family* into 223 training cases (15 sources) and
    40 validation cases (4 further sources); a 47-case locked test from 4 more sources is
    imported only by the benchmark, and a 12-case Phase 7 holdout from 5 further source
    families was frozen before the final fit and is scored once. Grouped cross-validation
@@ -169,9 +169,10 @@ independent holdout: 0 of the required 48 units from 12 new repositories exist, 
 corpus has only 8 definitive labels in 60, and H1 is a single-review corpus. Per the roadmap,
 H2 is therefore published as a documented shortfall rather than a number. A diagnostic
 re-score of the shipped P7 model on H1 (explicitly not independent and not H2) gives accuracy
-0.833, precision 0.786, recall 0.917, F1 0.846, FPR 0.250, Brier 0.150 at threshold 0.53.
+0.958, precision 1.000, recall 0.917, F1 0.957, FPR 0.000, Brier 0.041 at threshold 0.60.
+That is the M6 diagnostic after four extraction guards; it does not replace the H2 number.
 
-The shipped threshold is chosen on validation only (0.53 for the current model) and
+The shipped threshold is chosen on validation only (0.60 after the M6 rebuild) and
 probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at
 import time. The eleven candidates are compared when the benchmark is built; a request loads
 the class-balanced logistic regression frozen after Phase 7 validation from the checked-in
@@ -233,9 +234,10 @@ agree.
   files, and one reviewer labelled all of them. A post-freeze audit found 7 of 23 cited file
   paths had moved or did not exist at the pinned commit (13 reconstruction cases); the
   affected citations are listed in [REALWORLD_CORPUS.md](REALWORLD_CORPUS.md).
-- On that holdout the model reaches recall 0.958 but precision 0.767 (7 false positives on
-  24 legitimate units). Most false positives are safe CV, temporal-split, CatBoost Pool and
-  EDA-only patterns that the current indicators cannot separate from leaks.
+- On that holdout the Phase 6 model reached recall 0.958 and precision 0.767 (7 false
+  positives on 24 legitimate units), mostly safe CV, temporal-split, CatBoost Pool and
+  EDA-only patterns. Those four families are what M6 now guards; the shipped model's
+  diagnostic re-score on the same units is in the paragraph above, and it is still not H2.
 - Learned probabilities are calibrated on 40 validation cases and do **not** transfer:
   holdout Brier is 0.087 and ECE is 0.111. Treat the probability as a ranking score, not a
   risk estimate.

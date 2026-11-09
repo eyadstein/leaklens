@@ -59,17 +59,17 @@ def test_corpus_is_grouped_labeled_and_split_by_source():
     cases = corpus_cases()
 
     assert stats == {
-        "cases": 259,
+        "cases": 263,
         "leaky": 136,
-        "legitimate": 123,
-        "groups": 174,
+        "legitimate": 127,
+        "groups": 176,
         "leaky_groups": 107,
-        "legitimate_groups": 104,
+        "legitimate_groups": 106,
         "sources": 19,
-        "train_cases": 219,
+        "train_cases": 223,
         "train_leaky": 115,
-        "train_legitimate": 104,
-        "train_groups": 134,
+        "train_legitimate": 108,
+        "train_groups": 136,
         "validation_cases": 40,
         "validation_leaky": 21,
         "validation_legitimate": 19,
@@ -82,7 +82,7 @@ def test_corpus_is_grouped_labeled_and_split_by_source():
         "holdout_groups": 6,
         "holdout_sources": 5,
     }
-    assert len(cases) == 259
+    assert len(cases) == 263
     assert all(case.name and case.code and case.category for case in cases)
     assert all(case.split in {"train", "validation"} for case in cases)
     assert {case.split for case in training_cases()} == {"train"}
@@ -361,9 +361,9 @@ def test_measured_metrics_are_reported_with_a_model_card():
     _evaluation, model = get_model()
 
     assert evaluation.examples == 40
-    assert evaluation.train_examples == 219
+    assert evaluation.train_examples == 223
     assert evaluation.validation_examples == 40
-    assert evaluation.groups == 174
+    assert evaluation.groups == 176
     assert evaluation.folds == 5
     assert 0.05 <= evaluation.threshold <= 0.95
     assert evaluation.model_name in {row["name"]: row for row in evaluation.candidates}
@@ -386,7 +386,7 @@ def test_measured_metrics_are_reported_with_a_model_card():
     assert model.card.name == "leaklens-ai-p7"
     assert model.card.version == learned.MODEL_VERSION
     assert model.card.features == 108
-    assert model.card.training_examples == 259
+    assert model.card.training_examples == 263
     assert model.card.validation_examples == 40
     assert model.card.calibration
     assert model.card.candidates

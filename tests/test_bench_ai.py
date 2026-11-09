@@ -8,8 +8,8 @@ from leaklens import bench_ai
 def test_benchmark_reports_measured_metrics_and_limitations():
     data = bench_ai.evaluate()
 
-    assert data["corpus"]["cases"] == 259
-    assert data["corpus"]["train_cases"] == 219
+    assert data["corpus"]["cases"] == 263
+    assert data["corpus"]["train_cases"] == 223
     assert data["corpus"]["validation_cases"] == 40
     assert data["corpus"]["holdout_cases"] == 12
     assert data["external_cases"] > 100
@@ -54,7 +54,7 @@ def test_benchmark_reports_measured_metrics_and_limitations():
     assert "frozen before the final fit" in holdout["provenance"]
 
     gate = data["runtime_gate"]
-    assert gate["cases"] == 259
+    assert gate["cases"] == 263
     assert gate["metrics"]["precision"] >= 0.9
     assert gate["metrics"]["recall"] >= 0.9
     assert gate["false_positives"] == []

@@ -184,7 +184,11 @@ _SELECTOR = re.compile(
     r"\b(?:SelectKBest|SelectPercentile|SelectFromModel|RFE|RFECV|"
     r"SequentialFeatureSelector)\b"
 )
-_RESAMPLER = re.compile(r"\b(?:SMOTE|ADASYN|RandomOverSampler|RandomUnderSampler)\b")
+_RESAMPLER = re.compile(
+    r"\b(?:(?:Borderline|SVM|KMeans)?SMOTE\w*|ADASYN|RandomOverSampler|"
+    r"RandomUnderSampler|ClusterCentroids|NearMiss|TomekLinks|"
+    r"EditedNearestNeighbours)\b"
+)
 _VECTORIZER = re.compile(r"\b(?:TfidfVectorizer|CountVectorizer|HashingVectorizer)\b")
 _PIPELINE = re.compile(r"\b(?:Pipeline|make_pipeline)\s*\(")
 _COLUMN_TRANSFORMER = re.compile(r"\bColumnTransformer\s*\(")
@@ -361,6 +365,68 @@ def _references_target(expression: str, target_names: set[str]) -> bool:
     return bool(_tokens(expression) & target_names)
 
 
+_CONTAINER_CALL = re.compile(r"\b(?:DMatrix|Dataset|Pool)\s*\(")
+
+
+def _call_arguments_from(text: str, start: int) -> list[str] | None:
+    """Return the top-level arguments of the call that opens before ``start``."""
+
+    depth = 1
+    current: list[str] = []
+    arguments: list[str] = []
+    quote: str | None = None
+    for char in text[start:]:
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            current.append(char)
+            continue
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                arguments.append("".join(current).strip())
+                return arguments
+        if char == "," and depth == 1:
+            arguments.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    return None
+
+
+def _label_carrier_only(rhs: str, target_names: set[str]) -> bool:
+    """True when the target appears only as a model-data label argument.
+
+    ``xgb.DMatrix(X, label=y)``, ``lgb.Dataset(X, y)`` and ``catboost.Pool`` carry
+    the label next to the feature matrix; they do not build a feature from it.
+    A target that also appears in the feature argument still counts as a leak.
+    """
+
+    match = _CONTAINER_CALL.search(rhs)
+    if match is None:
+        return False
+    arguments = _call_arguments_from(rhs, match.end())
+    if arguments is None or len(arguments) < 2:
+        return False
+    feature_arguments = [
+        argument
+        for index, argument in enumerate(arguments)
+        if index != 1 and not re.match(r"\s*label\s*=", argument)
+    ]
+    if any(
+        _references_target(argument, target_names) or _LEAK_NAME.search(argument)
+        for argument in feature_arguments
+    ):
+        return False
+    return _references_target(arguments[1], target_names)
+
+
 def _fit_events(
     lines: list[str],
 ) -> list[tuple[int, str, str, str, str]]:
@@ -467,6 +533,16 @@ def extract_features(source: str) -> np.ndarray:
     text = source or ""
     lines = text.splitlines()
     split_at = _first_line(lines, _SPLIT)
+    sort_at = _first_line(lines, re.compile(r"\.sort_values\s*\("))
+    # A positional ``.iloc[:cut]`` / ``.iloc[cut:]`` split only orders time when
+    # the frame was sorted by a time column first.  Treating it as a split
+    # boundary keeps a fit after the cut from looking like a pre-split fit.
+    positional_split_at: int | None = None
+    if sort_at is not None and _TIME_COLUMN.search(lines[sort_at]):
+        head_at = _first_line(lines, re.compile(r"\.iloc\s*\[\s*:\s*[^\]]+\]"))
+        if head_at is not None and re.search(r"\.iloc\s*\[\s*[^:\]]+\s*:\s*\]", text):
+            positional_split_at = head_at
+    boundary_at = split_at if split_at is not None else positional_split_at
     split_calls = _split_calls(text)
     fit_events = _fit_events(lines)
     target_names = _target_names(text, lines)
@@ -522,7 +598,7 @@ def extract_features(source: str) -> np.ndarray:
 
     def any_fit_before(classes: tuple[re.Pattern[str], ...]) -> bool:
         for index, _receiver, _kind, _arg, klass in boundary_fit_events:
-            if not _before_split(index, split_at):
+            if not _before_split(index, boundary_at):
                 continue
             if any(pattern.search(klass) for pattern in classes):
                 return True
@@ -537,7 +613,7 @@ def extract_features(source: str) -> np.ndarray:
         """
 
         for index, _receiver, _kind, first, klass in boundary_fit_events:
-            if not _before_split(index, split_at):
+            if not _before_split(index, boundary_at):
                 continue
             if not any(pattern.search(klass) for pattern in classes):
                 continue
@@ -629,12 +705,12 @@ def extract_features(source: str) -> np.ndarray:
         if _is_train_frame(first) or (
             split_train_name and first_name == split_train_name
         ):
-            if not _before_split(index, split_at):
+            if not _before_split(index, boundary_at):
                 fit_on_train_frame = True
             continue
-        if not _before_split(index, split_at) and split_at is not None:
+        if not _before_split(index, boundary_at) and boundary_at is not None:
             fit_on_all_data_after_split = True
-        if _before_split(index, split_at) and any(
+        if _before_split(index, boundary_at) and any(
             pattern.search(klass) for pattern in transformer_patterns
         ):
             unsafe_transformer_count += 1
@@ -652,13 +728,16 @@ def extract_features(source: str) -> np.ndarray:
         )
     )
 
+    pipeline_present = bool(_PIPELINE.search(text))
     cv_present = cv_at is not None
     tuning_present = tuning_at is not None or tuning_fit_at is not None
     nested_cv = bool(cv_present and tuning_present and tuning_fit_at is None)
     cv_on_full_data = bool(
         cv_present and (split_at is None or _before_split(cv_at, split_at))
     )
-    cv_after_split = bool(cv_present and not cv_on_full_data)
+    cv_after_split = bool(
+        cv_present and split_at is not None and not _before_split(cv_at, split_at)
+    )
     tuning_on_full_data = bool(
         tuning_present
         and tuning_fit_at is not None
@@ -668,14 +747,63 @@ def extract_features(source: str) -> np.ndarray:
         tuning_present and tuning_fit_at is not None and not tuning_on_full_data
     )
 
-    pipeline_present = bool(_PIPELINE.search(text))
+    cv_on_test_partition = bool(
+        re.search(
+            r"cross_val_(?:score|validate|predict)\s*\((?:[^()]|\([^()]*\))*"
+            r"\b(?:X_)?test\w*\b",
+            text,
+        )
+    )
+    drop_identifier_at = _first_line(
+        lines,
+        re.compile(r"drop\s*\([^)]*\b\w+_id\b"),
+    )
+    identifier_dropped = bool(
+        drop_identifier_at is not None and _before_split(drop_identifier_at, split_at)
+    )
+    identifier_in_cv_features = (
+        bool(
+            re.search(r"\[\s*\[[^\]]*\b\w+_id\b", text)
+            or re.search(
+                r"cross_val_(?:score|validate|predict)\s*\([^)]*"
+                r"\[[^\]]*\b\w+_id\b",
+                text,
+            )
+        )
+        and not identifier_dropped
+    )
+    plain_cv_safe = bool(
+        cv_on_full_data
+        and split_at is None
+        and not pipeline_present
+        and not cv_on_test_partition
+        and not re.search(r"\bTimeSeriesSplit\b", text)
+        and not nested_cv
+        and not re.search(
+            r"\b(?:GroupKFold|StratifiedGroupKFold|GroupShuffleSplit)\b", text
+        )
+        and not _TIME_COLUMN.search(text)
+        and not _GROUP_WORDS.search(text)
+        and not identifier_in_cv_features
+        and not unsafe_preprocessing
+        and not unsafe_resampling
+        and not unsafe_selection
+        and not unsafe_target_encoding
+    )
     pipeline_boundary = pipeline_present and bool(
         split_at is not None and fit_at is not None and fit_at > split_at
     )
-    pipeline_cv_full_data = cv_on_full_data and pipeline_present
     cv_full_data_safe = cv_on_full_data and bool(
-        pipeline_present or re.search(r"\bTimeSeriesSplit\b", text) or nested_cv
+        pipeline_present
+        or re.search(r"\bTimeSeriesSplit\b", text)
+        or nested_cv
+        or plain_cv_safe
     )
+    if plain_cv_safe:
+        # Fold-local CV with nothing fitted outside the folds is not leakage
+        # evidence; keep the safe marker and drop the shape-only positives.
+        cv_on_full_data = False
+    pipeline_cv_full_data = cv_on_full_data and pipeline_present
 
     test_rows_before_split = bool(
         re.search(r"\.concat\s*\([^)]*(?:test|holdout|validation|val)", text)
@@ -694,16 +822,6 @@ def extract_features(source: str) -> np.ndarray:
     )
     group_aware = bool(_GROUP_AWARE.search(text))
     group_columns_used = bool(re.search(r"\bgroups\s*=", text))
-    drop_identifier_at = _first_line(
-        lines,
-        re.compile(
-            r"drop\s*\([^)]*(?:customer_id|user_id|row_id|uuid|guid|account_id|"
-            r"patient_id|session_id|device_id|merchant_id|row_hash)"
-        ),
-    )
-    identifier_dropped = bool(
-        drop_identifier_at is not None and _before_split(drop_identifier_at, split_at)
-    )
     # Drop the identifier from the *features*, and the group boundary is still
     # ignored when rows are split randomly: repeated entities straddle the
     # split.  Merely mentioning an id inside ``drop_duplicates`` is not enough
@@ -754,8 +872,8 @@ def extract_features(source: str) -> np.ndarray:
             or re.search(r"\bX\s*=\s*df\s*\[", text)
         )
     )
-    time_ordered_split = bool(
-        re.search(r"\.sort_values\s*\(", text)
+    time_ordered_split = positional_split_at is not None or (
+        sort_at is not None
         and (
             re.search(r"shuffle\s*=\s*False", text)
             or re.search(r"\bTimeSeriesSplit\b", text)
@@ -770,15 +888,25 @@ def extract_features(source: str) -> np.ndarray:
         column = _DATA_COLUMN.match(line)
         if column is not None:
             lhs, rhs = column.groups()
-            if _references_target(rhs, target_names) and not _NON_FEATURE_RHS.search(
-                rhs
+            label_carrier = _label_carrier_only(rhs, target_names) and (
+                boundary_at is None or index > boundary_at
+            )
+            if (
+                _references_target(rhs, target_names)
+                and not _NON_FEATURE_RHS.search(rhs)
+                and not label_carrier
             ):
                 target_in_assignment = True
             is_target_lhs = bool(_tokens(lhs) & target_names)
-            if is_target_lhs and _references_target(rhs, target_names):
+            if (
+                is_target_lhs
+                and _references_target(rhs, target_names)
+                and not re.search(r"\.(?:concat|append|merge)\s*\(", rhs)
+            ):
                 target_relabel_safe = True
             if (
                 not is_target_lhs
+                and not label_carrier
                 and _before_split(index, split_at)
                 and not _NON_FEATURE_RHS.search(rhs)
                 and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
@@ -794,15 +922,25 @@ def extract_features(source: str) -> np.ndarray:
         assign = _ASSIGN.match(line)
         if assign:
             lhs, rhs = assign.groups()
-            if _references_target(rhs, target_names) and not _NON_FEATURE_RHS.search(
-                rhs
+            label_carrier = _label_carrier_only(rhs, target_names) and (
+                boundary_at is None or index > boundary_at
+            )
+            if (
+                _references_target(rhs, target_names)
+                and not _NON_FEATURE_RHS.search(rhs)
+                and not label_carrier
             ):
                 target_in_assignment = True
             is_target_lhs = bool(_tokens(lhs) & target_names)
-            if is_target_lhs and _references_target(rhs, target_names):
+            if (
+                is_target_lhs
+                and _references_target(rhs, target_names)
+                and not re.search(r"\.(?:concat|append|merge)\s*\(", rhs)
+            ):
                 target_relabel_safe = True
             if (
                 not is_target_lhs
+                and not label_carrier
                 and _before_split(index, split_at)
                 and not _NON_FEATURE_RHS.search(rhs)
                 and not re.search(r"\.shift\s*\(\s*[1-9]\d*\s*\)", rhs)
@@ -822,7 +960,25 @@ def extract_features(source: str) -> np.ndarray:
                 rf"train_test_split\s*\([^)]*\b{re.escape(name)}\b", usage_text
             ) or re.search(rf"\bX\s*=[^\n]*\b{re.escape(name)}\b", usage_text):
                 summary_used_as_feature = True
-    eda_summary_only = bool(summary_vars) and not summary_used_as_feature
+    plot_call = bool(
+        re.search(
+            r"\b(?:plt\.|ax\d*\.|sns\.|scatter|imshow|contourf?|"
+            r"decision_boundary|fit_and_plot|plot\s*\()",
+            text,
+        )
+    )
+    # A full-frame transform in a script with no split, no CV and no held-out
+    # scoring can only feed inspection/plotting; there is no evaluation to leak.
+    plot_only_fit = bool(
+        fit_events
+        and split_at is None
+        and not cv_present
+        and not re.search(r"\.(?:score|predict|evaluate)\s*\(", text)
+        and plot_call
+    )
+    eda_summary_only = (
+        bool(summary_vars) and not summary_used_as_feature
+    ) or plot_only_fit
 
     shifted_columns: set[str] = set()
     for line in lines:
@@ -888,8 +1044,12 @@ def extract_features(source: str) -> np.ndarray:
             ):
                 group_aggregate_before_split = True
                 break
-    train_only_fit = split_at is not None and fit_at is not None and fit_at > split_at
-    fit_without_split = split_at is None and bool(boundary_fit_events)
+    train_only_fit = (
+        boundary_at is not None and fit_at is not None and fit_at > boundary_at
+    )
+    fit_without_split = (
+        boundary_at is None and bool(boundary_fit_events) and not plot_only_fit
+    )
     leak_column_name = bool(_LEAK_NAME.search(text))
     target_column_passed = any(
         bool(_QUOTED.search(arguments[1]))
@@ -999,14 +1159,6 @@ def extract_features(source: str) -> np.ndarray:
         get_dummies_at, split_at
     )
 
-    cv_on_test_partition = bool(
-        re.search(
-            r"cross_val_(?:score|validate|predict)\s*\((?:[^()]|\([^()]*\))*"
-            r"\b(?:X_)?test\w*\b",
-            text,
-        )
-    )
-
     group_kfold_without_groups = bool(
         re.search(r"\bGroupKFold\s*\(", text) and not re.search(r"\bgroups\s*=", text)
     )
@@ -1045,7 +1197,6 @@ def extract_features(source: str) -> np.ndarray:
     # Sorting only creates a temporal ordering when the sort key is a time-like
     # column and the sort happens before the split.  Sorting by amount for a
     # report, or sorting after the split, is not a temporal leak.
-    sort_at = _first_line(lines, re.compile(r"\.sort_values\s*\("))
     sort_line = lines[sort_at] if sort_at is not None else ""
     default_shuffle_after_sort = bool(
         sort_at is not None
@@ -1089,8 +1240,8 @@ def extract_features(source: str) -> np.ndarray:
                 break
 
     train_only_transformer_fit = any(
-        split_at is not None
-        and index > split_at
+        boundary_at is not None
+        and index > boundary_at
         and (
             _is_train_frame(first)
             or (split_train_name and first.strip() == split_train_name)
@@ -1118,10 +1269,12 @@ def extract_features(source: str) -> np.ndarray:
         "log_split_position": math.log1p(split_at) / 5.0
         if split_at is not None
         else 0.0,
-        "fit_before_split": _fitting_before(boundary_fit_events, split_at),
-        "fit_transform_before_split": _fitting_before(
-            boundary_fit_events, split_at, kind="fit_transform"
-        ),
+        "fit_before_split": 0.0
+        if plot_only_fit
+        else _fitting_before(boundary_fit_events, boundary_at),
+        "fit_transform_before_split": 0.0
+        if plot_only_fit
+        else _fitting_before(boundary_fit_events, boundary_at, kind="fit_transform"),
         "fit_without_split": 1.0 if fit_without_split else 0.0,
         "has_fit": 1.0 if fit_events else 0.0,
         "has_fit_transform": _has(r"\.\s*fit_transform\s*\(", text),
@@ -1143,10 +1296,12 @@ def extract_features(source: str) -> np.ndarray:
         ),
         "group_kfold": _has(r"\bGroupKFold\s*\(", text),
         "stratified_kfold": _has(r"\bStratifiedKFold\s*\(", text),
-        "plain_kfold": _has(r"(?<!Group)(?<!Stratified)\bKFold\s*\(", text),
+        "plain_kfold": 0.0
+        if plain_cv_safe
+        else _has(r"(?<!Group)(?<!Stratified)\bKFold\s*\(", text),
         "time_series_split": _has(r"\bTimeSeriesSplit\s*\(", text),
         "group_shuffle_split": _has(r"\bGroupShuffleSplit\s*\(", text),
-        "has_shuffle": _has(r"shuffle\s*=\s*True", text),
+        "has_shuffle": 0.0 if plain_cv_safe else _has(r"shuffle\s*=\s*True", text),
         "has_random_state": _has(r"random_state\s*=", text),
         "sort_values": _has(r"\.sort_values\s*\(", text),
         "time_words": 1.0 if _TIME_WORDS.search(text) else 0.0,
@@ -1224,7 +1379,9 @@ def extract_features(source: str) -> np.ndarray:
         "pipeline_cv_full_data": 1.0 if pipeline_cv_full_data else 0.0,
         "leak_column_name": 1.0 if leak_column_name else 0.0,
         "transform_after_split": 1.0
-        if transform_at is not None and split_at is not None and transform_at > split_at
+        if transform_at is not None
+        and boundary_at is not None
+        and transform_at > boundary_at
         else 0.0,
         "fit_count": float(fit_count),
         "unsafe_transformer_count_before_split": float(
