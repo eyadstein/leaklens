@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from leaklens.ai.reasoning import build_plan, enrich_plan, note_for
 from leaklens.ai.schemas import EvidenceSpan, Hypothesis
 from leaklens.leakage import Finding
@@ -118,6 +120,54 @@ def test_phase6_finding_kinds_get_specific_root_cause_and_remediation():
     assert notebook.remediation.code_hint
     assert "train_test_split" in notebook.remediation.code_hint
     assert "Restart the kernel" in " ".join(notebook.remediation.actions)
+
+
+PHASE10_KINDS = (
+    ("distribution_shift", "distribution_shift"),
+    ("missingness_target_signal", "informative_missingness"),
+    ("missingness_split_shift", "informative_missingness"),
+    ("missingness_group_signal", "informative_missingness"),
+    ("sql_target_as_feature", "sql_lineage"),
+    ("sql_split_predicate_missing", "sql_lineage"),
+    ("sql_future_window", "sql_lineage"),
+    ("sql_unresolved_column", "sql_unresolved"),
+)
+
+
+@pytest.mark.parametrize("kind, category", PHASE10_KINDS)
+def test_phase10_finding_kinds_get_a_specific_root_cause(kind, category):
+    plan = build_plan((Finding("low", kind, "q.sql:7", f"{kind} detail"),), ())
+
+    assert [group.category for group in plan.root_causes] == [category]
+    group = plan.root_causes[0]
+    assert group.group_id == f"rc-{category}"
+    assert not group.title.startswith("Review:")
+    assert group.remediation.actions and group.remediation.verification
+    assert kind in group.explanation
+    assert "did not change" in plan.summary
+
+
+def test_phase10_kinds_group_by_category_without_duplicating_logic():
+    findings = tuple(
+        Finding("low", kind, "q.sql:7", "detail") for kind, _ in PHASE10_KINDS
+    )
+    plan = build_plan(findings, ())
+
+    counts = {group.category: len(group.evidence_ids) for group in plan.root_causes}
+    assert counts == {
+        "distribution_shift": 1,
+        "informative_missingness": 3,
+        "sql_lineage": 3,
+        "sql_unresolved": 1,
+    }
+
+
+def test_unknown_finding_kinds_still_fall_back_to_a_review_group():
+    plan = build_plan((Finding("low", "some_new_kind", "x.py:1", "detail"),), ())
+
+    group = plan.root_causes[0]
+    assert group.category == "other"
+    assert group.title == "Review: some new kind"
 
 
 def test_build_plan_handles_clean_inputs_without_claiming_safety():

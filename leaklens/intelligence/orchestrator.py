@@ -109,6 +109,46 @@ _ROOT_CAUSES = {
         "Random splitting may mix related entities",
         "Multiple observations share the same group, so a random split may place related records in separate partitions.",
     ),
+    "distribution_shift": (
+        "distribution_shift",
+        "Feature distribution differs between train and test",
+        "A feature's train and test distributions differ beyond the configured effect floor; this can be an intended temporal or population split, or a sign of mixed partitions.",
+    ),
+    "missingness_target_signal": (
+        "informative_missingness",
+        "Missingness is associated with the target",
+        "Whether a value is missing tracks the label, so a missing-value indicator can encode the outcome itself.",
+    ),
+    "missingness_split_shift": (
+        "informative_missingness",
+        "Missingness differs between train and test",
+        "The missing rate changes across partitions, which suggests the split is not exchangeable or a filter treats the partitions differently.",
+    ),
+    "missingness_group_signal": (
+        "informative_missingness",
+        "Missingness is associated with group membership",
+        "Records missing a value cluster in some groups, so missingness may carry entity information that does not generalize.",
+    ),
+    "sql_target_as_feature": (
+        "sql_lineage",
+        "SQL feature derives from the target",
+        "Confirmed column lineage links a projected expression to the target column, so the feature cannot be known before the outcome.",
+    ),
+    "sql_split_predicate_missing": (
+        "sql_lineage",
+        "SQL query does not filter the split column",
+        "A source table that carries the configured split column is read without a predicate on it, so train and test rows may be mixed.",
+    ),
+    "sql_future_window": (
+        "sql_lineage",
+        "SQL window frame reads following rows",
+        "The window frame ends after the current row, so the feature can use values that are not available at prediction time.",
+    ),
+    "sql_unresolved_column": (
+        "sql_unresolved",
+        "SQL lineage could not be resolved",
+        "Lineage was ambiguous or the statement was not a SELECT, so the analysis stayed conservative and a target-derived feature may have been missed.",
+    ),
 }
 
 
@@ -226,6 +266,82 @@ _RECOMMENDATIONS = {
             "Use GroupKFold or GroupShuffleSplit.",
         ),
         ("Check group separation across all validation folds.",),
+    ),
+    "distribution_shift": (
+        "Explain or remove the distribution shift",
+        "Decide whether the train/test difference is intended before trusting held-out metrics.",
+        (
+            "Check whether the split should be random, temporal or by group.",
+            "Look for a sampling or filter step applied to only one partition.",
+        ),
+        ("Re-run the drift diagnostics and confirm the shift is explained or gone.",),
+    ),
+    "missingness_target_signal": (
+        "Review informative missingness",
+        "Determine why the value is missing before using it as a signal.",
+        (
+            "Trace whether the value is missing because of the outcome or the labelling process.",
+            "Drop missing-value indicators that encode the target.",
+        ),
+        (
+            "Re-run the missingness audit and confirm the association is gone or explained.",
+        ),
+    ),
+    "missingness_split_shift": (
+        "Investigate the missingness difference across partitions",
+        "Check whether the split is exchangeable or a filter treats partitions differently.",
+        (
+            "Confirm the split is random or chronological as intended.",
+            "Look for a filter or join that populates one partition only.",
+        ),
+        ("Compare missing rates per partition after rebuilding the split.",),
+    ),
+    "missingness_group_signal": (
+        "Check missingness per entity",
+        "Determine whether group membership explains why a value is recorded.",
+        (
+            "Identify the grouping column and inspect missing rates per group.",
+            "Avoid keeping a missing-value indicator when the group is already a feature.",
+        ),
+        ("Verify that missing rates no longer differ materially between groups.",),
+    ),
+    "sql_target_as_feature": (
+        "Remove target-derived SQL features",
+        "Keep every projected feature independent of the label.",
+        (
+            "Trace the cited projection's lineage to its source column.",
+            "Drop the expression or replace it with a pre-outcome source.",
+        ),
+        ("Re-run the SQL scan and confirm no projection has target lineage.",),
+    ),
+    "sql_split_predicate_missing": (
+        "Filter the split column in SQL",
+        "Keep train and test rows separated at the query level.",
+        (
+            "Add a predicate on the split column to every source table.",
+            "Or join the split label explicitly and filter per partition.",
+        ),
+        (
+            "Confirm the query returns training rows only when building training features.",
+        ),
+    ),
+    "sql_future_window": (
+        "Bound SQL windows to the current row",
+        "Stop features from reading rows that are unavailable at prediction time.",
+        (
+            "End the frame at CURRENT ROW.",
+            "Shift look-ahead windows back by the forecast horizon.",
+        ),
+        ("Re-run the SQL scan and confirm no frame ends after the current row.",),
+    ),
+    "sql_unresolved_column": (
+        "Resolve the remaining SQL lineage",
+        "Make every projection traceable before relying on the analysis.",
+        (
+            "Provide the table schema so projections resolve to source columns.",
+            "Give each projected expression a stable output name.",
+        ),
+        ("Re-run the SQL scan and confirm unresolved projections are zero.",),
     ),
 }
 

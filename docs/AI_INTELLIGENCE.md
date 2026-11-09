@@ -50,7 +50,9 @@ The layer has three parts:
 3. **Evidence-bound reasoning** (`leaklens/ai/reasoning.py`) groups related deterministic
    findings and AI hypotheses into root causes, then writes a remediation plan with actions,
    a code hint and verification steps. The plan is deterministic unless you opt into LLM
-   rephrasing, and every claim it makes is tied to an evidence id.
+   rephrasing, and every claim it makes is tied to an evidence id. Its categories cover the
+   scanner and dataset kinds, including SQL lineage (`sql_*`), informative missingness
+   (`missingness_*`) and the opt-in drift diagnostic (`distribution_shift`).
 
 The orchestration (`leaklens/ai/analysis.py`) accepts code, a dataset or both. Dataset
 analysis receives **metadata only** — no rows, no values — so row contents cannot leak into

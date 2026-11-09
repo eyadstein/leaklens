@@ -284,6 +284,82 @@ _CATEGORIES: dict[str, _Category] = {
             "Confirm the text did not alter any finding, severity or trust score.",
         ),
     ),
+    "distribution_shift": _Category(
+        title="Train and test distributions differ",
+        explanation=(
+            "A feature distribution moved between the train and test partitions beyond "
+            "the configured effect floor. This is a diagnostic, not proof of leakage: it "
+            "can come from an intended temporal or population split, or from partitions "
+            "that were mixed by mistake."
+        ),
+        priority="low",
+        actions=(
+            "Confirm whether the split is meant to be random, temporal or by group, and whether the difference is expected.",
+            "Look for a sampling or filter step that treats train and test differently.",
+            "Record the expected shift so future runs are not re-investigated from scratch.",
+        ),
+        verification=(
+            "Re-run `leaklens --drift` and confirm the shift is explained or gone.",
+            "Compare held-out metrics with the shift accounted for.",
+        ),
+    ),
+    "informative_missingness": _Category(
+        title="Missing values carry information the model should not see",
+        explanation=(
+            "Missingness here is not random: it tracks the label, an entity/group, or "
+            "differs between train and test. A missing-value indicator can then encode "
+            "information that is unavailable at prediction time, and a split difference "
+            "means the partitions are not exchangeable."
+        ),
+        priority="medium",
+        actions=(
+            "Check why the value is missing (measurement, outcome or labelling process) before imputing.",
+            "Drop missing-value indicators that encode the target or group membership.",
+            "Rebuild the split if missingness differs between train and test for a random split.",
+        ),
+        verification=(
+            "Re-run the missingness audit and confirm the cited columns no longer trigger.",
+            "Compare metrics with and without the missing-value indicator.",
+            "Confirm the split is random or chronological as intended and explain any remaining difference.",
+        ),
+    ),
+    "sql_lineage": _Category(
+        title="A SQL feature crosses the target or split boundary",
+        explanation=(
+            "Confirmed column lineage links a projected expression to the target, a "
+            "window frame reads rows after the current one, or a query reads a table "
+            "without filtering the configured split column. Each of these can put "
+            "information the model would not have at prediction time into a feature."
+        ),
+        priority="high",
+        actions=(
+            "Trace each cited projection to its source column and confirm it is known before the outcome.",
+            "Filter every source table by the split column, or join the split label explicitly.",
+            "End window frames at CURRENT ROW and shift look-ahead windows back by the forecast horizon.",
+        ),
+        verification=(
+            "Re-run `leaklens --sql` on the query and confirm the lineage findings are gone.",
+            "Confirm each feature's lineage excludes the target column.",
+        ),
+    ),
+    "sql_unresolved": _Category(
+        title="SQL lineage could not be verified",
+        explanation=(
+            "Some projections were ambiguous, or the statement was not a SELECT, so the "
+            "lineage check stayed conservative instead of guessing. A target-derived "
+            "feature may be present and was not confirmed either way."
+        ),
+        priority="low",
+        actions=(
+            "Provide the table schema so every projection resolves to a source column.",
+            "Rewrite the query so each projected expression has a stable output name.",
+            "Inspect the unresolved projections by hand before trusting the result.",
+        ),
+        verification=(
+            "Re-run the SQL scan and confirm the unresolved-column finding is gone.",
+            "Confirm every projection in the cited query resolves to a known source column.",
+        ),
+    ),
     "other": _Category(
         title="Related observations need manual review",
         explanation=(
@@ -325,6 +401,14 @@ _FINDING_CATEGORY = {
     "notebook_out_of_order_execution": "notebook_order",
     "id_like": "identifier",
     "parse_error": "syntax",
+    "distribution_shift": "distribution_shift",
+    "missingness_target_signal": "informative_missingness",
+    "missingness_split_shift": "informative_missingness",
+    "missingness_group_signal": "informative_missingness",
+    "sql_target_as_feature": "sql_lineage",
+    "sql_split_predicate_missing": "sql_lineage",
+    "sql_future_window": "sql_lineage",
+    "sql_unresolved_column": "sql_unresolved",
 }
 
 _CONCEPT_CATEGORY = {

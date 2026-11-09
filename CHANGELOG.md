@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### AI reasoning: Phase 10 root-cause coverage
+
+- The AI reasoning plan (`leaklens/ai/reasoning.py`) and the deterministic intelligence engine (`leaklens/intelligence/orchestrator.py`) now classify the Phase 10 finding kinds instead of falling back to a generic group or "unclassified risk": `sql_target_as_feature`, `sql_split_predicate_missing` and `sql_future_window` map to `sql_lineage`, `sql_unresolved_column` to `sql_unresolved`, the three `missingness_*` kinds to `informative_missingness`, and `distribution_shift` to `distribution_shift`. Each has a specific root cause, explanation, remediation and verification steps; drift stays a low diagnostic.
+- Unknown finding kinds still fall back to "Review: ..." in the AI plan and `unclassified_leakage` in the intelligence report. No finding severity, evidence, fingerprint, trust score, exit code, policy status, model, threshold or confidence value changed.
+- Extended `tests/test_ai_reasoning.py` and `tests/test_intelligence.py` with one parameterized case per kind, a grouping test, an unknown-kind fallback test and a real `audit_missingness` run feeding the intelligence engine.
+
 ### Phase 11.5: live workspace updates, history and comparisons
 
 - Added `GET /api/scans/{id}/events` and `GET /api/datasets/{id}/events` as bounded server-sent event streams. They read the existing session snapshots, emit only on change, send heartbeats, and end with `done`; dataset engine failures emit `failure` first. Unknown or trimmed sessions return 404 before streaming, streams never span sessions, and the UI keeps the existing polling path as a fallback when `EventSource` is unavailable or the stream breaks.

@@ -178,6 +178,113 @@ def test_analyze_findings_unknown_kind_falls_back():
     assert len(rec.actions) > 0
 
 
+PHASE10_ROOT_CAUSES = (
+    (
+        "distribution_shift",
+        "low",
+        "distribution_shift",
+        "Feature distribution differs between train and test",
+    ),
+    (
+        "missingness_target_signal",
+        "medium",
+        "informative_missingness",
+        "Missingness is associated with the target",
+    ),
+    (
+        "missingness_split_shift",
+        "medium",
+        "informative_missingness",
+        "Missingness differs between train and test",
+    ),
+    (
+        "missingness_group_signal",
+        "low",
+        "informative_missingness",
+        "Missingness is associated with group membership",
+    ),
+    (
+        "sql_target_as_feature",
+        "high",
+        "sql_lineage",
+        "SQL feature derives from the target",
+    ),
+    (
+        "sql_split_predicate_missing",
+        "low",
+        "sql_lineage",
+        "SQL query does not filter the split column",
+    ),
+    (
+        "sql_future_window",
+        "medium",
+        "sql_lineage",
+        "SQL window frame reads following rows",
+    ),
+    (
+        "sql_unresolved_column",
+        "low",
+        "sql_unresolved",
+        "SQL lineage could not be resolved",
+    ),
+)
+
+
+@pytest.mark.parametrize("kind, severity, category, title", PHASE10_ROOT_CAUSES)
+def test_analyze_findings_classifies_phase10_kinds(kind, severity, category, title):
+    report = analyze_findings([Finding(severity, kind, "q.sql:7", f"{kind} detail")])
+
+    cause = report.root_causes[0]
+    assert cause.category == category
+    assert cause.title == title
+    assert "unclassified" not in cause.category
+    rec = report.recommendations[0]
+    assert rec.title != "Investigate the detected leakage risk"
+    assert rec.related_finding_kinds == (kind,)
+    assert rec.priority == severity
+    assert rec.actions and rec.validation_steps
+
+
+def test_analyze_findings_never_unclassifies_a_phase10_kind():
+    report = analyze_findings(
+        [
+            Finding(severity, kind, "x", "detail")
+            for kind, severity, _cat, _t in PHASE10_ROOT_CAUSES
+        ]
+    )
+
+    assert {cause.category for cause in report.root_causes} == {
+        "distribution_shift",
+        "informative_missingness",
+        "sql_lineage",
+        "sql_unresolved",
+    }
+    assert len(report.root_causes) == 8
+
+
+def test_real_missingness_findings_reach_the_informative_missingness_cause():
+    from leaklens.missingness import MissingnessSettings, audit_missingness
+
+    frame = pd.DataFrame(
+        {
+            "y": [0] * 20 + [1] * 20,
+            "x": [float(index) for index in range(20)] + [float("nan")] * 20,
+        }
+    )
+    report = audit_missingness(
+        frame,
+        "y",
+        settings=MissingnessSettings(min_rows=20, min_group_rows=10, min_missing=10),
+    )
+    kinds = {finding.kind for finding in report.findings}
+    assert "missingness_target_signal" in kinds
+
+    intelligence = analyze_findings(report.findings)
+    assert {cause.category for cause in intelligence.root_causes} == {
+        "informative_missingness"
+    }
+
+
 def test_analyze_findings_duplicate_kinds_single_root_cause():
     findings = [
         Finding("high", "target_leakage", "a", "1"),

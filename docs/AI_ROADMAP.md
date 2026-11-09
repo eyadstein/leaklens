@@ -1,7 +1,8 @@
 # Phase 12.1 AI roadmap: research-backed proposal
 
-**Status:** proposal only. Nothing in this document is implemented. No Phase 12 code,
-dependency, model or schema change has been made in this change set.
+**Status:** partly landed. **M1** (complete root-cause maps for every detector kind) shipped in
+`leaklens/ai/reasoning.py` and `leaklens/intelligence/orchestrator.py`. **M2–M8 remain
+proposals** and none of them is implemented.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
 roadmap derived from its measured gaps. It exists so the next phase starts from evidence
