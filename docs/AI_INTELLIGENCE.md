@@ -12,6 +12,9 @@ the trust score and it never changes a deterministic finding, severity or exit c
   a schema entry, a relationship, a statistic or a measured model probability).
 - **No improvement claim.** Measured numbers are in
   [AI_BENCHMARK.md](AI_BENCHMARK.md); they are reported honestly, including false positives.
+- **Known gaps and the ordered plan to close them** are in
+  [AI_ROADMAP.md](AI_ROADMAP.md). That document is a proposal; nothing in it ships until its
+  milestone lands.
 
 ## What it does
 
