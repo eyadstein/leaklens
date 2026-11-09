@@ -1061,6 +1061,33 @@ def test_ai_is_opt_in_for_code_scans_and_cannot_change_the_score(client):
     assert payload["findings"] == plain.json()["findings"]
 
 
+def test_ai_evidence_links_only_to_real_graph_nodes(client):
+    source = (
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.preprocessing import StandardScaler\n"
+        "X = StandardScaler().fit_transform(X)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+    )
+
+    response = client.post(
+        "/scan",
+        json={"source": source, "include_ai": True, "include_intelligence": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    graph_ids = {item["evidence_id"] for item in payload["intelligence"]["evidence"]}
+    linked = [
+        span
+        for hypothesis in payload["ai"]["hypotheses"]
+        for span in hypothesis["evidence"]
+        if span["graph_node_id"]
+    ]
+
+    assert linked
+    assert all(span["graph_node_id"] in graph_ids for span in linked)
+
+
 def test_capabilities_advertise_ai_as_opt_in_and_offline(client):
     payload = client.get("/capabilities").json()
     ai = payload["ai"]

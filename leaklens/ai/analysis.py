@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pandas as pd
 
+from leaklens.fingerprint import normalize_location
+from leaklens.intelligence.context import build_context
 from leaklens.leakage import Finding, score
+from leaklens.manifest import surface_for
 
 from .learned import get_model, learned_hypotheses
 from .reasoning import CompletionProvider, build_plan, enrich_plan
-from .schemas import GLOBAL_LIMITATIONS, AIReport, Hypothesis
+from .schemas import GLOBAL_LIMITATIONS, AIReport, EvidenceSpan, Hypothesis
 from .semantics import CodeSource, SchemaInfo, analyze_semantics
 
 MAX_CODE_FILES = 200
@@ -70,6 +73,76 @@ def _display_path(path: Path) -> str:
         return str(path.resolve().relative_to(Path.cwd().resolve())).replace("\\", "/")
     except (OSError, ValueError):
         return path.name
+
+
+_FEATURE_SURFACES = frozenset({"dataset", "split"})
+_SPAN_GROUPS = {
+    "code": "code",
+    "finding": "code",
+    "schema": "dataset",
+    "relationship": "dataset",
+    "statistic": "dataset",
+}
+_GRAPH_GROUPS = {
+    "code": "code",
+    "notebook": "code",
+    "image": "code",
+    "dataset": "dataset",
+    "split": "dataset",
+}
+
+
+def _location_key(location: str, surface: str) -> tuple[str, str] | None:
+    """Normalized path or feature key for one location, or None when empty."""
+    if surface in _FEATURE_SURFACES:
+        _, feature = normalize_location(str(location), root=Path.cwd(), surface=surface)
+        return ("feature", feature) if feature else None
+    path, _ = normalize_location(str(location), root=Path.cwd(), surface=surface)
+    return ("path", path) if path else None
+
+
+def _span_key(span: EvidenceSpan) -> tuple[str, tuple[str, str]] | None:
+    group = _SPAN_GROUPS.get(span.source)
+    if group is None:
+        return None
+    key = _location_key(span.location, "dataset" if group == "dataset" else "code")
+    return (group, key) if key else None
+
+
+def _graph_index(
+    findings: Sequence[Finding],
+) -> dict[tuple[str, tuple[str, str]], set[str]]:
+    """One pass over the evidence records the deterministic graph serializes."""
+    index: dict[tuple[str, tuple[str, str]], set[str]] = {}
+    for item in build_context(findings).evidence:
+        surface = surface_for(item.kind)
+        group = _GRAPH_GROUPS.get(surface)
+        if group is None:
+            continue
+        key = _location_key(str(item.location), surface)
+        if key is None:
+            continue
+        index.setdefault((group, key), set()).add(item.evidence_id)
+    return index
+
+
+def _link_hypotheses(
+    hypotheses: tuple[Hypothesis, ...], findings: Sequence[Finding]
+) -> tuple[Hypothesis, ...]:
+    """Attach a graph node id only when exactly one node matches a span."""
+    if not findings or not hypotheses:
+        return hypotheses
+    index = _graph_index(findings)
+    linked = []
+    for hypothesis in hypotheses:
+        spans = []
+        for span in hypothesis.evidence:
+            key = _span_key(span)
+            ids = index.get(key, set()) if key else set()
+            node_id = next(iter(ids)) if len(ids) == 1 else None
+            spans.append(replace(span, graph_node_id=node_id))
+        linked.append(replace(hypothesis, evidence=tuple(spans)))
+    return tuple(linked)
 
 
 def _read_source(path: Path) -> CodeSource | None:
@@ -149,6 +222,7 @@ def analyze(
     semantic = analyze_semantics(code=code, schema=schema, findings=findings)
     learned = learned_hypotheses(code, findings) if code else ()
     hypotheses: tuple[Hypothesis, ...] = tuple(dict.fromkeys(semantic + learned))
+    hypotheses = _link_hypotheses(hypotheses, findings)
 
     plan = build_plan(findings, hypotheses, target=dataset.target if dataset else None)
     if llm_provider is not None:

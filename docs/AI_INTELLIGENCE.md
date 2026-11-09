@@ -194,6 +194,28 @@ HTML, the console and the website print the human label. The schema rejects an u
 and rejects `calibrated_probability` unless the `learned` detector backs it. Confidence values
 themselves are unchanged.
 
+## Evidence-graph anchoring
+
+`EvidenceSpan.graph_node_id` is a nullable link to an existing deterministic evidence record.
+It is the record's real `evidence_id` (for example `scanner-000000-e01`), never a fabricated
+identifier. The lookup is deterministic:
+
+- the span location is normalized with `fingerprint.normalize_location`;
+- code and finding spans match graph path anchors; schema, relationship and statistic spans
+  match graph feature anchors;
+- exactly one matching graph node links; zero matches or several matches leave the field
+  `null`.
+
+Model spans have no deterministic counterpart and stay `null`. Linking reads the existing
+graph nodes once and writes no graph edge: graph JSON, node ids, clusters, links, findings,
+fingerprints and trust scores are unchanged. With `--ai` off nothing is computed, and older
+payloads without the field remain valid because the default is `null`. The AI schema stays
+`1.1`.
+
+A non-null id means "this AI excerpt points at the same normalized location as this existing
+evidence record." It does not prove the hypothesis, add evidence, or claim the two records
+agree.
+
 ## Limitations
 
 - The development corpus is small, authored and Python-only; the locked test has 47 cases,

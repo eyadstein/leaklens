@@ -104,6 +104,7 @@ class EvidenceSpan:
     location: str
     excerpt: str
     supports: bool = True
+    graph_node_id: str | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.evidence_id, "evidence_id")
@@ -114,6 +115,8 @@ class EvidenceSpan:
         _text(self.excerpt, "excerpt", 400)
         if not isinstance(self.supports, bool):
             raise TypeError("supports must be a boolean")
+        if self.graph_node_id is not None:
+            _identifier(self.graph_node_id, "graph_node_id")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

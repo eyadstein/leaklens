@@ -5,7 +5,9 @@
 model artifact and provenance) shipped in `leaklens/ai/artifact.py`, `leaklens/ai/model.json`
 and `leaklens/ai/learned.py`. **M3** (explicit confidence semantics) shipped in
 `leaklens/ai/schemas.py`, `ai/semantics.py`, `ai/learned.py`, `report.py` and `cli.py`.
-**M4–M8 remain proposals** and none of them is implemented.
+**M4** (AI evidence anchored to the deterministic evidence graph) shipped in
+`leaklens/ai/schemas.py` and `ai/analysis.py`. **M5–M8 remain proposals** and none of them is
+implemented.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
 roadmap derived from its measured gaps. It exists so the next phase starts from evidence
