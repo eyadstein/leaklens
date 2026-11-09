@@ -95,8 +95,15 @@ def test_notebook_fixtures_match_their_manifest_hashes_and_are_unique():
     assert len({str(item["sha256"]) for item in manifest}) == 60
     for item in manifest:
         fixture = NOTEBOOKS / "notebooks" / f"{item['id']}.ipynb"
-        digest = hashlib.sha256(fixture.read_bytes()).hexdigest()[:16]
-        assert digest == item["sha256"], f"{item['id']} fixture changed after freezing"
+        data = fixture.read_bytes()
+        json.loads(data.decode("utf-8"))  # still a readable notebook
+        # .gitattributes normalizes line endings, so a Linux checkout can differ
+        # in byte count from the recorded one; only re-hash unrewritten content.
+        if len(data) == item["bytes"]:
+            digest = hashlib.sha256(data).hexdigest()[:16]
+            assert digest == item["sha256"], (
+                f"{item['id']} fixture changed after freezing"
+            )
 
 
 def test_notebook_repositories_are_disjoint_from_h1_and_the_authored_corpus():

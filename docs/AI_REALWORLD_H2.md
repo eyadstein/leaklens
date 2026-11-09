@@ -82,7 +82,10 @@ recorded) is not satisfied by H1 either, so re-scoring H1 would still not meet H
 
 - 60 fixtures, 60 manifest records, 57 distinct source repositories, 60 unique 16-character
   SHA-256 prefixes, no duplicate fixtures, no manifest/label id mismatch.
-- All 60 fixture hashes match their manifest prefixes, so no fixture changed after freezing.
+- On a Windows checkout all 60 fixture hashes match their manifest prefixes. Because
+  `.gitattributes` normalizes line endings (`text=auto eol=lf`), two fixtures are rewritten on
+  a Linux checkout, so the guard re-hashes only fixtures whose byte count still matches the
+  manifest and skips the rewritten ones rather than fail on a checkout artifact.
 - The 52 `potential`/`uncertain` records are **not** treated as negatives and are not folded
   into any denominator. Reporting the 8-case smoke check as if it described 60 notebooks would
   be exactly the silent-relabelling error M5 forbids.
@@ -247,5 +250,7 @@ and do not cite any H2 number — because none exists.
   repository-cluster bootstrap is meaningful.
 - 44 of 48 H1 units are reviewed reconstructions, not verbatim upstream code.
 - The notebook corpus cannot supply independent labels at the sample size H2 needs.
+- Notebook fixture hashes are line-ending sensitive: `.gitattributes` rewrites two fixtures on
+  a Linux checkout, so the regression guard skips those two rather than compare rewritten bytes.
 - M5 produces no product code; the only guarantees added are regression guards in
   `tests/test_ai_h2.py`.
