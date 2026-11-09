@@ -281,6 +281,13 @@ Both scan types also have an evidence-graph view: inspect the engine's evidence
 nodes and recorded relationships, filter and search them, and jump between a
 finding and its evidence. The view is bounded and read-only; it never rebuilds
 the graph or invents relationships.
+Scans and audits stream live progress over server-sent events with automatic
+fallback to polling. The history view lists retained in-memory sessions (lost on
+restart, last 20 of each kind) and can reopen results, reports and graphs.
+Compatible previous/current sessions can be compared using stable fingerprints:
+added, unchanged, changed and no-longer-present findings are shown with policy
+status and suppression preserved, while partial or cancelled scans report
+inconclusive instead of resolved.
 The workspace never writes a baseline. Nothing else is written to disk, no code
 is executed, and one activity runs at a time. See
 [docs/WORKSPACE.md](docs/WORKSPACE.md).

@@ -1,14 +1,15 @@
 # Interactive scan workspace
 
 `leaklens workspace` serves a local, read-only page for scanning a project or
-auditing a dataset, and exploring the results: start a scan, watch it progress,
+auditing a dataset, and exploring the results: start a scan, watch live progress,
 filter findings, read the evidence behind each one, open the surrounding source,
-and export the same HTML report the CLI writes.
+reopen retained sessions, compare compatible results, and export the same HTML
+report the CLI writes.
 
 It is a thin layer over the existing engine. Detection, fingerprints, trust
 score, evidence clusters, fix advice and the HTML report are the same code paths
-the CLI and the public API use; the workspace adds progress, navigation and a
-browser view.
+the CLI and the public API use; the workspace adds live updates, history,
+comparison, navigation and a browser view.
 
 ```sh
 pip install -e ".[app]"          # fastapi + uvicorn
@@ -33,6 +34,81 @@ workspace root.
 4. Renders the normal static HTML report with `report.render`.
 
 Scans never write to disk and never execute the scanned code.
+
+## Live updates
+
+Each running session has a server-sent events stream:
+`GET /api/scans/{id}/events` and `GET /api/datasets/{id}/events`. The stream reads
+the same in-memory session snapshot the polling endpoint returns; it does not
+queue results, so a slow or disconnected client cannot grow memory.
+
+- The first event is a `snapshot`; later `snapshot` events are emitted only when
+  the session actually changes (state, done/total, current file, counts, request,
+  errors). A `failure` event carries an engine failure, and `done` is always the
+  last event. Every event has an increasing `seq` and its `type`.
+- Heartbeat comments keep idle streams alive. The browser uses `EventSource`
+  when available and falls back to the existing 400 ms polling on an unsupported
+  browser or a broken stream, showing `reconnecting with polling`.
+- Reconnecting to a finished session replays its terminal snapshot and `done`
+  once. Unknown or trimmed session ids return 404 before the stream starts;
+  streams are scoped to exactly one session and never subscribe across sessions.
+- Cancellation is still between files for a source scan and only while queued
+  for a dataset audit. The stream reports those states honestly; it never
+  implies the engine can be interrupted mid-call.
+
+## Session history
+
+`GET /api/history` returns the retained sessions, newest first: id, type, target,
+state, start/completion wall-clock times, duration, result/report availability
+and a small summary (findings, severities, trust score, files or dataset rows and
+target).
+
+- History is **in memory only**. It does not survive a server restart, and the
+  endpoint and UI say so explicitly. No database was added and no source content
+  is copied into a history index.
+- Retention is the existing bound: the last 20 source scans and the last 20
+  dataset audits. Starting a new session drops the oldest finished session of
+  that kind first; running sessions are never dropped.
+- The UI's history table can reopen results, the evidence graph and the HTML
+  report, and can prefill a comparison. Reopening a retained result does not
+  rescan anything.
+
+## Comparing retained sessions
+
+`GET /api/compare/scans?previous=ID&current=ID` and
+`GET /api/compare/datasets?previous=ID&current=ID` compare two retained sessions
+of the same kind. Compatibility is checked before any classification:
+
+- A source scan is compatible with another source scan of the same target and
+  the same SQL setting.
+- A dataset audit is compatible with another audit of the same path, target,
+  threshold, held-out file, time column and group column.
+
+An incompatible pair returns `available: false` with the mismatched settings in
+`checks` and an explicit reason; it is never partially compared.
+
+The comparison reuses the previous session's findings as a
+`Baseline.from_findings()` identity set and the existing
+`baseline.compare()` classification. Changes are reported as:
+
+- `added` — the fingerprint exists only in the current complete session.
+- `unchanged` — the fingerprint exists in both with the same severity.
+- `changed` — the fingerprint exists in both with a different severity; the
+  previous and current findings are both included.
+- `no_longer_present` — the fingerprint existed previously and is absent from a
+  complete current session. Only these entries have `resolved: true`.
+- `inconclusive` — the conclusion depends on a partial scan and is not claimed.
+  A finding absent from a cancelled or failed current session is inconclusive,
+  never resolved; a current finding absent from a partial previous session is
+  inconclusive, never newly added.
+
+Each entry keeps the current finding's policy output unchanged: `status`,
+`suppression` reason/fingerprint and `requires_attention` are copied, and a
+finding without a status stays unclassified. The summary counts every category,
+plus `suppressed` and `unclassified`, and reports `counts_consistent` and
+`truncated` (the list is capped at 500 entries while totals remain complete).
+Entries include the current finding index and previous/current details, so the
+UI can open the finding or its evidence graph.
 
 ## Baselines and suppressions
 
@@ -147,8 +223,12 @@ baseline and suppression controls described above are shared with source scans.
 |---|---|
 | `GET /` | the single-page UI |
 | `GET /api/info` | version, root, scan limits, dataset limits/formats, SQL availability, config baseline/suppressions |
+| `GET /api/history` | bounded in-memory session list with metadata and result/report availability |
+| `GET /api/compare/scans?previous=&current=` | source/source comparison using stable fingerprints |
+| `GET /api/compare/datasets?previous=&current=` | dataset/dataset comparison with configuration compatibility checks |
 | `POST /api/scans` | `{"path": "...", "sql": false, "baseline": null}` → `{"scan_id"}` (202) |
 | `GET /api/scans/{id}` | state, `done`, `total`, `current`, counts, errors, elapsed |
+| `GET /api/scans/{id}/events` | `text/event-stream` snapshots → optional `failure` → `done` |
 | `POST /api/scans/{id}/cancel` | request cancellation (409 if not running) |
 | `GET /api/scans/{id}/results` | findings + statuses + policy + clusters + links + next actions (409 until finished) |
 | `GET /api/scans/{id}/graph` | bounded evidence-graph page with filters, search, focus and finding navigation (409 until finished) |
@@ -157,6 +237,7 @@ baseline and suppression controls described above are shared with source scans.
 | `POST /api/datasets/inspect` | `{"path": "train.csv"}` → columns, preview, target candidates |
 | `POST /api/datasets` | `{"path", "target", "threshold", "test_path", "time_col", "group_col", "baseline"}` → `{"dataset_id"}` (202) |
 | `GET /api/datasets/{id}` | state, echoed request, error, elapsed |
+| `GET /api/datasets/{id}/events` | `text/event-stream` snapshots → optional `failure` → `done` |
 | `POST /api/datasets/{id}/cancel` | cancel before the engine starts (409 once it runs) |
 | `GET /api/datasets/{id}/results` | the audit payload (409 until finished, or with the failure message) |
 | `GET /api/datasets/{id}/graph` | bounded evidence-graph page from the audit's nested `intelligence` (409 until finished) |
@@ -164,7 +245,8 @@ baseline and suppression controls described above are shared with source scans.
 
 Scan states are `running`, `done`, `cancelled` and `failed`. Audit states are
 `queued`, `auditing`, `done`, `cancelled` and `failed`. Old sessions are kept in
-memory (last 20 of each kind) so their report and results stay reachable.
+memory (last 20 of each kind) so history, results, reports and comparisons stay
+reachable; they are lost when the server restarts.
 
 ## Limits and safety
 
@@ -212,3 +294,9 @@ and dataset serialisation, evidence/link identity and neighbour symmetry,
 finding/evidence navigation in both directions, filters, search, paging and
 size caps, empty and isolated nodes, malformed/missing/dangling records,
 session boundaries (404/409), and preserved suppression status/evidence.
+Phase 11.5 adds SSE progress/completion/failure ordering, reconnect and trimmed
+session 404s, polling fallback, in-memory history metadata/retention/restart
+behaviour, compatible source and dataset comparisons,
+added/unchanged/changed/no-longer-present/suppressed/inconclusive
+classification, partial-scan safeguards, fingerprint/evidence consistency and
+comparison count consistency/navigation.

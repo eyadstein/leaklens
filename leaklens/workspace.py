@@ -13,21 +13,24 @@ dataset audits go through the public API's ``run_audit_job``.
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import threading
 import time
 from collections import Counter
+from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .baseline import Baseline, BaselineError
+from .baseline import Baseline, BaselineError, compare
 from .config import ConfigError, load_config
 from .fingerprint import LOCATION, normalize_path
 from .fixes import advice
@@ -50,6 +53,32 @@ MAX_ERRORS = 200
 SOURCE_CONTEXT = 8
 GRAPH_DEFAULT_LIMIT = 100
 GRAPH_MAX_LIMIT = 500
+# Live updates: poll the in-memory session often enough to feel immediate, but
+# only emit an event when the snapshot actually changed.
+SSE_POLL_SECONDS = 0.1
+SSE_HEARTBEAT_SECONDS = 10.0
+SSE_MAX_EVENTS = 5_000
+MAX_COMPARISON_CHANGES = 500
+HISTORY_NOTE = (
+    "Sessions are retained in memory only: they do not survive a server restart, "
+    "and the oldest finished sessions are dropped first."
+)
+_COMPARISON_FIELDS = (
+    "index",
+    "kind",
+    "severity",
+    "column",
+    "detail",
+    "file",
+    "line",
+    "cell",
+    "fingerprint",
+    "status",
+    "requires_attention",
+    "suppression",
+    "previous",
+    "diagnostic",
+)
 _CELL = re.compile(r"\[cell (\d+)\]")
 # Result states that still hold the single activity slot.
 ACTIVE_STATES = frozenset({"running", "queued", "auditing"})
@@ -86,12 +115,15 @@ class ScanSession:
     scan_id: str
     files: tuple[Path, ...]
     include_sql: bool
+    target: str = "."
     baseline: Baseline | None = None
     rules: tuple[SuppressionRule, ...] = ()
     baseline_path: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    created_at: float = field(default_factory=time.time)
     started_at: float = field(default_factory=time.perf_counter)
+    completed_at: float | None = None
     state: str = "running"
     done: int = 0
     current: str | None = None
@@ -157,7 +189,9 @@ class DatasetSession:
     baseline_path: str | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    created_at: float = field(default_factory=time.time)
     started_at: float = field(default_factory=time.perf_counter)
+    completed_at: float | None = None
     state: str = "queued"
     error: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
@@ -671,6 +705,382 @@ def _graph_payload(
     }
 
 
+def _wall_time(value: float | None) -> str | None:
+    return (
+        datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        if isinstance(value, (int, float))
+        else None
+    )
+
+
+def _sse_event(name: str, seq: int, payload: dict[str, Any]) -> str:
+    return (
+        f"id: {seq}\nevent: {name}\n"
+        f"data: {json.dumps(payload, default=str, sort_keys=True)}\n\n"
+    )
+
+
+def _scan_change_key(snapshot: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        snapshot["state"],
+        snapshot["done"],
+        snapshot["total"],
+        snapshot["current"],
+        tuple(sorted(snapshot["counts"].items())),
+        tuple((item.get("path"), item.get("message")) for item in snapshot["errors"]),
+    )
+
+
+def _dataset_change_key(snapshot: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        snapshot["state"],
+        json.dumps(snapshot["request"], sort_keys=True, default=str),
+        json.dumps(snapshot["error"], sort_keys=True, default=str),
+    )
+
+
+def _scan_failure(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    if snapshot["state"] != "failed":
+        return None
+    errors = list(snapshot.get("errors") or [])
+    message = str(errors[-1].get("message")) if errors else "the scan failed"
+    return {"message": message, "errors": errors[:10]}
+
+
+def _dataset_failure(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    if snapshot["state"] != "failed":
+        return None
+    return snapshot.get("error") or {"message": "the audit failed"}
+
+
+def _sse_stream(session: Any, change_key, failure) -> Iterator[str]:
+    """Stream one session's snapshots until it reaches a terminal state.
+
+    The stream reads the live session instead of queueing events, so a slow or
+    disconnected client cannot grow memory. Duplicate snapshots are dropped and
+    ``done`` is always the last event.
+    """
+    seq = 0
+    last: tuple[Any, ...] | None = None
+    last_beat = time.monotonic()
+    yield "retry: 1000\n\n"
+    while seq < SSE_MAX_EVENTS:
+        snapshot = session.snapshot()
+        key = change_key(snapshot)
+        if last is None or key != last:
+            seq += 1
+            last = key
+            yield _sse_event(
+                "snapshot", seq, {"seq": seq, "type": "snapshot", **snapshot}
+            )
+            last_beat = time.monotonic()
+        if snapshot["state"] not in ACTIVE_STATES:
+            problem = failure(snapshot)
+            if problem is not None:
+                seq += 1
+                yield _sse_event(
+                    "failure",
+                    seq,
+                    {"seq": seq, "type": "failure", **snapshot, "failure": problem},
+                )
+            seq += 1
+            yield _sse_event("done", seq, {"seq": seq, "type": "done", **snapshot})
+            return
+        now = time.monotonic()
+        if now - last_beat >= SSE_HEARTBEAT_SECONDS:
+            yield ": keep-alive\n\n"
+            last_beat = now
+        time.sleep(SSE_POLL_SECONDS)
+    seq += 1
+    yield _sse_event(
+        "failure",
+        seq,
+        {
+            "seq": seq,
+            "type": "failure",
+            "failure": {
+                "message": "live updates reached their event limit; reconnect to continue"
+            },
+        },
+    )
+
+
+def _finding_ref(item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    ref = {key: item.get(key) for key in _COMPARISON_FIELDS if key in item}
+    evidence = item.get("evidence")
+    if isinstance(evidence, (list, tuple)):
+        ref["evidence"] = list(evidence)[:20]
+        ref["evidence_total"] = len(evidence)
+    return ref
+
+
+def _comparison_baseline(findings: list[dict[str, Any]]) -> Baseline:
+    """Reuse ``Baseline.from_findings`` for a previous session's identities."""
+    views = []
+    for item in findings:
+        if not isinstance(item, dict):
+            continue
+        if not all(
+            key in item for key in ("fingerprint", "kind", "severity", "column")
+        ):
+            continue
+        views.append(_policy_view(item))
+    return Baseline.from_findings(views)
+
+
+def _compare_sessions(
+    previous: Any,
+    current: Any,
+    *,
+    kind: str,
+    root: Path,
+    previous_meta: dict[str, Any],
+    current_meta: dict[str, Any],
+) -> dict[str, Any]:
+    """Compare two retained sessions through the existing baseline semantics."""
+    with previous.lock:
+        previous_state = previous.state
+        previous_results = previous.results
+        previous_errors = list(previous.errors) if kind == "scan" else []
+    with current.lock:
+        current_state = current.state
+        current_results = current.results
+        current_errors = list(current.errors) if kind == "scan" else []
+
+    checks: list[dict[str, Any]] = []
+    if kind == "scan":
+        fields = [
+            ("target", previous.target, current.target),
+            ("SQL scanning", previous.include_sql, current.include_sql),
+        ]
+    else:
+        before = previous.request()
+        after = current.request()
+        fields = [
+            ("path", _relative(previous.path, root), _relative(current.path, root)),
+            ("file", before["file"], after["file"]),
+            ("target", before["target"], after["target"]),
+            ("threshold", before["threshold"], after["threshold"]),
+            ("held-out file", before["test"], after["test"]),
+            ("time column", before["time_column"], after["time_column"]),
+            ("group column", before["group_column"], after["group_column"]),
+        ]
+    mismatched = []
+    for name, before, after in fields:
+        compatible = before == after
+        checks.append(
+            {
+                "name": name,
+                "compatible": compatible,
+                "previous": before,
+                "current": after,
+            }
+        )
+        if not compatible:
+            mismatched.append(name)
+
+    base = {
+        "type": kind,
+        "checks": checks,
+        "previous": previous_meta,
+        "current": current_meta,
+    }
+    if previous_results is None or current_results is None:
+        return {
+            **base,
+            "available": False,
+            "compatible": False,
+            "reason": "both sessions need finished results before they can be compared",
+        }
+    if mismatched:
+        return {
+            **base,
+            "available": False,
+            "compatible": False,
+            "reason": (
+                "these sessions differ in "
+                + ", ".join(mismatched)
+                + "; compare sessions that use the same target and settings"
+            ),
+        }
+
+    previous_findings = [
+        item
+        for item in (previous_results.get("findings") or [])
+        if isinstance(item, dict) and item.get("fingerprint")
+    ]
+    current_findings = [
+        item
+        for item in (current_results.get("findings") or [])
+        if isinstance(item, dict) and item.get("fingerprint")
+    ]
+
+    def by_fingerprint(findings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        indexed: dict[str, dict[str, Any]] = {}
+        for item in sorted(
+            findings,
+            key=lambda entry: (
+                str(entry.get("kind")),
+                str(entry.get("column")),
+                str(entry.get("fingerprint")),
+            ),
+        ):
+            indexed.setdefault(str(item["fingerprint"]), item)
+        return indexed
+
+    previous_by_fp = by_fingerprint(previous_findings)
+    current_by_fp = by_fingerprint(current_findings)
+    try:
+        baseline = _comparison_baseline(previous_findings)
+        diff = compare(
+            baseline,
+            [
+                _policy_view(item)
+                for item in current_findings
+                if all(
+                    key in item for key in ("fingerprint", "kind", "severity", "column")
+                )
+            ],
+        )
+    except (BaselineError, KeyError, TypeError) as exc:
+        return {
+            **base,
+            "available": False,
+            "compatible": False,
+            "reason": f"the saved findings cannot be compared: {exc}",
+        }
+
+    previous_complete = previous_state == "done" and not previous_errors
+    current_complete = current_state == "done" and not current_errors
+    limitations: list[str] = []
+    if not previous_complete:
+        limitations.append(
+            "The previous session was partial; findings absent from it are "
+            "inconclusive, not newly added."
+        )
+    if not current_complete:
+        limitations.append(
+            "The current session was partial; findings absent from it are "
+            "inconclusive, not resolved."
+        )
+    notes = [
+        "Comparison reuses the existing stable finding fingerprints and "
+        "baseline classification; policy statuses come from each session."
+    ]
+
+    counts = {
+        "added": 0,
+        "unchanged": 0,
+        "changed": 0,
+        "no_longer_present": 0,
+        "inconclusive": 0,
+    }
+    changes: list[dict[str, Any]] = []
+
+    def add(
+        change: str,
+        current_item: dict[str, Any] | None,
+        previous_item: dict[str, Any] | None,
+        fingerprint: str,
+        reason: str | None = None,
+    ) -> None:
+        direction = (
+            "both"
+            if current_item is not None and previous_item is not None
+            else ("current_only" if current_item is not None else "previous_only")
+        )
+        subject = current_item or previous_item or {}
+        changes.append(
+            {
+                "change": change,
+                "direction": direction,
+                "fingerprint": fingerprint,
+                "kind": subject.get("kind"),
+                "severity": subject.get("severity"),
+                "column": subject.get("column"),
+                "resolved": change == "no_longer_present",
+                "current": _finding_ref(current_item),
+                "previous": _finding_ref(previous_item),
+                "reason": reason,
+            }
+        )
+        counts[change] += 1
+
+    for finding in diff.new:
+        fingerprint = finding.fingerprint
+        if previous_complete:
+            add("added", current_by_fp.get(fingerprint), None, fingerprint)
+        else:
+            add(
+                "inconclusive",
+                current_by_fp.get(fingerprint),
+                None,
+                fingerprint,
+                "the previous session was partial; this finding may have been missed",
+            )
+    for finding in diff.unchanged:
+        fingerprint = finding.fingerprint
+        add(
+            "unchanged",
+            current_by_fp.get(fingerprint),
+            previous_by_fp.get(fingerprint),
+            fingerprint,
+        )
+    for finding in diff.changed:
+        fingerprint = finding.fingerprint
+        add(
+            "changed",
+            current_by_fp.get(fingerprint),
+            previous_by_fp.get(fingerprint),
+            fingerprint,
+        )
+    for entry in diff.resolved:
+        fingerprint = entry.fingerprint
+        previous_item = previous_by_fp.get(fingerprint)
+        if current_complete:
+            add("no_longer_present", None, previous_item, fingerprint)
+        else:
+            add(
+                "inconclusive",
+                None,
+                previous_item,
+                fingerprint,
+                "the current session was partial; absence does not mean this finding is resolved",
+            )
+
+    total = len(changes)
+    counts_consistent = sum(counts.values()) == total
+    suppressed = sum(
+        1 for item in current_by_fp.values() if item.get("status") == "suppressed"
+    )
+    unclassified = sum(1 for item in current_by_fp.values() if not item.get("status"))
+    if unclassified:
+        notes.append(
+            "Findings without a policy status stay unclassified; comparison does "
+            "not relabel them."
+        )
+    return {
+        **base,
+        "available": True,
+        "compatible": True,
+        "reason": None,
+        "complete": {"previous": previous_complete, "current": current_complete},
+        "limitations": limitations,
+        "notes": notes,
+        "summary": {
+            **counts,
+            "total": total,
+            "suppressed": suppressed,
+            "unclassified": unclassified,
+        },
+        "changes": changes[:MAX_COMPARISON_CHANGES],
+        "truncated": total > MAX_COMPARISON_CHANGES,
+        "counts_consistent": counts_consistent,
+    }
+
+
 class WorkspaceScanManager:
     """Owns the workspace root and the single active scan or audit thread."""
 
@@ -751,6 +1161,7 @@ class WorkspaceScanManager:
                 scan_id=secrets.token_hex(6),
                 files=files,
                 include_sql=sql,
+                target=_relative(target, self.root),
                 baseline=baseline_doc,
                 rules=rules,
                 baseline_path=baseline_label,
@@ -848,6 +1259,7 @@ class WorkspaceScanManager:
         with session.lock:
             session.state = state
             session.current = None
+            session.completed_at = time.time()
             session.results = payload
             session.report_html = report_html
 
@@ -930,6 +1342,7 @@ class WorkspaceScanManager:
             if session.state == "queued":
                 session.cancel.set()
                 session.state = "cancelled"
+                session.completed_at = time.time()
                 return session
             if session.state == "auditing":
                 raise WorkspaceBusy(
@@ -937,9 +1350,148 @@ class WorkspaceScanManager:
                 )
         raise WorkspaceBusy("audit is not running")
 
+    def _scan_history(self, session: ScanSession) -> dict[str, Any]:
+        with session.lock:
+            results = session.results
+            state = session.state
+            counts = dict(session.counts)
+            completed_at = session.completed_at
+            errors = len(session.errors)
+            done = session.done
+            target = session.target
+            created_at = session.created_at
+            duration = (
+                results.get("duration_ms")
+                if isinstance(results, dict)
+                else session.elapsed_ms()
+            )
+            findings = (
+                len(results.get("findings") or [])
+                if isinstance(results, dict)
+                else None
+            )
+            trust = results.get("trust_score") if isinstance(results, dict) else None
+            report = session.report_html is not None
+        return {
+            "id": session.scan_id,
+            "type": "scan",
+            "target": target,
+            "state": state,
+            "started_at": _wall_time(created_at),
+            "completed_at": _wall_time(completed_at),
+            "duration_ms": duration,
+            "results_available": results is not None,
+            "report_available": report,
+            "summary": {
+                "findings": findings,
+                "high": counts.get("high", 0),
+                "medium": counts.get("medium", 0),
+                "low": counts.get("low", 0),
+                "trust_score": trust,
+                "files": len(session.files),
+                "done": done,
+                "errors": errors,
+            },
+        }
+
+    def _dataset_history(self, session: DatasetSession) -> dict[str, Any]:
+        with session.lock:
+            results = session.results
+            state = session.state
+            completed_at = session.completed_at
+            created_at = session.created_at
+            duration = (
+                results.get("elapsed_ms")
+                if isinstance(results, dict)
+                else session.elapsed_ms()
+            )
+            request = session.request()
+            path = _relative(session.path, self.root)
+            summary = results.get("summary") if isinstance(results, dict) else None
+            summary = summary if isinstance(summary, dict) else {}
+            findings = (
+                len(results.get("findings") or [])
+                if isinstance(results, dict)
+                else None
+            )
+            trust = results.get("trust_score") if isinstance(results, dict) else None
+            counts = results.get("counts") if isinstance(results, dict) else None
+            counts = counts if isinstance(counts, dict) else {}
+            report = session.report_html is not None
+        return {
+            "id": session.dataset_id,
+            "type": "dataset",
+            "target": path,
+            "state": state,
+            "started_at": _wall_time(created_at),
+            "completed_at": _wall_time(completed_at),
+            "duration_ms": duration,
+            "results_available": results is not None,
+            "report_available": report,
+            "summary": {
+                "findings": findings,
+                "high": counts.get("high", 0),
+                "medium": counts.get("medium", 0),
+                "low": counts.get("low", 0),
+                "trust_score": trust,
+                "rows": summary.get("rows"),
+                "columns": summary.get("columns"),
+                "held_out_rows": summary.get("test_rows"),
+                "target": request.get("target"),
+                "threshold": request.get("threshold"),
+                "file": request.get("file"),
+            },
+        }
+
+    def history(self) -> dict[str, Any]:
+        """Return the bounded in-memory session list, newest first."""
+        with self._lock:
+            scans = [self._scans[key] for key in self._order if key in self._scans]
+            datasets = [
+                self._datasets[key]
+                for key in self._dataset_order
+                if key in self._datasets
+            ]
+        scan_rows = [self._scan_history(session) for session in scans]
+        dataset_rows = [self._dataset_history(session) for session in datasets]
+        entries = sorted(
+            [*scan_rows, *dataset_rows],
+            key=lambda row: (row["started_at"] or "", row["id"]),
+            reverse=True,
+        )
+        return {
+            "retained": True,
+            "persistent": False,
+            "note": HISTORY_NOTE,
+            "limits": {
+                "scans": MAX_SCANS,
+                "datasets": MAX_DATASETS,
+                "total": MAX_SCANS + MAX_DATASETS,
+            },
+            "scans": scan_rows,
+            "datasets": dataset_rows,
+            "entries": entries,
+        }
+
+    def _history_entry(self, session: Any, kind: str) -> dict[str, Any]:
+        if kind == "scan":
+            return self._scan_history(session)
+        return self._dataset_history(session)
+
+    def compare(self, kind: str, previous: Any, current: Any) -> dict[str, Any]:
+        return _compare_sessions(
+            previous,
+            current,
+            kind=kind,
+            root=self.root,
+            previous_meta=self._history_entry(previous, kind),
+            current_meta=self._history_entry(current, kind),
+        )
+
     def _run_dataset(self, session: DatasetSession, upload, test_upload) -> None:
         with session.lock:
             if session.cancel.is_set():
+                session.completed_at = session.completed_at or time.time()
                 return
             session.state = "auditing"
         try:
@@ -958,6 +1510,7 @@ class WorkspaceScanManager:
         except UploadRejected as exc:
             with session.lock:
                 session.state = "failed"
+                session.completed_at = time.time()
                 session.error = {
                     "status": exc.status_code,
                     "code": exc.code,
@@ -967,6 +1520,7 @@ class WorkspaceScanManager:
         except Exception as exc:  # noqa: BLE001 - report, never crash the server
             with session.lock:
                 session.state = "failed"
+                session.completed_at = time.time()
                 session.error = {
                     "status": 500,
                     "code": "audit_failed",
@@ -1010,6 +1564,7 @@ class WorkspaceScanManager:
         }
         with session.lock:
             session.state = "done"
+            session.completed_at = time.time()
             session.results = results
             session.report_html = report_html
 
@@ -1094,6 +1649,30 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             "config": config_info,
         }
 
+    @app.get("/api/history")
+    def history() -> dict[str, Any]:
+        return manager.history()
+
+    def _compare(kind: str, previous: str, current: str) -> dict[str, Any]:
+        try:
+            if kind == "scan":
+                before = manager.get(previous)
+                after = manager.get(current)
+            else:
+                before = manager.get_dataset(previous)
+                after = manager.get_dataset(current)
+        except KeyError:
+            raise HTTPException(404, f"unknown {kind} session") from None
+        return manager.compare(kind, before, after)
+
+    @app.get("/api/compare/scans")
+    def compare_scans(previous: str, current: str) -> dict[str, Any]:
+        return _compare("scan", previous, current)
+
+    @app.get("/api/compare/datasets")
+    def compare_datasets(previous: str, current: str) -> dict[str, Any]:
+        return _compare("dataset", previous, current)
+
     @app.post("/api/scans", status_code=202)
     def start_scan(req: ScanRequest) -> dict[str, str]:
         try:
@@ -1110,6 +1689,18 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             return manager.get(scan_id).snapshot()
         except KeyError:
             raise HTTPException(404, "unknown scan") from None
+
+    @app.get("/api/scans/{scan_id}/events")
+    def scan_events(scan_id: str) -> StreamingResponse:
+        try:
+            session = manager.get(scan_id)
+        except KeyError:
+            raise HTTPException(404, "unknown scan") from None
+        return StreamingResponse(
+            _sse_stream(session, _scan_change_key, _scan_failure),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/scans/{scan_id}/cancel")
     def cancel_scan(scan_id: str) -> dict[str, Any]:
@@ -1208,6 +1799,18 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
             return manager.get_dataset(dataset_id).snapshot()
         except KeyError:
             raise HTTPException(404, "unknown dataset audit") from None
+
+    @app.get("/api/datasets/{dataset_id}/events")
+    def dataset_events(dataset_id: str) -> StreamingResponse:
+        try:
+            session = manager.get_dataset(dataset_id)
+        except KeyError:
+            raise HTTPException(404, "unknown dataset audit") from None
+        return StreamingResponse(
+            _sse_stream(session, _dataset_change_key, _dataset_failure),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     @app.post("/api/datasets/{dataset_id}/cancel")
     def cancel_dataset(dataset_id: str) -> dict[str, Any]:

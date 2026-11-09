@@ -36,6 +36,7 @@ button.finding[aria-current=true]{border-color:var(--accent);background:#1c2128}
 .status.new{color:var(--high)}.status.changed{color:var(--medium)}
 .status.unchanged,.status.suppressed{color:var(--muted)}
 .status.suppressed{text-decoration:line-through}
+.status.resolved{color:var(--ok)}
 .badge{display:inline-block;font-size:12px;padding:2px 9px;border-radius:999px;background:#21262d;border:1px solid var(--line)}
 .badge.running{color:var(--accent);border-color:var(--accent)}
 .badge.done{color:var(--ok);border-color:var(--ok)}
@@ -236,6 +237,33 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
     </div>
   </section>
 
+  <section class="card" aria-labelledby="history-title">
+    <div class="row">
+      <h2 id="history-title" style="font-size:14px;margin:0">Session history</h2>
+      <span class="grow"></span>
+      <button id="history-refresh" type="button">Refresh</button>
+    </div>
+    <p class="meta" id="history-note" role="status" aria-live="polite">Loading retained sessions…</p>
+    <div id="history-list"></div>
+  </section>
+
+  <section class="card" aria-labelledby="compare-title">
+    <h2 id="compare-title" style="font-size:14px;margin:0 0 10px">Compare retained sessions</h2>
+    <div class="row">
+      <span class="grow"><label for="cmp-previous">Previous</label>
+        <select id="cmp-previous" style="width:100%"></select></span>
+      <span class="grow"><label for="cmp-current">Current</label>
+        <select id="cmp-current" style="width:100%"></select></span>
+      <button id="cmp-run" type="button">Compare</button>
+    </div>
+    <p class="meta">Comparison uses stable finding fingerprints and the existing baseline
+      classification. A finding missing from a cancelled or partial scan is inconclusive,
+      never resolved.</p>
+    <p id="cmp-notice" class="meta" role="status" aria-live="polite"></p>
+    <div id="cmp-summary"></div>
+    <div id="cmp-list"></div>
+  </section>
+
   <section id="graph-panel" hidden aria-labelledby="graph-title">
     <div class="card">
       <div class="row">
@@ -282,7 +310,9 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = {id: null, info: null, results: null, selected: null};
+const state = {id: null, info: null, results: null, selected: null, source: null};
+const history = {data: null};
+const comparison = {data: null, type: null, current: null};
 const graph = {context: null, id: null, data: null, selected: null,
   offset: 0, limit: 50, focus: null, finding: null, request: 0, timer: null};
 
@@ -416,6 +446,67 @@ async function poll() {
     return;
   }
   await loadResults();
+  loadHistory();
+}
+
+function stopScanWatch() {
+  if (state.source) {
+    state.source.close();
+    state.source = null;
+  }
+}
+
+function watchScan() {
+  stopScanWatch();
+  if (!state.id) return;
+  if (!window.EventSource) {
+    poll();
+    return;
+  }
+  const id = state.id;
+  const source = new EventSource("/api/scans/" + id + "/events");
+  state.source = source;
+  let finished = false;
+  const stop = () => {
+    finished = true;
+    source.close();
+    if (state.source === source) state.source = null;
+  };
+  source.addEventListener("snapshot", (event) => {
+    if (finished || id !== state.id) return;
+    const status = JSON.parse(event.data);
+    renderStatus(status);
+  });
+  source.addEventListener("failure", (event) => {
+    if (finished || id !== state.id) return;
+    const status = JSON.parse(event.data);
+    renderStatus(status);
+    const failure = status.failure || {};
+    const details = (failure.errors || [])
+      .map((item) => item.path + " (" + item.message + ")").join("; ");
+    $("notice").textContent = (failure.message || "the scan failed") +
+      (details ? ": " + details : "");
+  });
+  source.addEventListener("done", async (event) => {
+    if (finished || id !== state.id) return;
+    stop();
+    const status = JSON.parse(event.data);
+    renderStatus(status);
+    $("notice").textContent = "Live updates complete.";
+    try {
+      await loadResults();
+    } catch (error) {
+      $("notice").textContent = error.message;
+    }
+    loadHistory();
+  });
+  source.onerror = () => {
+    if (finished || id !== state.id) return;
+    stop();
+    $("notice").textContent =
+      "Live updates disconnected; reconnecting with polling.";
+    poll();
+  };
 }
 
 async function loadResults() {
@@ -604,7 +695,8 @@ $("scan-form").addEventListener("submit", async (event) => {
     closeGraph();
     setState("running");
     $("cancel").disabled = false;
-    poll();
+    watchScan();
+    loadHistory();
   } catch (error) {
     setState("failed");
     $("notice").textContent = error.message;
@@ -629,7 +721,7 @@ for (const id of ["f-sev", "f-kind", "f-status", "f-q"]) {
 
 // --- dataset audits -------------------------------------------------------
 
-const ds = {id: null, columns: [], results: null};
+const ds = {id: null, columns: [], results: null, source: null};
 
 function dsState(name) {
   const badge = $("ds-state");
@@ -711,14 +803,90 @@ async function pollDataset() {
   dsBusy(false);
   if (status.state === "done") {
     await loadDatasetResults();
+    loadHistory();
     return;
   }
   if (status.state === "failed" && status.error) {
     $("ds-notice").textContent = status.error.message + " (" + status.error.code + ")";
     renderDatasetError(status.error);
+    loadHistory();
     return;
   }
   $("ds-notice").textContent = "Audit " + status.state + ".";
+  loadHistory();
+}
+
+function stopDatasetWatch() {
+  if (ds.source) {
+    ds.source.close();
+    ds.source = null;
+  }
+}
+
+function watchDataset() {
+  stopDatasetWatch();
+  if (!ds.id) return;
+  if (!window.EventSource) {
+    pollDataset();
+    return;
+  }
+  const id = ds.id;
+  const source = new EventSource("/api/datasets/" + id + "/events");
+  ds.source = source;
+  let finished = false;
+  const stop = () => {
+    finished = true;
+    source.close();
+    if (ds.source === source) ds.source = null;
+  };
+  source.addEventListener("snapshot", (event) => {
+    if (finished || id !== ds.id) return;
+    const status = JSON.parse(event.data);
+    dsState(status.state);
+    $("ds-elapsed").textContent = (status.elapsed_ms / 1000).toFixed(1) + "s";
+    if (status.state === "queued" || status.state === "auditing") {
+      $("ds-notice").textContent = "Auditing " + status.request.file +
+        " (target " + status.request.target + ")..." +
+        (status.state === "queued"
+          ? " queued: cancellation is still available."
+          : " the engine is running; it cannot be interrupted.");
+    }
+  });
+  source.addEventListener("failure", (event) => {
+    if (finished || id !== ds.id) return;
+    const status = JSON.parse(event.data);
+    dsState(status.state);
+    const failure = status.failure || {};
+    $("ds-notice").textContent = (failure.message || "the audit failed") +
+      (failure.code ? " (" + failure.code + ")" : "");
+    renderDatasetError({message: failure.message || "the audit failed",
+      code: failure.code || "audit_failed"});
+  });
+  source.addEventListener("done", async (event) => {
+    if (finished || id !== ds.id) return;
+    stop();
+    const status = JSON.parse(event.data);
+    dsState(status.state);
+    $("ds-elapsed").textContent = (status.elapsed_ms / 1000).toFixed(1) + "s";
+    dsBusy(false);
+    if (status.state === "done") {
+      await loadDatasetResults();
+      $("ds-notice").textContent = "Audit complete.";
+    } else if (status.state === "failed" && status.error) {
+      $("ds-notice").textContent = status.error.message + " (" + status.error.code + ")";
+      renderDatasetError(status.error);
+    } else {
+      $("ds-notice").textContent = "Audit " + status.state + ".";
+    }
+    loadHistory();
+  });
+  source.onerror = () => {
+    if (finished || id !== ds.id) return;
+    stop();
+    $("ds-notice").textContent =
+      "Live updates disconnected; reconnecting with polling.";
+    pollDataset();
+  };
 }
 
 async function loadDatasetResults() {
@@ -914,7 +1082,8 @@ $("ds-run").addEventListener("click", async () => {
     ds.results = null;
     closeGraph();
     dsState("queued");
-    pollDataset();
+    watchDataset();
+    loadHistory();
   } catch (error) {
     dsState("failed");
     $("ds-notice").textContent = error.message;
@@ -937,6 +1106,334 @@ $("ds-cancel").addEventListener("click", async () => {
 $("ds-status").addEventListener("input", () => {
   if (ds.results) datasetClusters(ds.results);
 });
+
+// --- session history and comparisons --------------------------------------
+
+function compareValue(entry) {
+  return entry.type + ":" + entry.id;
+}
+
+function describeEntry(entry) {
+  if (!entry) return "-";
+  const when = entry.started_at ? new Date(entry.started_at).toLocaleString() : "unknown start";
+  return (entry.type === "scan" ? "source scan" : "dataset audit") + " · " +
+    entry.target + " · " + entry.state + " · " + when;
+}
+
+function historyRow(entry) {
+  const summary = entry.summary || {};
+  const pieces = [];
+  if (summary.findings != null) pieces.push(summary.findings + " findings");
+  if (summary.trust_score != null) pieces.push("trust " + summary.trust_score + "/100");
+  if (entry.type === "dataset") {
+    if (summary.rows != null) pieces.push(summary.rows + " rows");
+    if (summary.target) pieces.push("target " + summary.target);
+  } else if (summary.files != null) {
+    pieces.push(summary.files + " files");
+  }
+  if (summary.errors) pieces.push(summary.errors + " error(s)");
+  const actions = [];
+  if (entry.results_available) {
+    const open = el("button", {type: "button", text: "Open results"});
+    open.addEventListener("click", async () => {
+      try {
+        await openHistoryEntry(entry);
+      } catch (error) {
+        $("notice").textContent = error.message;
+      }
+    });
+    actions.push(open);
+    const graphButton = el("button", {type: "button", text: "Graph"});
+    graphButton.addEventListener("click", async () => {
+      try {
+        await openHistoryEntry(entry);
+        openGraph(entry.type === "scan" ? "scan" : "dataset", entry.id);
+      } catch (error) {
+        $("notice").textContent = error.message;
+      }
+    });
+    actions.push(graphButton);
+  }
+  if (entry.report_available) {
+    actions.push(el("a", {href: "/api/" + (entry.type === "scan" ? "scans" : "datasets") +
+      "/" + entry.id + "/report", text: "Report"}));
+  }
+  if (entry.results_available) {
+    const compare = el("button", {type: "button", text: "Compare"});
+    compare.addEventListener("click", () => compareSelection(entry));
+    actions.push(compare);
+  }
+  const when = entry.started_at ? new Date(entry.started_at).toLocaleString() : "-";
+  const duration = entry.duration_ms != null
+    ? (entry.duration_ms / 1000).toFixed(1) + "s" : "-";
+  return el("tr", {},
+    el("td", {}, el("span", {class: "badge " + entry.state, text: entry.state})),
+    el("td", {text: entry.type === "scan" ? "source scan" : "dataset audit"}),
+    el("td", {class: "kv", text: entry.target}),
+    el("td", {class: "kv", text: when}),
+    el("td", {text: duration}),
+    el("td", {text: pieces.join(" · ")}),
+    el("td", {}, ...actions));
+}
+
+function compareOption(entry) {
+  const summary = entry.summary || {};
+  const bits = [entry.type === "scan" ? "scan" : "dataset", entry.target, entry.state];
+  if (summary.findings != null) bits.push(summary.findings + " findings");
+  if (entry.started_at) bits.push(new Date(entry.started_at).toLocaleString());
+  return el("option", {value: compareValue(entry), text: bits.join(" · ")});
+}
+
+function fillCompareSelect(select, entries) {
+  const previous = select.value;
+  const usable = (entries || []).filter((entry) => entry.results_available);
+  const scans = usable.filter((entry) => entry.type === "scan");
+  const datasets = usable.filter((entry) => entry.type === "dataset");
+  const children = [];
+  if (scans.length) {
+    children.push(el("optgroup", {label: "Source scans"}, ...scans.map(compareOption)));
+  }
+  if (datasets.length) {
+    children.push(el("optgroup", {label: "Dataset audits"}, ...datasets.map(compareOption)));
+  }
+  if (!children.length) children.push(el("option", {value: "", text: "No retained results yet"}));
+  select.replaceChildren(...children);
+  if (previous && Array.from(select.options).some((option) => option.value === previous)) {
+    select.value = previous;
+  }
+}
+
+async function loadHistory() {
+  const note = $("history-note");
+  try {
+    const data = await api("/api/history");
+    history.data = data;
+    note.textContent = data.note + " Retained now: " + data.scans.length +
+      " source scan(s) and " + data.datasets.length + " dataset audit(s); limits " +
+      data.limits.scans + " and " + data.limits.datasets + ".";
+    const list = $("history-list");
+    list.replaceChildren();
+    if (!data.entries.length) {
+      list.append(el("p", {class: "empty",
+        text: "No sessions yet. Start a scan or audit above."}));
+    } else {
+      list.append(el("table", {class: "table"},
+        el("thead", {}, el("tr", {},
+          ...["Status", "Type", "Target", "Started", "Duration", "Summary", "Actions"]
+            .map((name) => el("th", {text: name})))),
+        el("tbody", {}, ...data.entries.map(historyRow))));
+    }
+    fillCompareSelect($("cmp-previous"), data.entries);
+    fillCompareSelect($("cmp-current"), data.entries);
+  } catch (error) {
+    note.textContent = "History unavailable: " + error.message;
+  }
+}
+
+async function openHistoryEntry(entry) {
+  closeGraph();
+  if (entry.type === "scan") {
+    stopScanWatch();
+    state.id = entry.id;
+    state.selected = null;
+    state.results = null;
+    $("results").hidden = true;
+    $("notice").textContent = "";
+    setState(entry.state);
+    await loadResults();
+    $("results").scrollIntoView({behavior: "smooth", block: "start"});
+    return;
+  }
+  stopDatasetWatch();
+  ds.id = entry.id;
+  ds.results = null;
+  $("ds-results").hidden = true;
+  $("ds-notice").textContent = "";
+  dsState(entry.state);
+  await loadDatasetResults();
+  $("ds-results").scrollIntoView({behavior: "smooth", block: "start"});
+}
+
+function changeClass(change) {
+  if (change === "added") return "new";
+  if (change === "no_longer_present") return "resolved";
+  if (change === "inconclusive") return "unchanged";
+  return change;
+}
+
+function comparisonStat(label, value, cls) {
+  return el("span", {class: cls || "muted"},
+    el("b", {text: String(value == null ? 0 : value)}),
+    el("span", {class: "muted", text: label}));
+}
+
+function comparisonRow(entry) {
+  const subject = entry.current || entry.previous || {};
+  const where = subject.file
+    ? subject.file + (subject.line ? ":" + subject.line : "")
+    : (subject.column || "");
+  const details = [];
+  if (entry.change === "changed") {
+    details.push("severity " + ((entry.previous || {}).severity || "?") + " → " +
+      ((entry.current || {}).severity || "?"));
+  }
+  if (entry.current && entry.current.status) {
+    details.push("current status " + entry.current.status);
+  }
+  if (entry.current && entry.current.suppression) {
+    details.push("suppressed: " + entry.current.suppression.reason);
+  }
+  if (entry.current && entry.current.requires_attention === false) {
+    details.push("does not count toward the trust score");
+  }
+  if (entry.reason) details.push(entry.reason);
+  const actions = [];
+  if (entry.current && entry.current.index != null) {
+    const open = el("button", {type: "button", text: "Open finding"});
+    open.addEventListener("click", () => openComparisonFinding(entry.current.index));
+    actions.push(open);
+    const graphButton = el("button", {type: "button", text: "Graph"});
+    graphButton.addEventListener("click", () => openGraph(
+      comparison.type === "scan" ? "scan" : "dataset",
+      comparison.current, entry.current.index));
+    actions.push(graphButton);
+  }
+  return el("tr", {},
+    el("td", {}, el("span", {class: "chip status " + changeClass(entry.change),
+      text: entry.change})),
+    el("td", {}, subject.severity
+      ? el("span", {class: "chip " + subject.severity, text: subject.severity}) : null),
+    el("td", {text: subject.kind || ""}),
+    el("td", {class: "kv", text: where}),
+    el("td", {class: "kv", text: (entry.fingerprint || "").slice(0, 16)}),
+    el("td", {class: "meta", text: details.join(" · ")}),
+    el("td", {}, ...actions));
+}
+
+function renderComparison(data) {
+  const notice = $("cmp-notice");
+  const summary = $("cmp-summary");
+  const list = $("cmp-list");
+  summary.replaceChildren();
+  list.replaceChildren();
+  if (!data.available) {
+    notice.textContent = data.reason || "Comparison is unavailable.";
+    if (data.checks && data.checks.length) {
+      summary.append(el("table", {class: "table"},
+        el("thead", {}, el("tr", {},
+          ...["Setting", "Compatible", "Previous", "Current"]
+            .map((name) => el("th", {text: name})))),
+        el("tbody", {}, ...data.checks.map((check) => el("tr", {},
+          el("td", {text: check.name}),
+          el("td", {text: check.compatible ? "yes" : "no"}),
+          el("td", {class: "kv", text: String(check.previous)}),
+          el("td", {class: "kv", text: String(check.current)}))))));
+    }
+    return;
+  }
+  notice.textContent = "";
+  const s = data.summary;
+  summary.append(
+    el("p", {class: "meta", text: "Previous: " + describeEntry(data.previous)}),
+    el("p", {class: "meta", text: "Current: " + describeEntry(data.current)}),
+    el("div", {class: "stats"},
+      comparisonStat("added", s.added, "high"),
+      comparisonStat("unchanged", s.unchanged, "muted"),
+      comparisonStat("changed", s.changed, "medium"),
+      comparisonStat("no longer present", s.no_longer_present, "low"),
+      comparisonStat("inconclusive", s.inconclusive, "muted")),
+    el("p", {class: "meta", text: s.suppressed + " suppressed · " +
+      s.unclassified + " unclassified · " +
+      (data.counts_consistent ? "counts consistent" : "counts inconsistent") +
+      (data.truncated ? " · list truncated, " + s.total + " change(s) total" : "")}),
+    ...(data.limitations || []).map((text) => el("p", {class: "meta high", text: text})),
+    ...(data.notes || []).map((text) => el("p", {class: "meta", text: text})));
+  if (!data.changes.length) {
+    list.append(el("p", {class: "empty", text: "No findings to compare."}));
+    return;
+  }
+  list.append(el("table", {class: "table"},
+    el("thead", {}, el("tr", {},
+      ...["Change", "Severity", "Kind", "Column / file", "Fingerprint", "Details", "Actions"]
+        .map((name) => el("th", {text: name})))),
+    el("tbody", {}, ...data.changes.map(comparisonRow))));
+}
+
+async function runComparison() {
+  const before = $("cmp-previous").value;
+  const after = $("cmp-current").value;
+  const notice = $("cmp-notice");
+  $("cmp-summary").replaceChildren();
+  $("cmp-list").replaceChildren();
+  if (!before || !after) {
+    notice.textContent = "Choose two retained sessions with results.";
+    return;
+  }
+  if (before === after) {
+    notice.textContent = "Choose two different sessions.";
+    return;
+  }
+  const beforeType = before.split(":")[0];
+  const afterType = after.split(":")[0];
+  if (beforeType !== afterType) {
+    notice.textContent = "Compare a source scan with a source scan, or a dataset " +
+      "audit with a dataset audit.";
+    return;
+  }
+  const beforeId = before.split(":")[1];
+  const afterId = after.split(":")[1];
+  notice.textContent = "Comparing…";
+  try {
+    const data = await api("/api/compare/" + (afterType === "scan" ? "scans" : "datasets") +
+      "?previous=" + encodeURIComponent(beforeId) +
+      "&current=" + encodeURIComponent(afterId));
+    comparison.data = data;
+    comparison.type = afterType;
+    comparison.current = afterId;
+    renderComparison(data);
+  } catch (error) {
+    notice.textContent = error.message;
+  }
+}
+
+function compareSelection(entry) {
+  if (!history.data) return;
+  $("cmp-current").value = compareValue(entry);
+  const peer = (history.data.entries || []).find((item) =>
+    item.type === entry.type && item.id !== entry.id && item.results_available);
+  if (peer) $("cmp-previous").value = compareValue(peer);
+  runComparison();
+}
+
+async function openComparisonFinding(index) {
+  const type = comparison.type;
+  const id = comparison.current;
+  if (type === "scan") {
+    if (state.id !== id) {
+      const entry = (history.data ? history.data.entries : []).find((item) =>
+        item.type === "scan" && item.id === id);
+      if (entry) await openHistoryEntry(entry);
+    }
+    if (state.results) await focusFinding("scan", index);
+    return;
+  }
+  if (ds.id !== id) {
+    const entry = (history.data ? history.data.entries : []).find((item) =>
+      item.type === "dataset" && item.id === id);
+    if (entry) await openHistoryEntry(entry);
+  }
+  if (ds.results) await focusFinding("dataset", index);
+}
+
+$("history-refresh").addEventListener("click", loadHistory);
+$("cmp-run").addEventListener("click", runComparison);
+for (const id of ["cmp-previous", "cmp-current"]) {
+  $(id).addEventListener("change", () => {
+    $("cmp-notice").textContent = "";
+    $("cmp-summary").replaceChildren();
+    $("cmp-list").replaceChildren();
+  });
+}
 
 // --- evidence graph -------------------------------------------------------
 
@@ -1304,6 +1801,7 @@ api("/api/info").then((info) => {
     ". Limits: " + (limits.max_bytes / (1024 * 1024)) + " MiB, " +
     limits.max_rows + " rows, " + limits.max_columns + " columns, " +
     limits.max_cells + " cells.";
+  loadHistory();
 });
 </script>
 </body></html>

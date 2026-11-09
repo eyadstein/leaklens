@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Phase 11.5: live workspace updates, history and comparisons
+
+- Added `GET /api/scans/{id}/events` and `GET /api/datasets/{id}/events` as bounded server-sent event streams. They read the existing session snapshots, emit only on change, send heartbeats, and end with `done`; dataset engine failures emit `failure` first. Unknown or trimmed sessions return 404 before streaming, streams never span sessions, and the UI keeps the existing polling path as a fallback when `EventSource` is unavailable or the stream breaks.
+- Added `GET /api/history`: newest-first metadata for the retained source scans and dataset audits (type, target, state, wall-clock start/completion, duration, result/report availability and a small summary). It is explicitly in-memory only, respects the existing 20-per-kind retention, and is lost on restart; no storage layer or extra source content was added.
+- Added `GET /api/compare/scans` and `GET /api/compare/datasets`. They validate same-kind compatibility (source target/SQL setting; dataset path/target/threshold/held-out/time/group settings), then reuse `Baseline.from_findings()` and `baseline.compare()` on stable fingerprints. Results classify `added`, `unchanged`, `changed` and `no_longer_present`, preserve each current finding's policy status, suppression and `requires_attention`, and report `inconclusive` instead of `resolved` or `added` when either side is partial or cancelled. Summaries include suppressed/unclassified counts, count consistency, truncation and check details.
+- The workspace UI gains live progress with reconnecting/polling fallback, a retention-labelled history table that reopens results/graphs/reports, and a comparison panel with summary counts and finding/graph navigation. Existing filters, previews, dataset summaries, policy controls, graph navigation and exports are preserved.
+- Extended `tests/test_workspace.py` with SSE ordering/completion/failure/reconnect/trimmed-session coverage, polling fallback, history metadata/retention/restart, compatible and incompatible comparisons, all change categories, suppression preservation, partial-scan safeguards, fingerprint/evidence consistency and count/navigation checks; updated `docs/WORKSPACE.md` and `README.md`.
+
 ### Phase 11.4: interactive evidence graph navigation in the workspace
 
 - Added `GET /api/scans/{id}/graph` and `GET /api/datasets/{id}/graph`: read-only projections of the graph `intelligence.analyze_findings` already built. Source results spread `evidence`/`clusters`/`links` at the top level; dataset results nest them under `intelligence`. No graph is reconstructed and no node, edge, provenance or rationale is invented.

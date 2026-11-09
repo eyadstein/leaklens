@@ -16,6 +16,7 @@ from leaklens.baseline import BASELINE_SCHEMA, BASELINE_VERSION
 from leaklens.fingerprint import SCHEMA_VERSION
 from leaklens.workspace import (
     GRAPH_MAX_LIMIT,
+    ScanSession,
     _graph_payload,
     create_workspace_app,
 )
@@ -1456,3 +1457,388 @@ def test_dataset_graph_reuses_nested_intelligence_and_policy(tmp_path):
     assert suppressed["status"] == "suppressed"
     assert suppressed["finding"]["suppression"]["reason"] == "accepted"
     assert rerun["findings"][finding["index"]]["status"] == "suppressed"
+
+
+# --- live updates, history and comparisons --------------------------------
+
+
+def _sse_events(client, path):
+    events = []
+    with client.stream("GET", path) as response:
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"].startswith("text/event-stream")
+        name = None
+        for line in response.iter_lines():
+            line = line.strip()
+            if line.startswith("event:"):
+                name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                events.append((name, json.loads(line.split(":", 1)[1].strip())))
+    return events
+
+
+def _fake_finding(fingerprint, **overrides):
+    item = {
+        "fingerprint": fingerprint,
+        "kind": "target_leakage",
+        "severity": "high",
+        "column": "a.py:1",
+        "detail": "feature is the target",
+        "file": "a.py",
+        "line": 1,
+        "index": 0,
+        "evidence": [{"kind": "source", "description": "x"}],
+    }
+    item.update(overrides)
+    return item
+
+
+def _fake_scan_session(manager, scan_id, findings, *, state="done", target="."):
+    items = []
+    for index, finding in enumerate(findings):
+        item = dict(finding)
+        item["index"] = index
+        items.append(item)
+    session = ScanSession(scan_id=scan_id, files=(), include_sql=False, target=target)
+    session.state = state
+    session.results = {"findings": items, "state": state}
+    manager._scans[scan_id] = session
+    manager._order.append(scan_id)
+    return session
+
+
+def test_scan_events_stream_progress_completion_and_reconnect(tmp_path, monkeypatch):
+    from leaklens import workspace
+
+    entered, release = threading.Event(), threading.Event()
+
+    def blocking_scan(path):
+        entered.set()
+        release.wait(timeout=15)
+        return []
+
+    monkeypatch.setattr(workspace, "scan_file", blocking_scan)
+    client = _client(_project(tmp_path))
+    scan_id = client.post("/api/scans", json={"path": "."}).json()["scan_id"]
+    assert entered.wait(timeout=15)
+
+    with client.stream("GET", f"/api/scans/{scan_id}/events") as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        first = None
+        name = None
+        for line in response.iter_lines():
+            line = line.strip()
+            if line.startswith("event:"):
+                name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                first = (name, json.loads(line.split(":", 1)[1].strip()))
+                break
+
+    assert first[0] == "snapshot"
+    assert first[1]["type"] == "snapshot"
+    assert first[1]["state"] == "running"
+    assert first[1]["scan_id"] == scan_id
+    assert first[1]["seq"] == 1
+
+    release.set()
+    assert _wait(client, scan_id)["state"] == "done"
+
+    tail = _sse_events(client, f"/api/scans/{scan_id}/events")
+    assert [name for name, _ in tail] == ["snapshot", "done"]
+    assert tail[0][1]["state"] == "done"
+    assert tail[-1][1]["type"] == "done"
+    assert tail[0][1]["seq"] < tail[1][1]["seq"]
+
+
+def test_dataset_events_stream_stages_and_engine_failure(tmp_path, monkeypatch):
+    from leaklens import workspace
+
+    _dataset(tmp_path)
+    entered, release = threading.Event(), threading.Event()
+    real = workspace.run_audit_job
+
+    def blocking(*args, **kwargs):
+        entered.set()
+        release.wait(timeout=15)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(workspace, "run_audit_job", blocking)
+    client = _client(tmp_path)
+    started = client.post("/api/datasets", json={"path": "train.csv", "target": "y"})
+    assert started.status_code == 202, started.text
+    dataset_id = started.json()["dataset_id"]
+    assert entered.wait(timeout=15)
+
+    with client.stream("GET", f"/api/datasets/{dataset_id}/events") as response:
+        assert response.status_code == 200
+        first = None
+        name = None
+        for line in response.iter_lines():
+            line = line.strip()
+            if line.startswith("event:"):
+                name = line.split(":", 1)[1].strip()
+            elif line.startswith("data:"):
+                first = (name, json.loads(line.split(":", 1)[1].strip()))
+                break
+
+    assert first[0] == "snapshot"
+    assert first[1]["state"] in {"queued", "auditing"}
+    assert first[1]["request"]["target"] == "y"
+    release.set()
+    assert _wait_dataset(client, dataset_id)["state"] == "done"
+
+    tail = _sse_events(client, f"/api/datasets/{dataset_id}/events")
+    assert [name for name, _ in tail] == ["snapshot", "done"]
+    assert tail[-1][1]["state"] == "done"
+
+    failed_id, status = _run_dataset(client, target="missing")
+    assert status["state"] == "failed"
+    failed = _sse_events(client, f"/api/datasets/{failed_id}/events")
+    assert [name for name, _ in failed] == ["snapshot", "failure", "done"]
+    assert failed[1][1]["failure"]["code"] == "unknown_target"
+    assert failed[1][1]["seq"] < failed[2][1]["seq"]
+
+
+def test_events_reject_unknown_and_stale_sessions(tmp_path, monkeypatch):
+    from leaklens import workspace
+
+    client = _client(_project(tmp_path))
+    assert client.get("/api/scans/missing/events").status_code == 404
+    assert client.get("/api/datasets/missing/events").status_code == 404
+
+    monkeypatch.setattr(workspace, "MAX_SCANS", 1)
+    first, _ = _run(client)
+    second, _ = _run(client)
+    assert [row["id"] for row in client.get("/api/history").json()["scans"]] == [second]
+    assert client.get(f"/api/scans/{first}").status_code == 404
+    assert client.get(f"/api/scans/{first}/events").status_code == 404
+
+
+def test_history_is_bounded_in_memory_and_reports_metadata(tmp_path):
+    _dataset(tmp_path)
+    client = _client(_project(tmp_path))
+    scan_id, _ = _run(client)
+    dataset_id, _ = _run_dataset(client)
+
+    history = client.get("/api/history").json()
+    assert history["retained"] is True
+    assert history["persistent"] is False
+    assert "restart" in history["note"]
+    assert history["limits"]["scans"] >= 1
+    assert history["limits"]["datasets"] >= 1
+    assert {row["type"] for row in history["entries"]} == {"scan", "dataset"}
+
+    scan = next(row for row in history["entries"] if row["type"] == "scan")
+    assert scan["id"] == scan_id
+    assert scan["target"] == "."
+    assert scan["started_at"] and scan["completed_at"]
+    assert scan["duration_ms"] >= 0
+    assert scan["results_available"] is True
+    assert scan["report_available"] is True
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    assert scan["summary"]["findings"] == len(results["findings"])
+
+    dataset = next(row for row in history["entries"] if row["type"] == "dataset")
+    assert dataset["id"] == dataset_id
+    assert dataset["target"] == "train.csv"
+    assert dataset["summary"]["target"] == "y"
+    assert dataset["summary"]["rows"] == 120
+    assert dataset["results_available"] is True
+
+    # Newest first; a restarted server has no persisted history.
+    assert history["entries"][0]["id"] == dataset_id
+    fresh = create_workspace_app(tmp_path)
+    assert fresh.state.manager.history()["entries"] == []
+
+
+def test_page_exposes_live_history_and_comparison_controls(tmp_path):
+    page = _client(_project(tmp_path)).get("/").text
+    for control in (
+        'id="history-refresh"',
+        'id="history-list"',
+        'id="cmp-previous"',
+        'id="cmp-current"',
+        'id="cmp-run"',
+        'id="cmp-summary"',
+        'id="cmp-list"',
+    ):
+        assert control in page
+    assert "/events" in page
+
+
+def test_source_comparison_classifies_without_reinterpreting_policy(tmp_path):
+    app = create_workspace_app(tmp_path)
+    client = TestClient(app)
+    manager = app.state.manager
+    fp = {name: char * 64 for name, char in zip("abcde", "abcde")}
+
+    previous = [
+        _fake_finding(fp["a"]),
+        _fake_finding(fp["b"], column="b.py:1"),
+        _fake_finding(fp["c"], column="c.py:1"),
+        _fake_finding(
+            fp["d"],
+            column="d.py:1",
+            status="suppressed",
+            suppression={"fingerprint": fp["d"], "reason": "accepted"},
+            requires_attention=False,
+        ),
+    ]
+    current = [
+        _fake_finding(fp["a"]),
+        _fake_finding(fp["b"], severity="low", column="b.py:1"),
+        _fake_finding(
+            fp["d"],
+            column="d.py:1",
+            status="suppressed",
+            suppression={"fingerprint": fp["d"], "reason": "accepted"},
+            requires_attention=False,
+        ),
+        _fake_finding(fp["e"], column="e.py:1"),
+    ]
+    _fake_scan_session(manager, "prev", previous)
+    _fake_scan_session(manager, "curr", current)
+
+    response = client.get(
+        "/api/compare/scans", params={"previous": "prev", "current": "curr"}
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["available"] is True and data["compatible"] is True
+    assert data["type"] == "scan"
+    assert data["checks"] and all(check["compatible"] for check in data["checks"])
+    summary = data["summary"]
+    assert (
+        summary["added"],
+        summary["unchanged"],
+        summary["changed"],
+        summary["no_longer_present"],
+        summary["inconclusive"],
+    ) == (1, 2, 1, 1, 0)
+    assert summary["total"] == 5
+    assert summary["suppressed"] == 1
+    assert summary["unclassified"] == 3
+    assert data["counts_consistent"] is True
+    assert data["truncated"] is False
+
+    by_change = {entry["change"]: entry for entry in data["changes"]}
+    assert by_change["added"]["fingerprint"] == fp["e"]
+    assert by_change["added"]["current"]["index"] == 3
+    assert by_change["changed"]["previous"]["severity"] == "high"
+    assert by_change["changed"]["current"]["severity"] == "low"
+    assert by_change["no_longer_present"]["resolved"] is True
+    assert by_change["no_longer_present"]["fingerprint"] == fp["c"]
+    unchanged = next(
+        entry for entry in data["changes"] if entry["fingerprint"] == fp["a"]
+    )
+    assert unchanged["change"] == "unchanged"
+    assert "status" not in unchanged["current"]
+    suppressed = next(
+        entry for entry in data["changes"] if entry["fingerprint"] == fp["d"]
+    )
+    assert suppressed["current"]["status"] == "suppressed"
+    assert suppressed["current"]["suppression"]["reason"] == "accepted"
+    assert suppressed["current"]["requires_attention"] is False
+
+    assert (
+        client.get(
+            "/api/compare/scans", params={"previous": "missing", "current": "curr"}
+        ).status_code
+        == 404
+    )
+
+
+def test_comparison_never_marks_findings_from_partial_scans(tmp_path):
+    app = create_workspace_app(tmp_path)
+    client = TestClient(app)
+    manager = app.state.manager
+    a, b, c = "a" * 64, "b" * 64, "c" * 64
+
+    _fake_scan_session(manager, "prev", [_fake_finding(a), _fake_finding(b)])
+    _fake_scan_session(manager, "curr", [_fake_finding(a)], state="cancelled")
+    data = client.get(
+        "/api/compare/scans", params={"previous": "prev", "current": "curr"}
+    ).json()
+    assert data["available"] is True
+    assert data["complete"] == {"previous": True, "current": False}
+    assert data["summary"]["no_longer_present"] == 0
+    assert data["summary"]["inconclusive"] == 1
+    unresolved = next(
+        entry for entry in data["changes"] if entry["change"] == "inconclusive"
+    )
+    assert unresolved["resolved"] is False
+    assert unresolved["fingerprint"] == b
+    assert any("partial" in text for text in data["limitations"])
+
+    _fake_scan_session(manager, "partial", [_fake_finding(a)], state="cancelled")
+    _fake_scan_session(manager, "complete", [_fake_finding(a), _fake_finding(c)])
+    data = client.get(
+        "/api/compare/scans", params={"previous": "partial", "current": "complete"}
+    ).json()
+    assert data["available"] is True
+    assert data["summary"]["added"] == 0
+    assert data["summary"]["inconclusive"] == 1
+    unresolved = next(
+        entry for entry in data["changes"] if entry["change"] == "inconclusive"
+    )
+    assert unresolved["resolved"] is False
+    assert unresolved["fingerprint"] == c
+
+
+def test_source_comparison_reuses_stable_fingerprints(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    first, _ = _run(client)
+    second, _ = _run(client)
+    data = client.get(
+        "/api/compare/scans", params={"previous": first, "current": second}
+    ).json()
+    assert data["available"] is True and data["compatible"] is True
+    assert data["summary"]["added"] == 0
+    assert data["summary"]["no_longer_present"] == 0
+    assert data["summary"]["unchanged"] == data["summary"]["total"] > 0
+    assert data["counts_consistent"] is True
+    results = client.get(f"/api/scans/{second}/results").json()
+    fingerprints = {finding["fingerprint"]: finding for finding in results["findings"]}
+    assert {entry["fingerprint"] for entry in data["changes"]} <= set(fingerprints)
+    for entry in data["changes"]:
+        current = entry["current"]
+        assert current["fingerprint"] == entry["fingerprint"]
+        assert current["evidence"] == fingerprints[entry["fingerprint"]]["evidence"]
+
+
+def test_dataset_comparison_requires_matching_configuration(tmp_path):
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    first, _ = _run_dataset(client, test_path="test.csv")
+    second, _ = _run_dataset(client, test_path="test.csv")
+
+    data = client.get(
+        "/api/compare/datasets", params={"previous": first, "current": second}
+    ).json()
+    assert data["available"] is True
+    assert data["summary"]["added"] == 0
+    assert data["summary"]["no_longer_present"] == 0
+    assert data["summary"]["unchanged"] == data["summary"]["total"] > 0
+    assert data["counts_consistent"] is True
+    results = client.get(f"/api/datasets/{second}/results").json()
+    fingerprints = {finding["fingerprint"] for finding in results["findings"]}
+    assert {entry["fingerprint"] for entry in data["changes"]} <= fingerprints
+    assert all(entry["current"]["evidence"] for entry in data["changes"])
+
+    mismatch, _ = _run_dataset(client, threshold=0.8, test_path="test.csv")
+    incompatible = client.get(
+        "/api/compare/datasets", params={"previous": second, "current": mismatch}
+    ).json()
+    assert incompatible["available"] is False
+    assert "threshold" in incompatible["reason"]
+    assert any(
+        check["name"] == "threshold" and check["compatible"] is False
+        for check in incompatible["checks"]
+    )
+    assert (
+        client.get(
+            "/api/compare/datasets", params={"previous": "missing", "current": second}
+        ).status_code
+        == 404
+    )
