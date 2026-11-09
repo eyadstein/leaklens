@@ -350,6 +350,10 @@ class ModelCard:
     calibration: tuple[tuple[str, float], ...] = ()
     candidates: tuple[tuple[str, float], ...] = ()
     protocol: str = ""
+    artifact_digest: str = ""
+    corpus_digest: str = ""
+    feature_catalogue_digest: str = ""
+    library_version: str = ""
 
     def __post_init__(self) -> None:
         _text(self.name, "name", 120)
@@ -383,6 +387,17 @@ class ModelCard:
             raise TypeError("protocol must be a string")
         if self.protocol:
             _text(self.protocol, "protocol", 600)
+        for name in (
+            "artifact_digest",
+            "corpus_digest",
+            "feature_catalogue_digest",
+            "library_version",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise TypeError(f"{name} must be a string")
+            if value:
+                _text(value, name, 120)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

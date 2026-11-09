@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### AI model artifact and provenance
+
+- The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.
+- `ModelCard` gained `artifact_digest`, `corpus_digest`, `feature_catalogue_digest` and `library_version` (all optional, so older payloads still validate). `artifact_fallback_reason()` reports why a request fitted instead of loading. A missing, truncated, oversized, hand-edited, stale-corpus, stale-feature, wrong-version or incompatible-library artifact always falls back to the in-memory fit; JSON cannot execute code and no pickle is used.
+- `python -m leaklens.ai.artifact` regenerates the file from the current corpus and features. The artifact tests exercise the real `get_model` serving path, check parity at 1e-9 on all 48 real-world units and 47 locked-test cases, cover the corruption matrix, the cache, and prove a fresh fit reproduces the checked-in payload exactly. `docs/AI_PERFORMANCE.md` records the cold-load measurement.
+
 ### AI reasoning: Phase 10 root-cause coverage
 
 - The AI reasoning plan (`leaklens/ai/reasoning.py`) and the deterministic intelligence engine (`leaklens/intelligence/orchestrator.py`) now classify the Phase 10 finding kinds instead of falling back to a generic group or "unclassified risk": `sql_target_as_feature`, `sql_split_predicate_missing` and `sql_future_window` map to `sql_lineage`, `sql_unresolved_column` to `sql_unresolved`, the three `missingness_*` kinds to `informative_missingness`, and `distribution_shift` to `distribution_shift`. Each has a specific root cause, explanation, remediation and verification steps; drift stays a low diagnostic.

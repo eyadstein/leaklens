@@ -579,6 +579,8 @@ def _groups(cases: Sequence[CorpusCase]) -> np.ndarray:
 def _evaluate(
     *, include_external: bool = True, candidate: str | None = None
 ) -> tuple[ModelEvaluation, LearnedModel]:
+    from . import artifact
+
     train = training_cases()
     validation = validation_cases()
     development = development_cases()
@@ -713,6 +715,9 @@ def _evaluate(
         calibration=tuple(sorted(calibration.items())),
         candidates=tuple((row["name"], row["validation_f1"]) for row in candidate_rows),
         protocol=protocol,
+        corpus_digest=artifact.corpus_digest(),
+        feature_catalogue_digest=artifact.feature_catalogue_digest(),
+        library_version=artifact.library_version(),
     )
     evaluation = ModelEvaluation(
         metrics=validation_metrics,
@@ -740,27 +745,51 @@ def _evaluate(
 _lock = threading.Lock()
 _cached: tuple[ModelEvaluation, LearnedModel] | None = None
 _runtime_cached: tuple[ModelEvaluation, LearnedModel] | None = None
+_artifact_reason: str | None = None
 
 
 def evaluate_model(*, include_external: bool = True) -> ModelEvaluation:
     return get_model(include_external=include_external)[0]
 
 
+def artifact_fallback_reason() -> str | None:
+    """Why the last cold runtime load fitted instead of loading the artifact."""
+
+    return _artifact_reason
+
+
+def _runtime_model(include_external: bool) -> tuple[ModelEvaluation, LearnedModel]:
+    global _artifact_reason
+
+    from . import artifact
+
+    try:
+        loaded_evaluation, loaded_model = artifact.load_artifact()
+    except artifact.ArtifactError as exc:
+        _artifact_reason = str(exc)
+    else:
+        if not include_external or loaded_evaluation.external:
+            _artifact_reason = None
+            return loaded_evaluation, loaded_model
+        _artifact_reason = "artifact does not record external transfer metrics"
+    return _evaluate(include_external=include_external, candidate=_FROZEN_CANDIDATE)
+
+
 def get_model(
     *, include_external: bool = True, compare_candidates: bool = True
 ) -> tuple[ModelEvaluation, LearnedModel]:
-    """Train once, cache in memory, and return the evaluation plus the model.
+    """Return the evaluation plus the serving model.
 
-    ``compare_candidates=False`` is the runtime path used by the public API: it
-    fits only the candidate frozen after validation instead of retraining all
-    eleven, which keeps a cold opt-in AI request inside a small server's time
-    budget.  Both paths use the same corpus, grouped folds, calibration and
-    threshold rule; where the full comparison picks the same winner they are
-    numerically identical.  The benchmark always asks for the full comparison.
+    The runtime path (``compare_candidates=False``, used by the public API) loads
+    the checked-in JSON artifact when it exists and its digest, corpus, feature
+    catalogue, model version and library version all match this build.  A
+    missing, corrupt, stale or tampered artifact is never used: the path records
+    a reason (see :func:`artifact_fallback_reason`) and fits in memory instead.
 
-    Nothing is written to disk and no serialized model is loaded, so a tampered
-    file cannot execute code.  The cache is guarded because the public API may
-    serve concurrent requests.
+    The benchmark path (``compare_candidates=True``) always refits, because its
+    purpose is to compare all candidate estimators in the running environment.
+    Loading is read-only plain JSON, so a tampered file cannot execute code.
+    The cache is guarded because the public API may serve concurrent requests.
     """
 
     global _cached, _runtime_cached
@@ -769,9 +798,7 @@ def get_model(
             if _runtime_cached is None or (
                 include_external and not _runtime_cached[0].external
             ):
-                _runtime_cached = _evaluate(
-                    include_external=include_external, candidate=_FROZEN_CANDIDATE
-                )
+                _runtime_cached = _runtime_model(include_external)
             return _runtime_cached
         if _cached is None or (include_external and not _cached[0].external):
             _cached = _evaluate(include_external=include_external)
@@ -781,10 +808,11 @@ def get_model(
 def reset_model_cache() -> None:
     """Testing helper.  Never needed at runtime."""
 
-    global _cached, _runtime_cached
+    global _cached, _runtime_cached, _artifact_reason
     with _lock:
         _cached = None
         _runtime_cached = None
+        _artifact_reason = None
 
 
 def evaluate_locked_test() -> dict[str, object]:

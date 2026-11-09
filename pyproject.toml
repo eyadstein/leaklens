@@ -63,6 +63,9 @@ leaklens = "leaklens.cli:main"
 [tool.setuptools.packages.find]
 include = ["leaklens*"]
 
+[tool.setuptools.package-data]
+"leaklens.ai" = ["*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

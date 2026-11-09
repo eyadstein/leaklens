@@ -40,8 +40,10 @@ The layer has three parts:
    40 validation cases (4 further sources); a 47-case locked test from 4 more sources is
    imported only by the benchmark, and a 12-case Phase 7 holdout from 5 further source
    families was frozen before the final fit and is scored once. Grouped cross-validation
-   keeps a template family inside one fold. The model is never serialized to disk and never
-   loaded from an untrusted artifact.
+   keeps a template family inside one fold. The shipped weights live in a versioned,
+   digest-checked plain-JSON artifact (`leaklens/ai/model.json`); a request loads it when
+   its digest, corpus, feature catalogue and library version match the running build, and
+   otherwise fits in memory and records the reason. JSON cannot execute code on load.
    Hypotheses cite **local** signed log-odds contributions for the current unit, not global
    feature importance, and report a margin plus an uncertainty band. A runtime gate emits a
    hint only when at least one context-aware semantic risk indicator is active (or the
@@ -163,10 +165,11 @@ repository-cluster intervals and calibration. It is not a production-accuracy cl
 
 The shipped threshold is chosen on validation only (0.53 for the current model) and
 probabilities are calibrated from grouped out-of-fold scores, so behaviour does not drift at
-import time. The eleven candidates are compared when the benchmark is built; a request fits
-only the class-balanced logistic regression frozen after Phase 7 validation, so a cold opt-in
-API call stays well inside the server's time budget. Metrics can vary slightly between
-scikit-learn releases because the fitted model is not bit-identical.
+import time. The eleven candidates are compared when the benchmark is built; a request loads
+the class-balanced logistic regression frozen after Phase 7 validation from the checked-in
+JSON artifact, so a cold opt-in API call avoids the fit and stays well inside the server's
+time budget. If the artifact is absent, stale or tampered, the request fits in memory instead.
+Metrics can vary slightly between scikit-learn releases because a refit is not bit-identical.
 [AI_PERFORMANCE.md](AI_PERFORMANCE.md) records CPU latency and memory on the holdout and on a
 representative project scan.
 
