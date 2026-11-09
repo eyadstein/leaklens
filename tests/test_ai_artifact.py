@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,6 +32,46 @@ def _checked_in() -> dict:
     return json.loads(artifact.ARTIFACT_PATH.read_text(encoding="utf-8"))
 
 
+def _comparable(payload: dict) -> dict:
+    """Drop the environment-dependent digest; library patch is accepted by design."""
+
+    comparable = json.loads(json.dumps(payload))
+    comparable.pop("artifact_digest", None)
+    for section in ("model", "card"):
+        value = comparable.get(section, {}).get("library_version")
+        if value:
+            comparable[section]["library_version"] = artifact._minor(value)
+    return comparable
+
+
+# A fit on another OS/BLAS build lands within a few ulp of the checked-in one
+# (CI observed ~2e-16 relative).  This bound is the same order as the existing
+# prediction-parity tolerance and still rejects any real weight change.
+_FLOAT_REL_TOL = 1e-9
+_FLOAT_ABS_TOL = 1e-12
+
+
+def _assert_payload_close(actual, expected, path: str = "payload") -> None:
+    """Compare structure exactly and floating-point leaves numerically."""
+
+    if isinstance(expected, dict):
+        assert isinstance(actual, dict), path
+        assert set(actual) == set(expected), path
+        for key in expected:
+            _assert_payload_close(actual[key], expected[key], f"{path}.{key}")
+    elif isinstance(expected, list):
+        assert isinstance(actual, list) and len(actual) == len(expected), path
+        for index, (left, right) in enumerate(zip(actual, expected)):
+            _assert_payload_close(left, right, f"{path}[{index}]")
+    elif isinstance(expected, float):
+        assert isinstance(actual, (int, float)) and not isinstance(actual, bool), path
+        assert math.isclose(
+            actual, expected, rel_tol=_FLOAT_REL_TOL, abs_tol=_FLOAT_ABS_TOL
+        ), f"{path}: {actual!r} != {expected!r}"
+    else:
+        assert actual == expected, f"{path}: {actual!r} != {expected!r}"
+
+
 def test_checked_in_artifact_is_inspectable_and_matches_this_build():
     path = artifact.ARTIFACT_PATH
     assert path.is_file()
@@ -47,7 +88,10 @@ def test_checked_in_artifact_is_inspectable_and_matches_this_build():
         payload["model"]["feature_catalogue_digest"]
         == artifact.feature_catalogue_digest()
     )
-    assert payload["model"]["library_version"] == artifact.library_version()
+    # Patch releases are accepted by design (artifact compatibility is minor).
+    assert artifact._minor(payload["model"]["library_version"]) == artifact._minor(
+        artifact.library_version()
+    )
 
     evaluation, model = artifact.load_artifact()
     assert model.card.artifact_digest == payload["artifact_digest"]
@@ -55,12 +99,26 @@ def test_checked_in_artifact_is_inspectable_and_matches_this_build():
     assert evaluation.examples == 40
 
 
-def test_a_fresh_fit_produces_the_checked_in_payload():
+def test_a_fresh_fit_matches_the_checked_in_payload():
+    payload = _checked_in()
+    # Integrity is exact and independent of the machine: the recorded digest
+    # covers the canonical serialized body.
+    body = {key: value for key, value in payload.items() if key != "artifact_digest"}
+    assert payload["artifact_digest"] == artifact._digest(body)
+
     evaluation, model = learned._evaluate(
         include_external=True, candidate=learned._FROZEN_CANDIDATE
     )
+    fresh = artifact.build_payload(evaluation, model)
 
-    assert artifact.build_payload(evaluation, model) == _checked_in()
+    # Cross-environment fits differ only in floating-point leaves; names,
+    # ordering, protocol and version metadata stay exact.
+    _assert_payload_close(_comparable(fresh), _comparable(payload))
+    # Serialization itself is deterministic for a given fit.
+    assert fresh == artifact.build_payload(evaluation, model)
+    assert fresh["artifact_digest"] == artifact._digest(
+        {key: value for key, value in fresh.items() if key != "artifact_digest"}
+    )
 
 
 def test_runtime_serving_path_loads_the_artifact_without_fitting(monkeypatch):
@@ -76,7 +134,10 @@ def test_runtime_serving_path_loads_the_artifact_without_fitting(monkeypatch):
     assert model.card.artifact_digest.startswith("sha256:")
     assert model.card.corpus_digest == artifact.corpus_digest()
     assert model.card.feature_catalogue_digest == artifact.feature_catalogue_digest()
-    assert model.card.library_version == artifact.library_version()
+    assert model.card.library_version
+    assert artifact._minor(model.card.library_version) == artifact._minor(
+        artifact.library_version()
+    )
     assert np.isfinite(model.predict_proba("X_train, X_test, y_train, y_test"))
 
 
@@ -112,14 +173,44 @@ def test_artifact_predictions_match_a_fresh_fit_for_the_holdouts():
         rtol=0.0,
         atol=1e-9,
     )
+    artifact_contributions = artifact_model.local_contributions(cases[0].code)
+    fit_contributions = fit_model.local_contributions(cases[0].code)
+    assert [name for name, _value, _delta in artifact_contributions] == [
+        name for name, _value, _delta in fit_contributions
+    ]
     np.testing.assert_array_equal(
-        artifact_model.local_contributions(cases[0].code),
-        fit_model.local_contributions(cases[0].code),
+        [value for _name, value, _delta in artifact_contributions],
+        [value for _name, value, _delta in fit_contributions],
     )
-    assert artifact_model.threshold == fit_model.threshold
-    assert artifact_model.feature_importances == fit_model.feature_importances
-    assert artifact_evaluation.metrics == fit_evaluation.metrics
-    assert artifact_evaluation.calibration == fit_evaluation.calibration
+    np.testing.assert_allclose(
+        [delta for _name, _value, delta in artifact_contributions],
+        [delta for _name, _value, delta in fit_contributions],
+        rtol=_FLOAT_REL_TOL,
+        atol=_FLOAT_ABS_TOL,
+    )
+    assert math.isclose(
+        artifact_model.threshold,
+        fit_model.threshold,
+        rel_tol=_FLOAT_REL_TOL,
+        abs_tol=_FLOAT_ABS_TOL,
+    )
+    np.testing.assert_allclose(
+        artifact_model.feature_importances,
+        fit_model.feature_importances,
+        rtol=_FLOAT_REL_TOL,
+        atol=_FLOAT_ABS_TOL,
+    )
+    _assert_payload_close(
+        dict(artifact_evaluation.metrics), dict(fit_evaluation.metrics)
+    )
+    assert (artifact_evaluation.calibration is None) == (
+        fit_evaluation.calibration is None
+    )
+    if artifact_evaluation.calibration is not None:
+        _assert_payload_close(
+            dict(artifact_evaluation.calibration),
+            dict(fit_evaluation.calibration),
+        )
     assert artifact_model.card.corpus_digest == fit_model.card.corpus_digest
     assert artifact_model.card.artifact_digest
     assert fit_model.card.artifact_digest == ""
@@ -164,6 +255,20 @@ def test_provenance_digests_are_content_addressed(monkeypatch):
         artifact.feature_catalogue_digest()
         != _checked_in()["model"]["feature_catalogue_digest"]
     )
+
+
+def test_payload_comparison_accepts_ulp_noise_but_not_real_change():
+    payload = _checked_in()
+    noisy = json.loads(json.dumps(payload))
+    for values in (noisy["model"]["coefficients"], noisy["model"]["scaler_mean"]):
+        values[0] = math.nextafter(values[0], math.inf)
+
+    _assert_payload_close(noisy, payload)
+
+    changed = json.loads(json.dumps(payload))
+    changed["model"]["coefficients"][0] += 1e-3
+    with pytest.raises(AssertionError):
+        _assert_payload_close(changed, payload)
 
 
 def _write_variant(tmp_path, mutate, *, restamp: bool) -> Path:
