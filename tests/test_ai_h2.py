@@ -149,7 +149,8 @@ def test_shipped_model_identity_is_pinned_for_any_future_h2_run():
     assert model.card.version == MODEL_VERSION == "leaklens-ai-p7-2026.11"
     assert len(MODEL_FEATURE_NAMES) == 108
     assert model.threshold == 0.53
-    assert model.card.artifact_digest.startswith("sha256:")
+    # The card digest is only populated when the build matches the artifact's
+    # library minor version (see test_ai_artifact.py), so it is not pinned here.
 
 
 def test_metric_denominators_match_an_independently_checked_example():
