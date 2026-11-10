@@ -553,4 +553,4 @@ Split time-ordered data chronologically (shuffle=False, or a time-based split) s
 - Introduced: 0.13.0
 - Anchor: `#no_random_state`
 
-Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it.
+Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it. For torch.utils.data.random_split(), pass generator=torch.Generator().manual_seed(<int>) (or call torch.manual_seed(<int>) first).

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Reproducibility: unseeded `torch.utils.data.random_split`
+
+- The code scanner now reports `no_random_state` (low) for `random_split()` calls in files that import torch when no `generator` is passed (missing, or literal `generator=None`), because the split then comes from torch's global RNG and differs on every run. The generator is checked as a keyword and as the third positional argument; `*args`/`**kwargs` expansions are assumed to carry it. A file that seeds the global generator (`torch.manual_seed(...)`, `seed_everything(...)`, `set_seed(...)`) is not flagged, and neither is any explicit generator. The `--explain` advice for `no_random_state` now covers `random_split`.
+- Added four labeled `LOW_CASES` to the scanner benchmark and tests in `tests/test_reproducibility.py`.
+
 ### AI model artifact and provenance
 
 - The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.

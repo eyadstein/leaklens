@@ -260,7 +260,7 @@ export const fixtures = {
           "kind": "no_random_state",
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
-          "fix": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it.",
+          "fix": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it. For torch.utils.data.random_split(), pass generator=torch.Generator().manual_seed(<int>) (or call torch.manual_seed(<int>) first).",
           "line": 9
         }
       ],
