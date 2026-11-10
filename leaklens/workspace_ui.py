@@ -111,6 +111,10 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
         <input id="sql" type="checkbox">
       </div>
       <div>
+        <label for="ai">Include AI hypotheses</label>
+        <input id="ai" type="checkbox">
+      </div>
+      <div>
         <button id="start" class="primary" type="submit">Scan</button>
         <button id="cancel" type="button" disabled>Cancel</button>
       </div>
@@ -143,6 +147,7 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
       </div>
       <p class="meta" id="summary"></p>
       <p class="meta" id="policy-notes"></p>
+      <p class="meta" id="ai-summary"></p>
     </div>
     <div class="layout">
       <div>
@@ -194,6 +199,10 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
           <label for="ds-test">Held-out dataset (optional)</label>
           <input id="ds-test" type="text" placeholder="test.csv" spellcheck="false" autocomplete="off">
         </div>
+        <div>
+          <label for="ds-ai">Include AI hypotheses</label>
+          <input id="ds-ai" type="checkbox">
+        </div>
       </div>
       <div class="row" style="margin-top:12px">
         <button id="ds-run" class="primary" type="button">Audit</button>
@@ -216,6 +225,7 @@ footer{padding:0 20px 40px;font-size:12px;color:var(--muted)}
       </div>
       <p class="meta" id="ds-summary"></p>
       <p class="meta" id="ds-policy-notes"></p>
+      <p class="meta" id="ds-ai-summary"></p>
       <p class="meta high" id="ds-error"></p>
     </div>
     <div class="layout">
@@ -394,6 +404,34 @@ function policyNotes(policy) {
   return diagnostics.length ? "Policy diagnostics: " + diagnostics.join("; ") : "";
 }
 
+function aiSummary(data) {
+  if (!("ai" in data)) return "";
+  if (!data.ai) {
+    return "AI analysis unavailable; deterministic results are unchanged.";
+  }
+  const ai = data.ai;
+  const hypotheses = ai.hypotheses || [];
+  const counts = {supported: 0, weak: 0, insufficient: 0};
+  for (const item of hypotheses) {
+    const key = item.sufficiency in counts ? item.sufficiency : "weak";
+    counts[key] += 1;
+  }
+  const parts = [];
+  if (hypotheses.length) {
+    parts.push(hypotheses.length + " hypotheses");
+    if (counts.supported) parts.push(counts.supported + " supported");
+    if (counts.weak) parts.push(counts.weak + " weak");
+    if (counts.insufficient) parts.push(counts.insufficient + " ranking only");
+  }
+  if (ai.selection && ai.selection.applied) {
+    parts.push("selective reporting at p >= " +
+      Number(ai.selection.threshold).toFixed(2));
+  }
+  return "AI (experimental, never changes the trust score): " +
+    (parts.length ? parts.join(" · ") : "no hypotheses") +
+    ". Open the HTML report for evidence and limitations.";
+}
+
 function renderResolved(box, items) {
   box.replaceChildren();
   if (!items || !items.length) return;
@@ -521,6 +559,7 @@ async function loadResults() {
     " · medium " + c.medium + " · low " + c.low +
     (policyText(data.policy) ? " · " + policyText(data.policy) : "");
   $("policy-notes").textContent = policyNotes(data.policy);
+  $("ai-summary").textContent = aiSummary(data);
   $("report-link").href = "/api/scans/" + state.id + "/report";
   $("report-link").hidden = false;
   $("json-link").href = "/api/scans/" + state.id + "/results";
@@ -688,6 +727,7 @@ $("scan-form").addEventListener("submit", async (event) => {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({path: $("path").value, sql: $("sql").checked,
+        include_ai: $("ai").checked,
         baseline: $("baseline").value.trim() || null}),
     });
     state.id = started.scan_id;
@@ -1027,6 +1067,7 @@ function renderDataset(data) {
     " · low " + (counts.low || 0) +
     (policyText(data.policy) ? " · " + policyText(data.policy) : "");
   $("ds-policy-notes").textContent = policyNotes(data.policy);
+  $("ds-ai-summary").textContent = aiSummary(data);
   $("ds-links").replaceChildren(
     el("a", {href: "/api/datasets/" + ds.id + "/report", text: "HTML report"}),
     el("a", {href: "/api/datasets/" + ds.id + "/results", text: "Raw results (JSON)",
@@ -1043,6 +1084,7 @@ function renderDatasetError(error) {
   $("ds-trust").textContent = "-";
   $("ds-summary").textContent = "";
   $("ds-policy-notes").textContent = "";
+  $("ds-ai-summary").textContent = "";
   $("ds-links").replaceChildren();
   $("ds-error").textContent = error.message + " [" + error.code + "]";
   $("ds-status").replaceChildren(el("option", {value: "", text: "all"}));
@@ -1068,6 +1110,7 @@ $("ds-run").addEventListener("click", async () => {
     time_col: $("ds-time").value || null,
     group_col: $("ds-group").value || null,
     baseline: $("baseline").value.trim() || null,
+    include_ai: $("ds-ai").checked,
   };
   $("ds-notice").textContent = "";
   $("ds-results").hidden = true;

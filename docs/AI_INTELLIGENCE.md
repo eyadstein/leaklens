@@ -234,6 +234,12 @@ shipped artifact records the decision from the environment that produced it.
 The complete analysis is always available: selection never deletes a hypothesis, mutates a
 finding, changes a severity or changes the trust score.
 
+The interactive workspace exposes the same report only when a scan or dataset audit requests
+`include_ai` (default off). Source scans run the AI pass after policy classification, so
+suppressed findings are not handed to it as active; dataset audits use the engine's own
+`run_audit_job(include_ai=True)` path. A failure yields `ai_unavailable: true` with the
+deterministic result unchanged, and the HTML report is the shared `report._ai_section` output.
+
 ## Evidence-graph anchoring
 
 `EvidenceSpan.graph_node_id` is a nullable link to an existing deterministic evidence record.

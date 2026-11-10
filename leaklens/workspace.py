@@ -115,6 +115,7 @@ class ScanSession:
     scan_id: str
     files: tuple[Path, ...]
     include_sql: bool
+    include_ai: bool = False
     target: str = "."
     baseline: Baseline | None = None
     rules: tuple[SuppressionRule, ...] = ()
@@ -184,6 +185,7 @@ class DatasetSession:
     test_path: Path | None = None
     time_col: str | None = None
     group_col: str | None = None
+    include_ai: bool = False
     baseline: Baseline | None = None
     rules: tuple[SuppressionRule, ...] = ()
     baseline_path: str | None = None
@@ -1139,7 +1141,12 @@ class WorkspaceScanManager:
         self._active = session
 
     def start(
-        self, path: str = ".", *, sql: bool = False, baseline: str | None = None
+        self,
+        path: str = ".",
+        *,
+        sql: bool = False,
+        baseline: str | None = None,
+        include_ai: bool = False,
     ) -> ScanSession:
         target = self.resolve(path)
         if not target.exists():
@@ -1164,6 +1171,7 @@ class WorkspaceScanManager:
                 scan_id=secrets.token_hex(6),
                 files=files,
                 include_sql=sql,
+                include_ai=include_ai,
                 target=_relative(target, self.root),
                 baseline=baseline_doc,
                 rules=rules,
@@ -1250,12 +1258,38 @@ class WorkspaceScanManager:
         }
         if resolved:
             payload["resolved"] = resolved
+        if session.include_ai:
+            # Policy runs first so the optional layer never sees a suppressed
+            # finding as active; failure stays a normal result, never an error.
+            active = [
+                finding
+                for finding, item in zip(findings, items)
+                if item["fingerprint"] not in outcome.suppressed
+            ]
+            ai_payload = None
+            try:
+                from .ai import analyze, collect_code_sources
+
+                ai_payload = analyze(
+                    active,
+                    code=collect_code_sources(
+                        path
+                        for path in session.files
+                        if path.suffix.lower() in {".py", ".ipynb"}
+                    ),
+                    trust_score=payload["trust_score"],
+                ).to_dict()
+            except Exception:  # noqa: BLE001 - optional AI must not break the scan
+                ai_payload = None
+            payload["ai"] = ai_payload
+            payload["ai_unavailable"] = ai_payload is None
         report_html = render(
             {
                 "trust_score": payload["trust_score"],
                 "findings": _report_findings(payload["findings"]),
                 "intelligence": intelligence,
                 "policy": _report_policy(policy),
+                "ai": payload.get("ai"),
             },
             title="LeakLens workspace report",
         )
@@ -1298,6 +1332,7 @@ class WorkspaceScanManager:
         time_col: str | None = None,
         group_col: str | None = None,
         baseline: str | None = None,
+        include_ai: bool = False,
     ) -> DatasetSession:
         threshold = _threshold(threshold)
         upload = self.open_dataset(path)
@@ -1317,6 +1352,7 @@ class WorkspaceScanManager:
                 test_path=self.resolve(test_path) if test_path else None,
                 time_col=(time_col or "").strip() or None,
                 group_col=(group_col or "").strip() or None,
+                include_ai=include_ai,
                 baseline=baseline_doc,
                 rules=rules,
                 baseline_path=baseline_label,
@@ -1509,6 +1545,7 @@ class WorkspaceScanManager:
                 session.time_col,
                 session.group_col,
                 include_intelligence=True,
+                include_ai=session.include_ai,
             )
         except UploadRejected as exc:
             with session.lock:
@@ -1583,6 +1620,7 @@ class ScanRequest(BaseModel):
     path: str = Field(default=".", max_length=1000)
     sql: bool = Field(default=False)
     baseline: str | None = Field(default=None, max_length=1000)
+    include_ai: bool = Field(default=False)
 
 
 class DatasetPathRequest(BaseModel):
@@ -1597,6 +1635,7 @@ class DatasetRequest(BaseModel):
     time_col: str | None = Field(default=None, max_length=200)
     group_col: str | None = Field(default=None, max_length=200)
     baseline: str | None = Field(default=None, max_length=1000)
+    include_ai: bool = Field(default=False)
 
 
 def create_workspace_app(root: str | Path | None = None) -> FastAPI:
@@ -1679,7 +1718,9 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
     @app.post("/api/scans", status_code=202)
     def start_scan(req: ScanRequest) -> dict[str, str]:
         try:
-            session = manager.start(req.path, sql=req.sql, baseline=req.baseline)
+            session = manager.start(
+                req.path, sql=req.sql, baseline=req.baseline, include_ai=req.include_ai
+            )
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None
         except WorkspaceBusy as exc:
@@ -1787,6 +1828,7 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
                 time_col=req.time_col,
                 group_col=req.group_col,
                 baseline=req.baseline,
+                include_ai=req.include_ai,
             )
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None

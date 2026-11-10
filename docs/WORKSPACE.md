@@ -33,6 +33,14 @@ workspace root.
    recommendations, `policy.apply_policy()` and `leakage.score()`.
 4. Renders the normal static HTML report with `report.render`.
 
+An optional AI pass is requested per scan (`include_ai`, default off). It runs only after
+`policy.apply_policy()` has classified the findings, so suppressed findings are never handed
+to the AI layer as active; the AI source reader keeps its own 200-file / 512 KB caps on top of
+the workspace limits. The payload is the same `AIReport` the CLI prints (schema `1.2`),
+rendered by `report._ai_section`; nothing is re-implemented in the workspace. It never changes
+the trust score, findings, policy labels or exit semantics, and a failure is reported as
+`ai_unavailable: true` with the deterministic result intact.
+
 Scans never write to disk and never execute the scanned code.
 
 ## Live updates
@@ -213,9 +221,15 @@ workspace limits enable them (they do not by default, matching the public API).
 UI explains which ones are unavailable and why.
 
 Exposed engine options are exactly those the audit job accepts: target,
-threshold (`0.5`–`1.0`, rounded to 4 decimals), held-out dataset, time column
-and group column. There is no AI or snapshot control in this milestone; the
-baseline and suppression controls described above are shared with source scans.
+threshold (`0.5`–`1.0`, rounded to 4 decimals), held-out dataset, time column,
+group column and the opt-in `include_ai` flag (default off). The AI pass runs
+inside `run_audit_job`, exactly as the public API runs it; a failure sets
+`ai_unavailable: true` and leaves the deterministic audit untouched. There is
+no snapshot control in this milestone; the baseline and suppression controls
+described above are shared with source scans. Dataset AI blocks are computed
+by the engine in that single call, before the workspace applies its policy
+labels to the serialized findings; they never change a finding, a severity, a
+status or the trust score.
 
 ## Endpoints
 
@@ -226,7 +240,7 @@ baseline and suppression controls described above are shared with source scans.
 | `GET /api/history` | bounded in-memory session list with metadata and result/report availability |
 | `GET /api/compare/scans?previous=&current=` | source/source comparison using stable fingerprints |
 | `GET /api/compare/datasets?previous=&current=` | dataset/dataset comparison with configuration compatibility checks |
-| `POST /api/scans` | `{"path": "...", "sql": false, "baseline": null}` → `{"scan_id"}` (202) |
+| `POST /api/scans` | `{"path": "...", "sql": false, "baseline": null, "include_ai": false}` → `{"scan_id"}` (202) |
 | `GET /api/scans/{id}` | state, `done`, `total`, `current`, counts, errors, elapsed |
 | `GET /api/scans/{id}/events` | `text/event-stream` snapshots → optional `failure` → `done` |
 | `POST /api/scans/{id}/cancel` | request cancellation (409 if not running) |
@@ -235,7 +249,7 @@ baseline and suppression controls described above are shared with source scans.
 | `GET /api/scans/{id}/report` | the static HTML report |
 | `GET /api/source?path=...&line=N` | read-only source window around a line |
 | `POST /api/datasets/inspect` | `{"path": "train.csv"}` → columns, preview, target candidates |
-| `POST /api/datasets` | `{"path", "target", "threshold", "test_path", "time_col", "group_col", "baseline"}` → `{"dataset_id"}` (202) |
+| `POST /api/datasets` | `{"path", "target", "threshold", "test_path", "time_col", "group_col", "baseline", "include_ai"}` → `{"dataset_id"}` (202) |
 | `GET /api/datasets/{id}` | state, echoed request, error, elapsed |
 | `GET /api/datasets/{id}/events` | `text/event-stream` snapshots → optional `failure` → `done` |
 | `POST /api/datasets/{id}/cancel` | cancel before the engine starts (409 once it runs) |
@@ -300,3 +314,8 @@ behaviour, compatible source and dataset comparisons,
 added/unchanged/changed/no-longer-present/suppressed/inconclusive
 classification, partial-scan safeguards, fingerprint/evidence consistency and
 comparison count consistency/navigation.
+Phase 12 M8 adds default-off AI (no AI call and no extra payload keys), AI-on
+trust/finding/policy invariance for both scan types, failure isolation
+(`ai_unavailable`), policy-active findings in the source-scan AI pass,
+single-slot refusal with AI on, and HTML escaping of AI text in the workspace
+report.

@@ -12,8 +12,9 @@ is published and H1 remains the Phase 6 record. **M6** (false-positive reduction
 `ai/features.py`, `ai/corpus.py` and the regenerated `ai/model.json`; it is a diagnostic
 improvement, not an H2 score. **M7** (selective reporting with explicit insufficiency) shipped
 in `ai/learned.py`, `ai/schemas.py`, `ai/artifact.py`, `report.py`, `cli.py` and the regenerated
-`ai/model.json`; it is an authored-corpus diagnostic, not an H2 score. **M8 remains a proposal**
-and is not implemented.
+`ai/model.json`; it is an authored-corpus diagnostic, not an H2 score. **M8** (opt-in AI surface
+in the workspace) shipped in `workspace.py` and `workspace_ui.py` with a pass-through request
+flag; the AI layer remains additive and off by default.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
 roadmap derived from its measured gaps. It exists so the next phase starts from evidence

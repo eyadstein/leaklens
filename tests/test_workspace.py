@@ -132,9 +132,15 @@ def _wait(client, scan_id, timeout=15.0):
     raise AssertionError("scan did not finish")
 
 
-def _run(client, path=".", sql=False, baseline=None):
+def _run(client, path=".", sql=False, baseline=None, include_ai=False):
     response = client.post(
-        "/api/scans", json={"path": path, "sql": sql, "baseline": baseline}
+        "/api/scans",
+        json={
+            "path": path,
+            "sql": sql,
+            "baseline": baseline,
+            "include_ai": include_ai,
+        },
     )
     assert response.status_code == 202, response.text
     scan_id = response.json()["scan_id"]
@@ -147,7 +153,15 @@ def test_page_and_info_expose_the_root(tmp_path):
     page = client.get("/")
     assert page.status_code == 200
     assert "LeakLens workspace" in page.text
-    for control in ('id="baseline"', 'id="f-status"', 'id="ds-status"'):
+    for control in (
+        'id="baseline"',
+        'id="f-status"',
+        'id="ds-status"',
+        'id="ai"',
+        'id="ds-ai"',
+        'id="ai-summary"',
+        'id="ds-ai-summary"',
+    ):
         assert control in page.text
     info = client.get("/api/info").json()
     assert info["root"] == tmp_path.resolve().as_posix()
@@ -500,7 +514,7 @@ def test_dataset_audit_passes_the_request_to_the_engine(tmp_path, monkeypatch):
     assert upload.filename == "train.csv" and test_upload.filename == "test.csv"
     assert limits is workspace.DATASET_LIMITS
     assert (target, threshold) == ("y", 0.8)
-    assert kwargs == {"include_intelligence": True}
+    assert kwargs == {"include_intelligence": True, "include_ai": False}
 
 
 def test_dataset_threshold_is_validated_and_rounded(tmp_path):
@@ -1876,3 +1890,245 @@ def test_dataset_comparison_requires_matching_configuration(tmp_path):
         ).status_code
         == 404
     )
+
+
+# --- M8: opt-in AI surface ------------------------------------------------
+
+
+def _ai_payload():
+    """A minimal valid report used to exercise workspace rendering only."""
+
+    class _Report:
+        def to_dict(self):
+            return {
+                "schema_version": "1.2",
+                "engine": "leaklens.ai.experimental",
+                "scope": "code",
+                "target": None,
+                "deterministic_findings": 1,
+                "deterministic_trust_score": 90,
+                "changes_deterministic_findings": False,
+                "hypotheses": [
+                    {
+                        "hypothesis_id": "hyp-script",
+                        "concept": "learned_leakage_pattern",
+                        "title": "<script>alert(1)</script>",
+                        "explanation": "<img src=x onerror=alert(1)>",
+                        "confidence": 0.9,
+                        "confidence_basis": "calibrated_probability",
+                        "sufficiency": "supported",
+                        "severity_hint": "low",
+                        "location": "leaky.py:1",
+                        "detector": "learned",
+                        "corroborates": None,
+                        "limitations": ["<b>limit</b>"],
+                        "evidence": [],
+                    }
+                ],
+                "plan": {
+                    "root_causes": [],
+                    "priority_order": [],
+                    "summary": "",
+                    "verification": [],
+                    "enrichment": "deterministic",
+                    "fallback_reason": None,
+                    "llm_summary": None,
+                    "llm_notes": [],
+                },
+                "models": [],
+                "limitations": ["AI hypotheses are experimental."],
+            }
+
+    return _Report()
+
+
+def test_scan_ai_is_off_by_default(tmp_path, monkeypatch):
+    from leaklens import ai
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("AI must not run unless requested")
+
+    monkeypatch.setattr(ai, "analyze", boom)
+    client = _client(_project(tmp_path))
+    scan_id, status = _run(client)
+
+    assert status["state"] == "done"
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    assert "ai" not in results and "ai_unavailable" not in results
+    assert "AI intelligence" not in client.get(f"/api/scans/{scan_id}/report").text
+
+
+def test_scan_ai_never_changes_score_findings_or_policy(tmp_path):
+    client = _client(_project(tmp_path))
+    plain_id, _ = _run(client)
+    plain = client.get(f"/api/scans/{plain_id}/results").json()
+
+    ai_id, status = _run(client, include_ai=True)
+    assert status["state"] == "done"
+    rich = client.get(f"/api/scans/{ai_id}/results").json()
+
+    assert rich["trust_score"] == plain["trust_score"]
+    assert rich["counts"] == plain["counts"]
+    assert rich["policy"] == plain["policy"]
+    assert [
+        (f["fingerprint"], f.get("status"), f["severity"], f["evidence"])
+        for f in rich["findings"]
+    ] == [
+        (f["fingerprint"], f.get("status"), f["severity"], f["evidence"])
+        for f in plain["findings"]
+    ]
+    assert rich["ai_unavailable"] is False
+    ai = rich["ai"]
+    assert ai["changes_deterministic_findings"] is False
+    assert ai["deterministic_trust_score"] == rich["trust_score"]
+    assert ai["deterministic_findings"] == sum(
+        1 for f in rich["findings"] if f.get("status") != "suppressed"
+    )
+    assert isinstance(ai["hypotheses"], list)
+    assert "AI intelligence" in client.get(f"/api/scans/{ai_id}/report").text
+
+
+def test_source_scan_ai_only_sees_policy_active_findings(tmp_path):
+    client = _client(_policy_project(tmp_path))
+    scan_id, _ = _run(client)
+    findings = client.get(f"/api/scans/{scan_id}/results").json()["findings"]
+    target = next(f for f in findings if f["severity"] == "high")
+    _write_config(
+        tmp_path,
+        suppressions=[{"fingerprint": target["fingerprint"], "reason": "known"}],
+    )
+
+    scan_id, _ = _run(client, include_ai=True)
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    suppressed = {
+        f["fingerprint"] for f in results["findings"] if f.get("status") == "suppressed"
+    }
+    assert target["fingerprint"] in suppressed
+    assert results["ai"]["deterministic_findings"] == sum(
+        1 for f in results["findings"] if f.get("status") != "suppressed"
+    )
+    assert results["ai"]["deterministic_trust_score"] == results["trust_score"]
+
+
+def test_scan_ai_failure_keeps_the_deterministic_result(tmp_path, monkeypatch):
+    from leaklens import ai
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated AI failure")
+
+    monkeypatch.setattr(ai, "analyze", boom)
+    client = _client(_project(tmp_path))
+    scan_id, status = _run(client, include_ai=True)
+
+    assert status["state"] == "done"
+    results = client.get(f"/api/scans/{scan_id}/results").json()
+    assert results["ai"] is None and results["ai_unavailable"] is True
+    assert results["findings"] and results["trust_score"] >= 0
+    report = client.get(f"/api/scans/{scan_id}/report").text
+    assert "AI intelligence" not in report
+
+
+def test_workspace_report_escapes_ai_content(tmp_path, monkeypatch):
+    from leaklens import ai
+
+    monkeypatch.setattr(ai, "analyze", lambda *_args, **_kwargs: _ai_payload())
+    client = _client(_project(tmp_path))
+    scan_id, _ = _run(client, include_ai=True)
+
+    assert client.get(f"/api/scans/{scan_id}/results").json()["ai_unavailable"] is False
+    report = client.get(f"/api/scans/{scan_id}/report").text
+    assert "<script>" not in report
+    assert "&lt;script&gt;" in report
+
+
+def test_dataset_ai_request_is_forwarded_only_when_asked(tmp_path, monkeypatch):
+    from leaklens import workspace
+
+    calls = []
+    real = workspace.run_audit_job
+
+    def spy(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(workspace, "run_audit_job", spy)
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    _run_dataset(client)
+    _run_dataset(client, include_ai=True)
+
+    assert calls[0] == {"include_intelligence": True, "include_ai": False}
+    assert calls[1] == {"include_intelligence": True, "include_ai": True}
+
+
+def test_dataset_ai_failure_keeps_the_audit_result(tmp_path, monkeypatch):
+    from leaklens import ai
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("simulated AI failure")
+
+    monkeypatch.setattr(ai, "analyze_dataset", boom)
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    dataset_id, status = _run_dataset(client, include_ai=True)
+
+    assert status["state"] == "done"
+    results = client.get(f"/api/datasets/{dataset_id}/results").json()
+    assert results["ai"] is None and results["ai_unavailable"] is True
+    assert results["findings"] and results["trust_score"] >= 0
+    assert (
+        "AI intelligence" not in client.get(f"/api/datasets/{dataset_id}/report").text
+    )
+
+
+def test_dataset_ai_never_changes_the_audit(tmp_path):
+    _dataset(tmp_path)
+    client = _client(tmp_path)
+    plain_id, _ = _run_dataset(client)
+    plain = client.get(f"/api/datasets/{plain_id}/results").json()
+
+    ai_id, status = _run_dataset(client, include_ai=True)
+    rich = client.get(f"/api/datasets/{ai_id}/results").json()
+
+    assert status["state"] == "done"
+    assert rich["trust_score"] == plain["trust_score"]
+    assert rich["counts"] == plain["counts"]
+    assert rich["policy"] == plain["policy"]
+    assert [
+        (f["fingerprint"], f.get("status"), f["severity"], f["evidence"])
+        for f in rich["findings"]
+    ] == [
+        (f["fingerprint"], f.get("status"), f["severity"], f["evidence"])
+        for f in plain["findings"]
+    ]
+    assert rich["ai_unavailable"] is False
+    assert rich["ai"]["changes_deterministic_findings"] is False
+    assert rich["ai"]["deterministic_trust_score"] == rich["trust_score"]
+    assert "AI intelligence" in client.get(f"/api/datasets/{ai_id}/report").text
+
+
+def test_ai_on_scan_still_occupies_one_slot(tmp_path, monkeypatch):
+    from leaklens import ai
+
+    entered, release = threading.Event(), threading.Event()
+
+    def blocking(*_args, **_kwargs):
+        entered.set()
+        release.wait(timeout=15)
+        raise RuntimeError("simulated AI failure")
+
+    monkeypatch.setattr(ai, "analyze", blocking)
+    _dataset(tmp_path)
+    client = _client(_project(tmp_path))
+
+    started = client.post("/api/scans", json={"path": ".", "include_ai": True})
+    assert started.status_code == 202
+    scan_id = started.json()["scan_id"]
+    assert entered.wait(timeout=15)
+
+    refused = client.post("/api/datasets", json={"path": "train.csv", "target": "y"})
+    assert refused.status_code == 409
+
+    release.set()
+    assert _wait(client, scan_id)["state"] == "done"
+    assert client.get(f"/api/scans/{scan_id}/results").json()["ai_unavailable"] is True
