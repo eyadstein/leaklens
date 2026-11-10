@@ -81,7 +81,7 @@ export const fixtures = {
       "trustScore": 0,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -273,7 +273,7 @@ export const fixtures = {
       "trustScore": 25,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -399,7 +399,7 @@ export const fixtures = {
       "trustScore": 100,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",

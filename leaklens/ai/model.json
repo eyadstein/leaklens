@@ -1,5 +1,5 @@
 {
-  "artifact_digest": "sha256:5a9046febdf26a78af38f4751ec70b27d3f8d5c7652871449189f1c078993da1",
+  "artifact_digest": "sha256:f9b611484ffef2aa560cc8c11dada52d374485ec6cfe1d7dfc0f5991397071f4",
   "card": {
     "calibration": [
       [
@@ -702,6 +702,27 @@
       0.21676338880211787,
       0.06154530059406338
     ],
+    "selection": {
+      "accepted": 122,
+      "applied": true,
+      "coverage": 0.953125,
+      "emitted": 128,
+      "examples": 263,
+      "limitations": [
+        "Measured on grouped out-of-fold development probabilities from the authored corpus, not on an independent corpus.",
+        "Repository-level shift violates the exchangeability assumption behind selective-risk bounds; no distribution-free guarantee is claimed.",
+        "Hypotheses below the selective threshold stay visible and are labelled insufficient (ranking only); they are not suppressed."
+      ],
+      "protocol": "Smallest threshold whose Wilson 95% upper bound on selective risk is at or below the unselective error rate, requiring at least 50% coverage of emitted units; fitted on grouped out-of-fold development probabilities.",
+      "risk_interval": [
+        0.0,
+        0.026204
+      ],
+      "selective_risk": 0.008197,
+      "threshold": 0.922743,
+      "unit_coverage": 0.463878,
+      "unselective_error_rate": 0.053232
+    },
     "threshold": 0.6,
     "version": "leaklens-ai-p7-2026.11"
   },

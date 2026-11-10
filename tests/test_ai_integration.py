@@ -271,7 +271,7 @@ def test_json_output_carries_the_confidence_contract(tmp_path, capsys):
     assert cli.main(["--scan", path, "--ai", "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
 
-    assert payload["ai"]["schema_version"] == "1.1"
+    assert payload["ai"]["schema_version"] == "1.2"
     assert payload["ai"]["hypotheses"]
     for item in payload["ai"]["hypotheses"]:
         assert item["confidence_basis"] in {
@@ -279,4 +279,4 @@ def test_json_output_carries_the_confidence_contract(tmp_path, capsys):
             "heuristic_weight",
             "unavailable",
         }
-        assert item["sufficiency"] in {"supported", "weak"}
+        assert item["sufficiency"] in {"supported", "weak", "insufficient"}

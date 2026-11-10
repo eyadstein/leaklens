@@ -1051,6 +1051,40 @@ def main(argv=None) -> int:
                     bases.append(label)
             if bases:
                 print(f"    AI confidence bases: {', '.join(bases)}")
+            selection = ai_report.get("selection")
+            if selection:
+                threshold = float(selection.get("threshold", 0) or 0)
+                state = (
+                    f"applied at p>={threshold:.2f}"
+                    if selection.get("applied")
+                    else f"not applied (no candidate met the acceptance rule); "
+                    f"unselective output at p>={threshold:.2f} kept"
+                )
+                low, high = selection.get("risk_interval", (0.0, 1.0))
+                print(
+                    f"    AI selective reporting: {state} · coverage "
+                    f"{float(selection.get('coverage', 0)):.1%} of emitted "
+                    f"({selection.get('accepted')} of {selection.get('emitted')}) · "
+                    f"selective risk {float(selection.get('selective_risk', 0)):.3f} "
+                    f"(95% cluster-bootstrap {float(low):.3f}-{float(high):.3f}) · "
+                    f"unselective error "
+                    f"{float(selection.get('unselective_error_rate', 0)):.3f}; "
+                    "no distribution-free guarantee."
+                )
+            buckets = {"supported": 0, "weak": 0, "insufficient": 0}
+            for hypothesis in hypotheses:
+                value = hypothesis.get("sufficiency")
+                buckets[value if value in buckets else "weak"] += 1
+            words = {
+                "supported": "supported",
+                "weak": "weak",
+                "insufficient": "ranking only (insufficient calibration data)",
+            }
+            summary = ", ".join(
+                f"{count} {words[key]}" for key, count in buckets.items() if count
+            )
+            if summary:
+                print(f"    AI sufficiency: {summary}")
             for group in groups[:3]:
                 print(
                     f"    AI root cause [{group['priority']}]: {group['title']} "
@@ -1062,8 +1096,13 @@ def main(argv=None) -> int:
                 print(
                     f"    AI hypothesis "
                     f"[{confidence_label(hypothesis.get('confidence_basis'))}: "
-                    f"{hypothesis['confidence']:.2f}]: "
-                    f"{hypothesis['title']} :: {hypothesis['location']}"
+                    f"{hypothesis['confidence']:.2f}"
+                    + (
+                        ", ranking only"
+                        if hypothesis.get("sufficiency") == "insufficient"
+                        else ""
+                    )
+                    + f"]: {hypothesis['title']} :: {hypothesis['location']}"
                 )
         for index, f in enumerate(fs):
             suffix = ""

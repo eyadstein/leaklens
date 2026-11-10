@@ -193,15 +193,44 @@ read as more than it is:
 | `heuristic_weight` | heuristic rule strength | semantic rules | A hand-assigned weight with bounded corroboration bonuses. It encodes rule strength, not a measured frequency. |
 | `unavailable` | unavailable | legacy or unknown payloads | No provenance was recorded. The default keeps older payloads valid. |
 
-`sufficiency` (`supported|weak`) records whether the observation is strong enough to act on:
-semantic rules are always `weak`; the learned detector is `supported` only on a clear margin
-and `weak` for moderate or uncertain units. Root-cause groups do not have a hypothesis basis;
-they carry a derived score and are labelled `Confidence (derived group score)`.
+`sufficiency` (`supported|weak|insufficient`) records whether the calibration data
+supports a decision on this unit. Semantic rules are always `weak`. The learned detector is
+`supported` when its probability clears the fitted selective threshold, `insufficient` when it
+was emitted below that threshold (shown for ranking only), and `weak` only when no selection
+decision is available (for example a legacy artifact). Root-cause groups do not have a
+hypothesis basis; they carry a derived score and are labelled `Confidence (derived group score)`.
 
-JSON keeps the machine values in `confidence_basis` and `sufficiency` (schema `1.1`), while
-HTML, the console and the website print the human label. The schema rejects an unknown basis
-and rejects `calibrated_probability` unless the `learned` detector backs it. Confidence values
-themselves are unchanged.
+JSON keeps the machine values in `confidence_basis` and `sufficiency` (schema `1.2`; `1.1`
+payloads still validate), while HTML, the console and the website print the human label. The
+schema rejects an unknown basis and rejects `calibrated_probability` unless the `learned`
+detector backs it. Confidence values themselves are unchanged.
+
+## Selective reporting
+
+The learned detector now returns a decision as well as a score. At fit time it computes grouped
+out-of-fold development probabilities and picks the smallest threshold whose Wilson 95% upper
+bound on selective risk is at or below the unselective error rate, while keeping at least half
+of the emitted hypotheses. Runtime only compares a probability to the stored threshold; it never
+re-estimates risk. Below-threshold hypotheses are **not suppressed**: they stay in the report
+with their evidence, are labelled `insufficient` and `[ranking only]`, and cannot raise severity.
+
+Measured on the authored development corpus (263 units, shipped cutoff 0.60):
+
+| Property | Value |
+|---|---:|
+| Selective threshold | p >= 0.923 |
+| Coverage of emitted hypotheses | 95.3% (122 of 128) |
+| Coverage of all development units | 46.4% |
+| Empirical selective risk | 0.008 (cluster-bootstrap 95% interval 0.000-0.026) |
+| Unselective error rate | 0.053 |
+
+These are authored-corpus diagnostics, not an independent validation and not an H2 result.
+Repository-level shift violates the exchangeability assumption behind selective-risk bounds;
+**no distribution-free guarantee is claimed**. If a future independent corpus shows coverage
+below 0.5, the unselective output stays the default and the result is published as a shortfall.
+
+The complete analysis is always available: selection never deletes a hypothesis, mutates a
+finding, changes a severity or changes the trust score.
 
 ## Evidence-graph anchoring
 
@@ -218,8 +247,8 @@ identifier. The lookup is deterministic:
 Model spans have no deterministic counterpart and stay `null`. Linking reads the existing
 graph nodes once and writes no graph edge: graph JSON, node ids, clusters, links, findings,
 fingerprints and trust scores are unchanged. With `--ai` off nothing is computed, and older
-payloads without the field remain valid because the default is `null`. The AI schema stays
-`1.1`.
+payloads without the field remain valid because the default is `null`. The AI schema is `1.2`
+and still accepts `1.1` payloads.
 
 A non-null id means "this AI excerpt points at the same normalized location as this existing
 evidence record." It does not prove the hypothesis, add evidence, or claim the two records

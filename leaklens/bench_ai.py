@@ -469,6 +469,11 @@ def evaluate() -> dict[str, object]:
             "validation_examples": evaluation.validation_examples,
         },
         "protocol": evaluation.protocol,
+        "selection": (
+            model.selection.to_dict()
+            if getattr(model, "selection", None) is not None
+            else None
+        ),
         "candidates": list(comparison.candidates),
         "train_out_of_fold": evaluation.train_metrics,
         "validation": evaluation.metrics,
@@ -528,6 +533,41 @@ def _metric_table(metrics: dict[str, float]) -> list[str]:
         f"| False-positive rate | {metrics['false_positive_rate']:.3f} |",
         f"| TP / FP / FN / TN | {_confusion_row(metrics)} |",
     ]
+
+
+# Historical M6 record: kept in the generator so regeneration cannot drop it.
+_M6_SECTION = """
+## M6 false-positive reduction
+
+Four deterministic extraction guards replace shape-only signals with boundary-aware ones. They
+change emitted features, not the model class or the feature catalogue (108 model features).
+
+| Family | Guard | Development hard negative | H1 FPs before → after |
+|---|---|---|---:|
+| Safe CV | `plain_cv_safe` emits `cv_full_data_safe` and drops `cv_on_full_data`, `plain_kfold`, `has_shuffle` only when nothing is fitted outside the folds, no time/group/identifier feature is used, and no group-aware splitter is present | `plain fold local cross validation`; `plain cross validation inside an objective` | 2 → 0 |
+| Temporal split | `sort_values(time)` + `.iloc[:cut]` / `.iloc[cut:]` is a split boundary; label carriers after it are exempt | `positional time split into catboost pools` | 2 → 0 |
+| CatBoost `Pool` / label carriers | `label=`, target-vector arguments and `Pool(...)` targets are carriers, exempt only when no boundary exists or they are built after it | existing safe pool cases; `positional time split into catboost pools` | 1 → 0 |
+| EDA-only | A full-frame fit with no split, CV or held-out scoring that only feeds a plot is `eda_summary_only` | `scaling for a diagnostic scatter` | 1 → 0 |
+
+Two development snippets (`cross validation across time`, `kfold over accounts`) were completed
+with the time and account columns their labels already depended on; their labels did not change.
+The development corpus grew from 259 to 263 cases (127 legitimate, 176 groups); the validation
+slice is unchanged at TP/FP/FN/TN 21/0/0/19. The runtime hypothesis gate on the development set
+moved from 131/0/5/123 to 133/0/3/127, recovering `kfold over accounts` (identifier used as a CV
+feature) and `borderline smote before cross validation` (prefixed resampler name); it still emits
+no hint on a legitimate development case.
+
+The H1 diagnostic moved from TP/FP/FN/TN 22/6/2/18 to 22/0/2/24: precision 0.7857 → 1.0000,
+recall 0.9167 → 0.9167, F1 0.8462 → 0.9565, accuracy 0.8333 → 0.9583. The locked test is
+unchanged at 24/0/1/22 (accuracy 0.9787, precision 1.000) and the Phase 7 holdout at 6/1/0/5.
+The unchanged validation-only rule now selects threshold **0.60** (it was 0.53); the rule itself
+was not edited.
+
+Known limitation: `xgboost_early_stopping_on_test` previously scored as leaky only because
+`label=y_train` was misread as a target feature. The carrier guard removes that spurious signal,
+leaving a genuine false negative with no existing early-stopping indicator. Recall on H1 is
+unchanged at 0.9167. Adding such an indicator is deferred because M6 must not tune on H1.
+"""
 
 
 def markdown(data: dict) -> str:
@@ -984,6 +1024,33 @@ def markdown(data: dict) -> str:
         )
     else:
         lines.append("No leaky external cases were missed at the selected threshold.")
+
+    lines.extend(_M6_SECTION.splitlines())
+
+    lines.extend(["", "## Selective reporting", ""])
+    selection = data.get("selection")
+    if selection:
+        low, high = selection["risk_interval"]
+        lines.extend(
+            [
+                "- Decision: "
+                + (
+                    f"applied at p >= {selection['threshold']:.3f}."
+                    if selection["applied"]
+                    else "not applied; the unselective output is kept as the default."
+                ),
+                f"- Coverage: {selection['coverage']:.1%} of emitted hypotheses "
+                f"({selection['accepted']} of {selection['emitted']}); "
+                f"{selection['unit_coverage']:.1%} of all development units.",
+                f"- Empirical selective risk: {selection['selective_risk']:.3f} "
+                f"(cluster-bootstrap 95% interval {low:.3f}-{high:.3f}).",
+                f"- Unselective error rate: {selection['unselective_error_rate']:.3f}.",
+                f"- {selection['protocol']}",
+            ]
+        )
+        lines.extend(f"- {item}" for item in selection["limitations"])
+    else:
+        lines.append("- No selection decision was recorded for this artifact.")
 
     lines.extend(["", "## Overfitting checks", ""])
     lines.extend(f"- {item}" for item in data["overfitting_checks"])

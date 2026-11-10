@@ -168,6 +168,8 @@ def build_payload(evaluation: Any, model: Any) -> dict[str, Any]:
         "evaluation": _evaluation_dict(evaluation),
         "card": card,
     }
+    if model.selection is not None:
+        payload["model"]["selection"] = model.selection.to_dict()
     # Round-trip so a freshly built payload compares equal to the written file.
     payload = json.loads(json.dumps(payload, sort_keys=True, allow_nan=False))
     payload["artifact_digest"] = _digest(payload)
@@ -208,6 +210,7 @@ def _from_payload(payload: object) -> tuple[Any, Any]:
         _CalibratedModel,
         _PlattCalibrator,
     )
+    from .schemas import SelectionReport
 
     _require(isinstance(payload, dict), "artifact payload is not an object")
     payload = cast(dict[str, Any], payload)
@@ -291,6 +294,22 @@ def _from_payload(payload: object) -> tuple[Any, Any]:
     card_data = cast(dict[str, Any], card_data)
     card = _card(card_data, str(recorded))
 
+    selection = None
+    selection_data = section.get("selection")
+    if selection_data is not None:
+        _require(
+            isinstance(selection_data, dict), "artifact selection decision is invalid"
+        )
+        values = dict(cast(dict[str, Any], selection_data))
+        values["risk_interval"] = tuple(values.get("risk_interval", ()))
+        values["limitations"] = tuple(values.get("limitations", ()))
+        try:
+            selection = SelectionReport(**values)
+        except (TypeError, ValueError) as exc:
+            raise ArtifactError(
+                f"artifact selection decision is invalid: {exc}"
+            ) from exc
+
     evaluation_data = payload.get("evaluation")
     _require(isinstance(evaluation_data, dict), "artifact evaluation is missing")
     evaluation_data = cast(dict[str, Any], evaluation_data)
@@ -306,6 +325,7 @@ def _from_payload(payload: object) -> tuple[Any, Any]:
         card=card,
         feature_importances=tuple(float(value) for value in importances),
         threshold=float(threshold),
+        selection=selection,
     )
     return evaluation, model
 

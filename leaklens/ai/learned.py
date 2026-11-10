@@ -49,7 +49,13 @@ from .corpus import (
     validation_cases,
 )
 from .features import FEATURE_NAMES, MODEL_FEATURE_NAMES, model_features
-from .schemas import EvidenceSpan, Hypothesis, ModelCard
+from .schemas import (
+    EXCHANGEABILITY_LIMITATION,
+    EvidenceSpan,
+    Hypothesis,
+    ModelCard,
+    SelectionReport,
+)
 from .semantics import CodeSource
 
 _RANDOM_STATE = 0
@@ -123,6 +129,7 @@ class LearnedModel:
     card: ModelCard
     feature_importances: tuple[float, ...]
     threshold: float
+    selection: SelectionReport | None = None
 
     def predict_proba(self, source: str) -> float:
         vector = model_features(source).reshape(1, -1)
@@ -449,6 +456,129 @@ def _fit_calibrated(
     return _CalibratedModel(estimator=fitted, calibrator=calibrator)
 
 
+# Selective reporting is fitted once, at fit time, from development grouped
+# out-of-fold probabilities.  Runtime only compares a probability to the
+# stored threshold; it never re-estimates coverage or risk.
+_SELECTION_COVERAGE_FLOOR = 0.5
+_BOOTSTRAP_SAMPLES = 200
+_BOOTSTRAP_SEED = 0
+_SELECTION_LIMITATIONS = (
+    "Measured on grouped out-of-fold development probabilities from the authored "
+    "corpus, not on an independent corpus.",
+    EXCHANGEABILITY_LIMITATION,
+    "Hypotheses below the selective threshold stay visible and are labelled "
+    "insufficient (ranking only); they are not suppressed.",
+)
+_SELECTION_PROTOCOL = (
+    "Smallest threshold whose Wilson 95% upper bound on selective risk is at or "
+    "below the unselective error rate, requiring at least 50% coverage of "
+    "emitted units; fitted on grouped out-of-fold development probabilities."
+)
+
+
+def _selective_risk(
+    labels: np.ndarray, probabilities: np.ndarray, threshold: float
+) -> tuple[int, int, float]:
+    """Return accepted count, false positives and the false-positive share."""
+
+    accepted = probabilities >= threshold
+    count = int(np.count_nonzero(accepted))
+    if count == 0:
+        return 0, 0, 0.0
+    false_positives = int(np.count_nonzero(accepted & (labels == 0)))
+    return count, false_positives, false_positives / count
+
+
+def _wilson_upper(false_positives: int, accepted: int, z: float = 1.96) -> float:
+    """Wilson score upper bound for a binomial proportion (conservative)."""
+
+    if accepted == 0:
+        return 1.0
+    share = false_positives / accepted
+    denominator = 1.0 + z * z / accepted
+    centre = share + z * z / (2.0 * accepted)
+    margin = z * np.sqrt(
+        share * (1.0 - share) / accepted + z * z / (4.0 * accepted * accepted)
+    )
+    return float(min(1.0, (centre + margin) / denominator))
+
+
+def _cluster_bootstrap_interval(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    groups: np.ndarray,
+    threshold: float,
+) -> tuple[float, float]:
+    """Percentile interval for selective risk, resampling whole groups."""
+
+    group_index = [np.flatnonzero(groups == group) for group in np.unique(groups)]
+    rng = np.random.default_rng(_BOOTSTRAP_SEED)
+    risks: list[float] = []
+    for _ in range(_BOOTSTRAP_SAMPLES):
+        picks = rng.integers(0, len(group_index), size=len(group_index))
+        index = np.concatenate([group_index[pick] for pick in picks])
+        accepted = probabilities[index] >= threshold
+        if not accepted.any():
+            continue
+        risks.append(
+            float(np.count_nonzero(labels[index][accepted] == 0)) / accepted.sum()
+        )
+    if len(risks) < 20:  # pragma: no cover - tiny corpora only
+        return 0.0, 1.0
+    return (
+        round(float(np.quantile(risks, 0.025)), 6),
+        round(float(np.quantile(risks, 0.975)), 6),
+    )
+
+
+def _selective_selection(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    groups: np.ndarray,
+    cutoff: float,
+) -> SelectionReport:
+    """Fit the selective threshold; fall back to unselective output when unsafe."""
+
+    probabilities = np.asarray(probabilities, dtype=float)
+    labels = np.asarray(labels, dtype=int)
+    groups = np.asarray(groups)
+    emitted = probabilities >= cutoff
+    emitted_count = int(np.count_nonzero(emitted))
+    if emitted_count == 0:  # pragma: no cover - cutoff always emits something
+        raise RuntimeError("the development corpus emits no unit at the cutoff")
+    unselective_error = float(np.count_nonzero(emitted != labels)) / len(labels)
+
+    chosen: float | None = None
+    for candidate in np.unique(probabilities[emitted]):
+        accepted, false_positives, _risk = _selective_risk(
+            labels, probabilities, float(candidate)
+        )
+        if accepted / emitted_count < _SELECTION_COVERAGE_FLOOR:
+            continue
+        if _wilson_upper(false_positives, accepted) <= unselective_error:
+            chosen = float(candidate)
+            break
+
+    threshold = cutoff if chosen is None else chosen
+    accepted, _false_positives, risk = _selective_risk(labels, probabilities, threshold)
+    return SelectionReport(
+        applied=chosen is not None,
+        threshold=round(threshold, 6),
+        coverage=round(accepted / emitted_count, 6),
+        unit_coverage=round(accepted / len(labels), 6),
+        accepted=accepted,
+        emitted=emitted_count,
+        examples=len(labels),
+        selective_risk=round(risk, 6),
+        risk_interval=_cluster_bootstrap_interval(
+            probabilities, labels, groups, threshold
+        ),
+        unselective_error_rate=round(unselective_error, 6),
+        protocol=_SELECTION_PROTOCOL,
+        limitations=_SELECTION_LIMITATIONS,
+    )
+
+
 def _candidate_results(
     matrix: np.ndarray,
     labels: np.ndarray,
@@ -654,6 +784,12 @@ def _evaluate(
     final = _fit_calibrated(
         selected, development_matrix, development_labels, development_oof
     )
+    selection_report = _selective_selection(
+        final.calibrator.predict(development_oof),
+        development_labels,
+        _groups(development),
+        threshold,
+    )
     importances = _feature_importances(final.estimator)
 
     external: dict[str, float] = {}
@@ -739,6 +875,7 @@ def _evaluate(
         card=card,
         feature_importances=importances,
         threshold=threshold,
+        selection=selection_report,
     )
 
 
@@ -1180,6 +1317,7 @@ def learned_hypotheses(
 
     _evaluation, model = get_model(compare_candidates=False)
     cutoff = model.threshold if threshold is None else float(threshold)
+    selection = getattr(model, "selection", None)
     known_kinds = {finding.kind for finding in findings}
     corroborating = next(
         (
@@ -1280,6 +1418,15 @@ def learned_hypotheses(
                 if uncertainty == "clear"
                 else min(0.70, 0.30 + 0.40 * probability)
             )
+            if selection is not None and selection.applied:
+                sufficiency = (
+                    "supported"
+                    if probability >= selection.threshold
+                    else "insufficient"
+                )
+            else:
+                sufficiency = "supported" if uncertainty == "clear" else "weak"
+            ranking_only = sufficiency == "insufficient"
             signal_text = ", ".join(
                 f"{name} ({contribution:+.2f})"
                 for name, _value, contribution in supporting[:3]
@@ -1300,7 +1447,13 @@ def learned_hypotheses(
                     title=(
                         "Learned model sees a leakage-like code pattern"
                         + (f" ({top_signal})" if contributions else "")
-                        + ("" if uncertainty == "clear" else " [needs review]")
+                        + (
+                            " [ranking only]"
+                            if ranking_only
+                            else ""
+                            if uncertainty == "clear"
+                            else " [needs review]"
+                        )
                     ),
                     explanation=(
                         f"A calibrated local model trained on labeled authored "
@@ -1319,16 +1472,27 @@ def learned_hypotheses(
                         "semantic risk indicator is active (score alone is not "
                         "enough). This is a statistical hint, not a verified "
                         "finding."
+                        + (
+                            f" Selective reporting: p={probability:.3f} is below the "
+                            f"fitted decision threshold {selection.threshold:.2f}, so "
+                            "the calibration data is insufficient for a decision; "
+                            "this hypothesis is shown for ranking only and cannot "
+                            "raise severity."
+                            if ranking_only and selection is not None
+                            else ""
+                        )
                     ),
                     confidence=round(confidence, 4),
                     evidence=tuple(evidence),
                     location=f"{label}:{primary_line}",
                     detector="learned",
                     severity_hint=(
-                        "medium" if probability >= 0.85 and margin >= 0.20 else "low"
+                        "medium"
+                        if not ranking_only and probability >= 0.85 and margin >= 0.20
+                        else "low"
                     ),
                     confidence_basis="calibrated_probability",
-                    sufficiency="supported" if uncertainty == "clear" else "weak",
+                    sufficiency=sufficiency,
                     corroborates=corroborating,
                     limitations=MODEL_LIMITATIONS[:3],
                 )

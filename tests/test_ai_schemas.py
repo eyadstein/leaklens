@@ -156,7 +156,7 @@ def test_confidence_basis_and_sufficiency_are_validated():
 
 
 def test_schema_version_carries_the_confidence_contract():
-    assert SCHEMA_VERSION == "1.1"
+    assert SCHEMA_VERSION == "1.2"
 
 
 def test_group_and_plan_must_stay_internally_consistent():

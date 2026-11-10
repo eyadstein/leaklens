@@ -660,7 +660,9 @@ def test_uncertain_units_are_labelled_for_review_with_lower_confidence():
     assert "uncertain" in item.explanation
     assert "margin" in item.explanation
     assert item.confidence_basis == "calibrated_probability"
-    assert item.sufficiency == "weak"
+    # The explicit cutoff still sits above the fitted selective threshold, so the
+    # unit is supported; the uncertainty marker remains on the title.
+    assert item.sufficiency == "supported"
     assert item.confidence <= 0.70
     assert item.severity_hint == "low"
 
