@@ -2,6 +2,12 @@
 
 Goal: the most trusted open-source tool for finding data leakage in ML datasets and code. Each phase has an exit criterion so we know when it is really done. Tasks live in [Issues](https://github.com/eyadstein/leaklens/issues).
 
+The longer-term architecture sequence uses a **separate numbering scheme** that continues
+[docs/AI_ROADMAP.md](docs/AI_ROADMAP.md) (Phase 12 onward), not the phases below. It is planned in
+[docs/AI_ML_EXPANSION_ROADMAP.md](docs/AI_ML_EXPANSION_ROADMAP.md), with the design in
+[docs/FUTURE_ARCHITECTURE.md](docs/FUTURE_ARCHITECTURE.md). Those phases are proposals, not
+commitments.
+
 ## Phase 0: Foundation (done)
 Data detectors, code scanner, model arena, API, UI, Docker, CI, PyPI, pre-commit, HTML report, benchmark, study.
 Exit: `pip install leaklens-ml` works and CI is green.

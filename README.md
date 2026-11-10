@@ -600,6 +600,15 @@ flowchart LR
   D --> H[CLI / Streamlit / GitHub Action]
 ```
 
+The long-term design (multi-modal engines, shared evidence core, phase plan) is documented
+separately and is **not implemented**: [FUTURE_VISION.md](docs/FUTURE_VISION.md),
+[FUTURE_ARCHITECTURE.md](docs/FUTURE_ARCHITECTURE.md),
+[AI_ML_EXPANSION_ROADMAP.md](docs/AI_ML_EXPANSION_ROADMAP.md),
+[ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md), with supporting research in
+[AI_ML_ECOSYSTEM_RESEARCH.md](docs/AI_ML_ECOSYSTEM_RESEARCH.md),
+[ARTIFACT_SECURITY_STRATEGY.md](docs/ARTIFACT_SECURITY_STRATEGY.md) and
+[WORKSPACE_DESIGN_VISION.md](docs/WORKSPACE_DESIGN_VISION.md).
+
 ## How the Trust Score Is Calculated
 
 LeakLens starts with a trust score of 100 and deducts points for each finding based on its severity.

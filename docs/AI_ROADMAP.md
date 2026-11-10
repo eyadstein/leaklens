@@ -21,7 +21,9 @@ roadmap derived from its measured gaps. It exists so the next phase starts from 
 instead of ambition. The architecture, safety invariants and limitations of the current
 layer are documented in [AI_INTELLIGENCE.md](AI_INTELLIGENCE.md); measured results live in
 [AI_BENCHMARK.md](AI_BENCHMARK.md), [AI_REALWORLD.md](AI_REALWORLD.md) and
-[AI_PERFORMANCE.md](AI_PERFORMANCE.md).
+[AI_PERFORMANCE.md](AI_PERFORMANCE.md). The phases that follow Phase 12 (foundation, pipeline/MLOps,
+text, deep learning, vision, investigation, remediation) are planned in
+[AI_ML_EXPANSION_ROADMAP.md](AI_ML_EXPANSION_ROADMAP.md) and are not commitments.
 
 ## How this document was produced
 
