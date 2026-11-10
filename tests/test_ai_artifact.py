@@ -47,6 +47,11 @@ def _comparable(payload: dict) -> dict:
     comparable.pop("artifact_digest", None)
     for section in ("model", "card"):
         comparable[section].pop("library_version", None)
+    if not _compatible():
+        # The selective threshold is derived from fitted probabilities, so a
+        # foreign scikit-learn minor can move it by one accepted unit even when
+        # every float leaf stays within tolerance.
+        comparable["model"].pop("selection", None)
     return comparable
 
 

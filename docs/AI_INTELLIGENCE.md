@@ -228,6 +228,8 @@ These are authored-corpus diagnostics, not an independent validation and not an 
 Repository-level shift violates the exchangeability assumption behind selective-risk bounds;
 **no distribution-free guarantee is claimed**. If a future independent corpus shows coverage
 below 0.5, the unselective output stays the default and the result is published as a shortfall.
+A refit on another scikit-learn minor can move the fitted threshold by one accepted unit; the
+shipped artifact records the decision from the environment that produced it.
 
 The complete analysis is always available: selection never deletes a hypothesis, mutates a
 finding, changes a severity or changes the trust score.
