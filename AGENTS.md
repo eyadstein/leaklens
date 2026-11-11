@@ -20,6 +20,7 @@ python -m leaklens.bench                            # labeled scanner regression
 python -m leaklens.bench_data                       # dataset-detector benchmark
 python -m leaklens.bench_missing                    # labeled missingness benchmark
 python -m leaklens.bench_drift                      # drift diagnostics benchmark
+python -m leaklens.bench_pipeline                   # pipeline/MLOps benchmark (needs .[yaml])
 python -m leaklens.bench_ai                         # optional AI layer benchmark
 python -m leaklens.bench_sql                        # optional SQL benchmark (needs .[sql])
 ```

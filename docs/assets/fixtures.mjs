@@ -260,7 +260,7 @@ export const fixtures = {
           "kind": "no_random_state",
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
-          "fix": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it.",
+          "fix": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
           "line": 9
         }
       ],

@@ -300,6 +300,7 @@ def doctor(argv) -> int:
         "excel": "openpyxl",
         "images": "PIL",
         "app": "fastapi",
+        "yaml": "yaml",
         "taintwatch": "taintwatch",
     }
 
@@ -471,6 +472,15 @@ def main(argv=None) -> int:
         choices=("ansi", "postgres", "bigquery", "snowflake"),
         default=None,
         help="declared dialect for SQL lineage (default: ansi)",
+    )
+    p.add_argument(
+        "--pipeline",
+        action="store_true",
+        help=(
+            "audit pipeline metadata (dvc.yaml/.dvc/dvc.lock, *.dag.json, notebook "
+            "cell order, requirements) under --scan paths; opt-in diagnostics, "
+            "needs the yaml extra for DVC files"
+        ),
     )
     p.add_argument(
         "--drift",
@@ -737,6 +747,29 @@ def main(argv=None) -> int:
                 fs += scan_path(source)
         except ImportError as exc:
             p.error(str(exc))
+    if a.pipeline and not scan_targets:
+        p.error("--pipeline audits --scan paths; add --scan PATH")
+    if a.pipeline:
+        from .pipeline import PipelineUnavailable, audit_pipeline, is_yaml_metadata
+
+        reports = []
+        for source in scan_targets:
+            try:
+                report = audit_pipeline(
+                    source,
+                    strict_yaml=Path(source).is_file() and is_yaml_metadata(source),
+                )
+            except PipelineUnavailable as exc:
+                p.error(str(exc))
+            fs += report.findings
+            reports.append(report.to_dict())
+            if report.skipped.get("yaml_not_installed"):
+                print(
+                    "leaklens: DVC metadata skipped; install it with "
+                    'pip install "leaklens-ml[yaml]"',
+                    file=sys.stderr,
+                )
+        rep["pipeline"] = reports[0] if len(reports) == 1 else {"reports": reports}
 
     sections = assemble.build(
         fs,

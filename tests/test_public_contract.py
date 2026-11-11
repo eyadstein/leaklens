@@ -72,6 +72,7 @@ def test_engine_ids_are_frozen():
         "leaklens.scanner.scan_source",
         "leaklens.ai.experimental",
         "leaklens.intelligence.deterministic",
+        "leaklens.pipeline",
     }
 
 

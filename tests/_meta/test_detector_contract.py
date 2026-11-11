@@ -39,6 +39,16 @@ def emitted_kinds() -> set[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
                 name = node.func.id if isinstance(node.func, ast.Name) else None
+                if name == "_finding":
+                    # leaklens.pipeline._finding(kind, ...) keeps the severity and
+                    # diagnostic flag in one place; its first argument is the kind.
+                    if (
+                        node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[0].value, str)
+                    ):
+                        kinds.add(node.args[0].value)
+                    continue
                 if name not in {"Finding", "_sql_finding"}:
                     continue
                 if (
@@ -75,6 +85,7 @@ def benchmark_case_names() -> set[str]:
         bench_data,
         bench_drift,
         bench_missing,
+        bench_pipeline,
         bench_sql,
     )
 
@@ -86,6 +97,7 @@ def benchmark_case_names() -> set[str]:
     names |= {case.name for case in bench_missing._build_cases()}
     names |= {case.name for case in bench_sql._build_cases()}
     names |= {case.name for case in bench_drift._build_cases()}
+    names |= {case.name for case in bench_pipeline._build_cases()}
     return names
 
 
@@ -118,6 +130,11 @@ def test_diagnostic_kinds_are_not_scored():
     assert {e.kind for e in manifest.DETECTORS if not e.scored} == {
         "distribution_shift",
         "sql_unresolved_column",
+        "pipeline_split_overlap",
+        "pipeline_unresolved_lineage",
+        "pipeline_param_drift",
+        "pipeline_missing_digest",
+        "pipeline_unpinned_dependency",
     }
 
 

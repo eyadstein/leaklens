@@ -340,6 +340,28 @@ leaklens train.csv --target label --test test.csv --drift --json
 
 Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls: [`docs/DRIFT_BENCHMARK.md`](docs/DRIFT_BENCHMARK.md).
 
+## Pipeline and MLOps intelligence (opt-in)
+
+`--pipeline` reads the metadata a training pipeline leaves in the repository (DVC stages and locks, serialized DAG JSON, notebook cell order, dependency declarations) and asks whether the evaluation is circular. It is **off by default**, **read-only**, and needs no orchestrator: nothing is executed and no service is contacted. `pip install "leaklens-ml[yaml]"` adds `safe_load`-only YAML parsing for DVC files; without it, directory audits skip DVC metadata and naming a DVC file raises an actionable `PipelineUnavailable`.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `pipeline_split_overlap` | high | train and eval read the same data artifact, or eval reads a data artifact train produced |
+| `pipeline_unresolved_lineage` | low | a declared dependency has no producing stage and no file |
+| `pipeline_param_drift` | low | `dvc.lock` and the current parameter file disagree |
+| `pipeline_missing_digest` | low | a locked output has no content digest |
+| `pipeline_unpinned_dependency` | low | a requirements entry has no exact pin |
+| `no_random_state` | low | a training stage declares model parameters but no seed |
+
+Every pipeline finding is `diagnostic: true` and `scored: false`: it never changes the trust score, the exit code or an existing finding. Only a confirmed lineage path reaches `high`. Edge and stage output is deterministic and sorted.
+
+```sh
+leaklens --scan . --pipeline
+leaklens --scan pipelines/dvc.yaml --pipeline --json
+```
+
+Rules, formats and limits: [`docs/PIPELINE.md`](docs/PIPELINE.md); measured controls: [`docs/PIPELINE_BENCHMARK.md`](docs/PIPELINE_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
 `leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.

@@ -21,13 +21,23 @@ from .fixes import FIXES
 SURFACES = frozenset({"dataset", "split", "code", "notebook", "image"})
 MODALITIES = frozenset({"tabular", "code", "sql", "image", "text", "artifact"})
 SEVERITIES = frozenset({"high", "medium", "low"})
-EXTRAS = frozenset({"images", "sql"})
+EXTRAS = frozenset({"images", "sql", "yaml"})
 INTRODUCED = "0.13.0"
 
 # Historical diagnostic kinds score nothing; every other shipped kind is scored.
 # New kinds must pass scored=False explicitly until a labelled benchmark graduates
 # them (ADR-006).
-_DIAGNOSTIC_KINDS = frozenset({"distribution_shift", "sql_unresolved_column"})
+_DIAGNOSTIC_KINDS = frozenset(
+    {
+        "distribution_shift",
+        "sql_unresolved_column",
+        "pipeline_split_overlap",
+        "pipeline_unresolved_lineage",
+        "pipeline_param_drift",
+        "pipeline_missing_digest",
+        "pipeline_unpinned_dependency",
+    }
+)
 
 _SURFACE_MODALITIES = {
     "dataset": ("tabular",),
@@ -426,6 +436,43 @@ DETECTORS: tuple[Detector, ...] = (
         "no_random_state",
         "train_test_split without random_state",
     ),
+    # Phase 14 pipeline and MLOps intelligence. Every pipeline kind is a
+    # diagnostic: it ships scored=False and never changes the trust score.
+    _entry(
+        "pipeline_split_overlap",
+        "code",
+        "high",
+        "pipeline_split_overlap",
+        "train and eval share one dataset",
+    ),
+    _entry(
+        "pipeline_unresolved_lineage",
+        "code",
+        "low",
+        "pipeline_unresolved_lineage",
+        "unresolved stage dependency",
+    ),
+    _entry(
+        "pipeline_param_drift",
+        "code",
+        "low",
+        "pipeline_param_drift",
+        "locked parameter drift",
+    ),
+    _entry(
+        "pipeline_missing_digest",
+        "code",
+        "low",
+        "pipeline_missing_digest",
+        "locked output without digest",
+    ),
+    _entry(
+        "pipeline_unpinned_dependency",
+        "code",
+        "low",
+        "pipeline_unpinned_dependency",
+        "unpinned requirements entry",
+    ),
 )
 
 BY_KIND: dict[str, Detector] = {entry.kind: entry for entry in DETECTORS}
@@ -465,6 +512,21 @@ ENGINES: dict[str, Engine] = {
     ),
     "leaklens.intelligence.deterministic": Engine(
         "leaklens.intelligence.deterministic", "dataset", None, frozenset()
+    ),
+    "leaklens.pipeline": Engine(
+        "leaklens.pipeline",
+        "code",
+        None,
+        frozenset(
+            {
+                "pipeline_split_overlap",
+                "pipeline_unresolved_lineage",
+                "pipeline_param_drift",
+                "pipeline_missing_digest",
+                "pipeline_unpinned_dependency",
+                "no_random_state",
+            }
+        ),
     ),
 }
 
