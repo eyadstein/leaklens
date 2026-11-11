@@ -51,11 +51,11 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       # Check out the trusted default branch first. No code from the release tag
       # runs until its commit is proven to be on main and its version matches.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
       - name: Validate tag, version, and main history
@@ -100,6 +100,10 @@ jobs:
               )
           print("Publishing files:", ", ".join(files))
           PY
+      # The wheel must carry package code and dist-info only: no tests, docs or
+      # repository metadata can ride along into the published artifact.
+      - name: Verify wheel contents against the release allowlist
+        run: python scripts/validate_release.py --wheel dist/*.whl
       # Install the built wheel so the SBOM can record resolved runtime versions.
       - run: pip install dist/*.whl
       # Keep the SBOM outside dist/: the PyPI publish action uploads every file
@@ -113,16 +117,16 @@ jobs:
             echo "::error::SBOM must not be inside dist/."
             exit 1
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: python-package
           path: |
             dist/*.whl
             dist/*.tar.gz
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom
           path: sbom/sbom.json
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
         with:
           packages-dir: dist/
