@@ -151,6 +151,32 @@ Containment tests for `..`, Windows separators, absolute drive paths, UNC paths 
 a refusal test for `joblib`/pickle artifacts; an API test asserting error bodies never contain
 traceback text; and a scanner test that `scan_targets` cannot escape its root.
 
+### Remediation status (Phase 13, 2026-11-11)
+
+Behaviour changed on `main`; alert closure can only be confirmed by the next CodeQL run on the
+default branch. Counts above are the pre-fix baseline.
+
+- **G1 — fixed.** `/predict` no longer resolves or opens a request-supplied path. The model is fixed
+  at startup (`LEAKLENS_MODEL_PATH`, default `models/best.joblib`), any other `model_path` gets 422
+  before any filesystem work, and the load cache is keyed on the resolved operator path.
+  `tests/test_api_predict.py` proves a request-selected path never reaches `joblib.load`. Three
+  existing `/predict` tests were updated to this contract (the one documented exception to "tests
+  unchanged").
+- **G2 — hardened.** `leaklens/paths.py` owns `resolve_within`: a candidate whose drive/anchor
+  differs from the root is refused *before* `resolve()`, so UNC/device paths cannot trigger network
+  resolution just to be rejected; traversal, absolute-path and symlink escapes are still refused
+  after resolution. `WorkspaceManager.resolve` and `WorkspaceManager._policy` delegate to it.
+  `tests/test_paths.py` covers `..`, both separators, absolute paths, UNC/device paths, another
+  drive and symlinks.
+- **G4 — fixed.** `/api/config` returns the fixed string `configuration could not be loaded`; the
+  `ConfigError` detail is written to the server log.
+- **G3/G5 — unchanged by design** (no sink / fixed strings); they remain likely false positives.
+  Containment and refusal are covered by tests rather than by an alert disposition alone.
+
+`py/path-injection` may still be reported for `baseline.py`/`scanner.py` because CodeQL follows
+operator-supplied CLI/config paths into file reads. Those are not request-controlled in this threat
+model, and no suppression or query filter was added.
+
 ---
 
 ## 3. Trust boundaries in the future architecture

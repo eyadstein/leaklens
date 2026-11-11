@@ -454,7 +454,7 @@ streamlit run leaklens/ui.py
 
 Endpoints: `GET /health`, `POST /audit`, `POST /scan`, `POST /predict`.
 
-> `POST /predict` loads model files with `joblib` only from `./models/` below the API's working directory. Absolute paths and traversal outside that directory are rejected. `joblib` uses pickle, which can execute arbitrary code while loading; only load models you trust and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
+> `POST /predict` never accepts a model path from the request. The server loads one operator-chosen artifact at startup: `LEAKLENS_MODEL_PATH` (default `models/best.joblib`). Any other `model_path` in the body is rejected with 422 before the filesystem is touched. `joblib` uses pickle, which can execute arbitrary code while loading; only point the server at a model you built or otherwise trust, and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
 
 ### Upload and archive limits
 

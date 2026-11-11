@@ -42,6 +42,10 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Reports / exports | `leaklens/report.py` (HTML), `leaklens/sarif.py` (SARIF), `leaklens/fixes.py` (`--explain`) |
 | Dataset audit + CV check + LLM | `leaklens/audit.py` (class balance etc.), `leaklens/cvcheck.py` (CV misuse, used by scanner), `leaklens/llm.py` (`--llm` explanations, off by default) |
 | Baselines / suppressions / config | `leaklens/baseline.py`, `leaklens/suppression.py`, `leaklens/config.py`; shared application in `leaklens/policy.py` |
+| Shared payload sections (findings/counts/policy) | `leaklens/assemble.py` — one policy application for CLI/API/live scan; never re-serialize findings per surface |
+| Shared scanner vocabulary/AST helpers | `leaklens/source.py` — `cvcheck.py`/`flow.py` import from here, `scanner.py` re-exports; no cycles |
+| Optional-engine availability | `leaklens/availability.py` (`probe`, `EngineUnavailable`); `sqlscan`/`images` override the error class |
+| Path containment | `leaklens/paths.py` (`resolve_within`, `contained`); refuses foreign drives/UNC anchors before `resolve()` |
 | Missingness audit | `leaklens/missingness.py`; benchmark `leaklens/bench_missing.py` + `docs/MISSINGNESS_BENCHMARK.md` |
 | Experimental AI layer | `leaklens/ai/` (`semantics.py`, `features.py`, `corpus.py`, `learned.py`, `reasoning.py`, `schemas.py`, `analysis.py`); benchmark `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md`; design `docs/AI_INTELLIGENCE.md` |
 
@@ -49,7 +53,7 @@ New detectors: data → `leakage.py`, code → `scanner.py`, SQL → `sqlscan.py
 
 ## Non-obvious behavior
 
-- **Exit code**: CLI exits 1 if any `high` finding OR trust score `< --fail-under`. `leaklens --scan` in CI/pre-commit relies on this.
+- **Exit code**: CLI exits 1 if any `high` finding OR trust score `< --fail-under`; findings with `diagnostic=True` are ignored by both gates (and by `--fail-on-new`). `leaklens --scan` in CI/pre-commit relies on this.
 - **Readers**: unknown/extensionless suffix silently falls back to CSV (`readers.py`); optional formats raise `ImportError` naming the missing extra.
 - **`.leaklens.toml`** is read from CWD (or `--config`) when present. Precedence: defaults < config < explicit CLI flags. Invalid keys/types/paths exit 2. Output paths must stay inside the config directory. `leaklens init` still refuses to overwrite without `--force`.
 - **Baselines/suppressions**: baseline entries key on the stable fingerprint; comparison statuses are `new|unchanged|changed|resolved`. Suppressions are exact-fingerprint only, require a reason, and only label findings — they never change severity/evidence/fingerprint, and suppressed findings stop counting toward `leakage.score()` and the default exit gate. `--fail-on-new` is the only opt-in new failure mode.
@@ -59,5 +63,7 @@ New detectors: data → `leakage.py`, code → `scanner.py`, SQL → `sqlscan.py
 - **LLM explanations** are off by default; only opt-in via `--llm`. Never send dataset rows or full source — findings only (provider: local Ollama by default; `LEAKLENS_LLM_API_KEY` for remote).
 - **AI layer** is off by default (`--ai`, `--ai-llm`, `include_ai`). It must stay additive: never touch `Finding` severity, `leakage.score()`, the exit code or raw rows; hypotheses are capped at `medium`, confidence at `0.95`, and evidence is mandatory.
 - **Workspace dataset audits** reuse `public_api.run_audit_job` / `run_inspect_job` under `upload_guard.guard_upload` limits; never re-implement parsing, target checks or detectors in `workspace.py`. A source scan and a dataset audit share one activity slot (409 on overlap), and an audit cannot be cancelled once the engine call is running. Both scan types apply the existing `policy.apply_policy()` to their serialized findings; the workspace loads baselines read-only (relative to the root or `[baseline].path`), never writes them, and shows only statuses the policy engine returned.
+- **`POST /predict`** never accepts a request-selected model. The server loads `LEAKLENS_MODEL_PATH` (default `models/best.joblib`) and returns 422 for any other `model_path` before touching the filesystem. Pickle artifacts are trusted operator input only.
+- **Paths from requests** go through `paths.resolve_within`; it refuses foreign drives/anchor (UNC, device paths) before `Path.resolve()`, so a rejected path cannot trigger network resolution.
 - **Benchmark**: `python -m leaklens.bench` output goes to `docs/BENCHMARK.md`; treat as regression guard, not accuracy claim. The AI benchmark is `python -m leaklens.bench_ai` → `docs/AI_BENCHMARK.md`; report its measured numbers, never an improvement claim.
 - Live demo: `python examples/make_demo.py && leaklens demo.csv --target is_fraud --arena`. API: `uvicorn leaklens.api:app --port 8000`; UI: `streamlit run leaklens/ui.py`; Docker: `docker compose up --build` (API :8000, UI :8501).
