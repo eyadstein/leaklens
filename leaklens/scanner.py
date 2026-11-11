@@ -480,7 +480,10 @@ def _scan_core(
                     "no_stratify",
                     loc(c.lineno),
                     "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
-                    stable_key=keys[id(c)],
+                    # Namespaced: no_random_state can fire on the same call and
+                    # already carries the bare node key; stable keys must stay
+                    # distinct per finding.
+                    stable_key=f"no_stratify:{keys[id(c)]}",
                 )
             )
         if isinstance(f, ast.Name) and f.id in funcs:

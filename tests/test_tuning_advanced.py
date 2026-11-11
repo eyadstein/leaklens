@@ -56,7 +56,7 @@ def test_nested_cross_validation_is_clean():
         "from sklearn.model_selection import GridSearchCV, cross_val_score, "
         "train_test_split\n"
         "X_train, X_test, y_train, y_test = train_test_split("
-        "X, y, random_state=0)\n"
+        "X, y, random_state=0, stratify=y)\n"
         "gs = GridSearchCV(model, grid, cv=5)\n"
         "scores = cross_val_score(gs, X_train, y_train, cv=5)\n"
         "print(gs.fit(X_train, y_train).score(X_test, y_test))\n"
