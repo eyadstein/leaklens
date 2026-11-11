@@ -32,6 +32,14 @@ export const fixtures = {
           "line": 18
         },
         {
+          "severity": "low",
+          "kind": "no_stratify",
+          "column": "advanced_leaks.py:26",
+          "detail": "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+          "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
+          "line": 26
+        },
+        {
           "severity": "high",
           "kind": "target_encode_before_split",
           "column": "advanced_leaks.py:16",
@@ -75,7 +83,7 @@ export const fixtures = {
       "counts": {
         "high": 3,
         "medium": 3,
-        "low": 0
+        "low": 1
       },
       "clean": false,
       "trustScore": 0,
@@ -262,15 +270,23 @@ export const fixtures = {
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
           "fix": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
           "line": 9
+        },
+        {
+          "severity": "low",
+          "kind": "no_stratify",
+          "column": "bad_pipeline.py:9",
+          "detail": "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+          "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
+          "line": 9
         }
       ],
       "counts": {
         "high": 2,
         "medium": 0,
-        "low": 1
+        "low": 2
       },
       "clean": false,
-      "trustScore": 25,
+      "trustScore": 20,
       "ai": {
         "engine": "leaklens.ai.experimental",
         "schemaVersion": "1.2",

@@ -14,6 +14,7 @@ FIXES = {
     "group_overlap": "Split by entity with GroupShuffleSplit or GroupKFold so no entity appears in both splits.",
     "group_leakage_risk": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
     "no_random_state": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
+    "no_stratify": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
     "target_encode_before_split": "Compute the target encoding from the training fold only (sklearn.preprocessing.TargetEncoder in a Pipeline, or out-of-fold encoding) so held-out rows never help build it.",
     "manual_scale_before_split": "Compute the statistics (mean, std, min, max, ...) on the training split only and apply them to the test split, or use a scaler inside a Pipeline so held-out rows never help set the scale.",
     "fillna_before_split": "Impute using training data only: split first, then compute the mean/median on the training split and apply it to both splits, or use SimpleImputer inside a Pipeline.",

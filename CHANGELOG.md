@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Scanner: stratify advisory
+
+- New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
+
 ### AI model artifact and provenance
 
 - The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.
