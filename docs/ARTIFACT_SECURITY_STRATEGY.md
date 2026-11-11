@@ -153,25 +153,46 @@ traceback text; and a scanner test that `scan_targets` cannot escape its root.
 
 ### Remediation status (Phase 13, 2026-11-11)
 
-Behaviour changed on `main`; alert closure can only be confirmed by the next CodeQL run on the
-default branch. Counts above are the pre-fix baseline.
+Behaviour changed on `main`; the next CodeQL run on the default branch was then read back through
+the code-scanning API. Counts above are the pre-fix baseline.
 
 - **G1 — fixed.** `/predict` no longer resolves or opens a request-supplied path. The model is fixed
   at startup (`LEAKLENS_MODEL_PATH`, default `models/best.joblib`), any other `model_path` gets 422
   before any filesystem work, and the load cache is keyed on the resolved operator path.
-  `tests/test_api_predict.py` proves a request-selected path never reaches `joblib.load`. Three
-  existing `/predict` tests were updated to this contract (the one documented exception to "tests
-  unchanged").
-- **G2 — hardened.** `leaklens/paths.py` owns `resolve_within`: a candidate whose drive/anchor
-  differs from the root is refused *before* `resolve()`, so UNC/device paths cannot trigger network
-  resolution just to be rejected; traversal, absolute-path and symlink escapes are still refused
-  after resolution. `WorkspaceManager.resolve` and `WorkspaceManager._policy` delegate to it.
-  `tests/test_paths.py` covers `..`, both separators, absolute paths, UNC/device paths, another
-  drive and symlinks.
+  `tests/test_api_predict.py` proves a request-selected path never reaches `joblib.load`.
+- **G2 — hardened, not closed.** `leaklens/paths.py` owns `resolve_within`: a candidate whose
+  drive/anchor differs from the root is refused *before* `resolve()`, so UNC/device paths cannot
+  trigger network resolution just to be rejected; traversal, absolute-path and symlink escapes are
+  still refused after resolution. `WorkspaceManager.resolve` and `WorkspaceManager._policy`
+  delegate to it. `tests/test_paths.py` covers `..`, both separators, absolute paths, UNC/device
+  paths, another drive and symlinks.
 - **G4 — fixed.** `/api/config` returns the fixed string `configuration could not be loaded`; the
   `ConfigError` detail is written to the server log.
 - **G3/G5 — unchanged by design** (no sink / fixed strings); they remain likely false positives.
   Containment and refusal are covered by tests rather than by an alert disposition alone.
+
+### Verified alert outcome after the CodeQL run
+
+Read back on 2026-11-11 at `8492a3c`. No alert was dismissed, suppressed or filtered:
+five alerts are `fixed`, sixteen remain `open`, and one is new at the sanitizer helper itself.
+
+Fixed automatically by the remediation:
+
+| Alert | Rule | Location |
+|---:|---|---|
+| 1 | `py/path-injection` | `api.py:314` (old request path) |
+| 2 | `py/path-injection` | `api.py:320` (old `models/` gate) |
+| 3 | `py/unsafe-deserialization` | `api.py:325` (old `joblib.load`) |
+| 7 | `py/path-injection` | `workspace.py:1107` (old `WorkspaceManager.resolve`) |
+| 18 | `py/stack-trace-exposure` | `workspace.py:1680` (old `/api/config` body) |
+
+Still open (14 `py/path-injection`, 2 `py/stack-trace-exposure`):
+`paths.py:39` (new, the shared sanitizer's own `resolve()` call), `baseline.py:236`,
+`scanner.py:882,886`, `workspace.py:232,1148,1150 (x2),1300,1302,1309,1925,1927,1929`, and
+`workspace.py:1709,1713`. Alert 7's downstream readers remain because CodeQL does not model
+`resolve()` + containment as a sanitizer; `paths.py:39` is the same unmodeled pattern, now with one
+home and regression tests instead of ten scattered call sites. The two stack-trace alerts (G5) map
+to a handler whose only exception text is a fixed `unknown {kind} session` string.
 
 `py/path-injection` may still be reported for `baseline.py`/`scanner.py` because CodeQL follows
 operator-supplied CLI/config paths into file reads. Those are not request-controlled in this threat
