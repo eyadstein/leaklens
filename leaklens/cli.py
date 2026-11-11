@@ -409,6 +409,24 @@ def doctor(argv) -> int:
     return 0
 
 
+def _gate_failure(
+    outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
+) -> bool:
+    """Failure predicates ignore ``diagnostic=True``, matching ``leakage.score()``."""
+    if any(
+        f.severity == "high" and not getattr(f, "diagnostic", False)
+        for f in outcome.active
+    ):
+        return True
+    if fail_under is not None and trust_score < fail_under:
+        return True
+    return bool(
+        fail_on_new
+        and outcome.diff is not None
+        and any(not getattr(f, "diagnostic", False) for f in outcome.diff.new)
+    )
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "init":
@@ -1145,11 +1163,9 @@ def main(argv=None) -> int:
                 f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
             )
             print(res.round(4).to_string(index=False))
-    gate = any(f.severity == "high" for f in active) or (
-        fail_under is not None and rep["trust_score"] < fail_under
+    gate = _gate_failure(
+        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
     )
-    if fail_on_new and outcome.diff is not None and outcome.diff.new:
-        gate = True
     if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
         gate = True
     return 1 if gate else 0
