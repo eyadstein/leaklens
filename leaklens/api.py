@@ -13,7 +13,7 @@ import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from . import __version__
+from . import __version__, assemble
 from .audit import audit
 from .baseline import BaselineError
 from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
@@ -25,7 +25,7 @@ from .intelligence import (
     compare_graph_snapshots,
     snapshot_context,
 )
-from .leakage import scan, score
+from .leakage import scan
 from .missingness import audit_missingness
 from .policy import apply_policy, parse_baseline, parse_suppressions
 from .readers import DatasetLimitError, read_dataset
@@ -69,15 +69,14 @@ def validate_upload_size(name: str, byte_count: int) -> None:
 
 def _finding_payloads(outcome) -> list[dict]:
     """Existing fields plus optional status/suppression; never mutates findings."""
-    return [outcome.finding_payload(finding) for finding in outcome.findings]
+    return assemble.from_outcome(outcome).findings
 
 
-def _policy_payload(outcome) -> tuple[dict, dict | None]:
-    if outcome.diff is None and outcome.suppression is None:
-        return {}
-    payload = {"policy": outcome.summary()}
-    if outcome.diff is not None and outcome.diff.resolved:
-        payload["resolved"] = [entry.to_dict() for entry in outcome.diff.resolved]
+def _policy_payload(outcome) -> dict:
+    sections = assemble.from_outcome(outcome)
+    payload = {"policy": sections.policy} if sections.policy else {}
+    if sections.resolved:
+        payload["resolved"] = sections.resolved
     return payload
 
 
@@ -230,7 +229,7 @@ async def audit_csv(
         suppressions=_json_form(suppressions, "suppressions"),
     )
     payload = {
-        "trust_score": score(outcome.active),
+        "trust_score": assemble.from_outcome(outcome).trust_score,
         "audit": audit(df, target),
         "missingness": missing.to_dict(),
         "findings": _finding_payloads(outcome),
@@ -282,7 +281,7 @@ def scan_code(req: ScanReq):
         fs = scan_source(req.source, req.name)
     outcome = _apply_policy(fs, baseline=req.baseline, suppressions=req.suppressions)
     payload = {
-        "trust_score": score(outcome.active),
+        "trust_score": assemble.from_outcome(outcome).trust_score,
         "findings": _finding_payloads(outcome),
         **_policy_payload(outcome),
     }

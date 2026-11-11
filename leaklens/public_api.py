@@ -42,7 +42,7 @@ from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__
+from . import __version__, assemble
 from .audit import audit
 from .fixes import advice
 from .intelligence import (
@@ -59,7 +59,6 @@ from .leakage import (
     group_risk,
     near_duplicate_overlap,
     scan,
-    score,
     split_overlap,
     temporal_overlap,
 )
@@ -486,23 +485,19 @@ def _clean_option(value: str | None, label: str) -> str | None:
     return text
 
 
-def _finding_payload(finding: Any) -> dict[str, Any]:
-    payload = finding.to_dict()
-    payload["fix"] = advice(finding.kind) or (
-        "Fix the syntax error before relying on this scan."
-        if finding.kind == "parse_error"
-        else ""
-    )
-    return payload
+def _scan_sections(findings: list[Any]):
+    sections = assemble.build(findings)
+    for payload in sections.findings:
+        payload["fix"] = advice(payload["kind"]) or (
+            "Fix the syntax error before relying on this scan."
+            if payload["kind"] == "parse_error"
+            else ""
+        )
+    return sections
 
 
 def _severity_counts(findings: list[Any]) -> dict[str, int]:
-    counts = {"high": 0, "medium": 0, "low": 0}
-    for finding in findings:
-        if finding.severity in counts:
-            counts[finding.severity] += 1
-    counts["total"] = len(findings)
-    return counts
+    return assemble.severity_counts(findings)
 
 
 def _form_json(raw: str | None) -> Any:
@@ -653,13 +648,14 @@ def run_audit_job(
             ).to_dict()
         except (TypeError, ValueError):
             impact = None
+    sections = _scan_sections(findings)
     payload = {
         "live": True,
         "engine": "leaklens.python",
         "version": __version__,
-        "trust_score": score(findings),
-        "findings": [_finding_payload(finding) for finding in findings],
-        "counts": _severity_counts(findings),
+        "trust_score": sections.trust_score,
+        "findings": sections.findings,
+        "counts": sections.counts,
         "audit": audit_data,
         "impact": impact,
         "summary": {
@@ -736,13 +732,14 @@ def run_code_job(
 ) -> dict[str, Any]:
     started = time.perf_counter()
     findings = scan_source(source, name)
+    sections = _scan_sections(findings)
     payload = {
         "live": True,
         "engine": "leaklens.scanner.scan_source",
         "version": __version__,
-        "trust_score": score(findings),
-        "findings": [_finding_payload(finding) for finding in findings],
-        "counts": _severity_counts(findings),
+        "trust_score": sections.trust_score,
+        "findings": sections.findings,
+        "counts": sections.counts,
         "syntax_error": any(finding.kind == "parse_error" for finding in findings),
         "summary": {
             "file": name,

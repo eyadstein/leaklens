@@ -9,7 +9,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__, llm
+from . import __version__, assemble, llm
 from .audit import audit
 from .baseline import Baseline, BaselineError
 from .config import ConfigError, load_config
@@ -26,7 +26,6 @@ from .leakage import (
     temporal_overlap,
 )
 from .missingness import audit_missingness
-from .policy import apply_policy
 from .readers import read_dataset
 from .scanner import SKIP, scan_path
 
@@ -739,7 +738,14 @@ def main(argv=None) -> int:
         except ImportError as exc:
             p.error(str(exc))
 
-    outcome = apply_policy(fs, baseline=baseline, rules=cfg.suppressions)
+    sections = assemble.build(
+        fs,
+        baseline=baseline,
+        rules=cfg.suppressions,
+        baseline_path=baseline_path,
+        fail_on_new=fail_on_new,
+    )
+    outcome = sections.outcome
     fs = list(outcome.findings)
     active = list(outcome.active)
     policy_active = baseline is not None or bool(cfg.suppressions)
@@ -761,16 +767,14 @@ def main(argv=None) -> int:
             )
 
     rep = {
-        "trust_score": score(active),
+        "trust_score": sections.trust_score,
         **rep,
-        "findings": [outcome.finding_payload(f) for f in fs],
+        "findings": sections.findings,
     }
     if policy_active:
-        rep["policy"] = outcome.summary(
-            baseline_path=baseline_path, fail_on_new=fail_on_new
-        )
-        if outcome.diff is not None and outcome.diff.resolved:
-            rep["resolved"] = [entry.to_dict() for entry in outcome.diff.resolved]
+        rep["policy"] = sections.policy
+        if sections.resolved:
+            rep["resolved"] = sections.resolved
     ai_report = None
     if use_ai:
         try:
