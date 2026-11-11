@@ -30,6 +30,8 @@ def resolve_within(root: Path, value: str) -> Path:
     if not text:
         raise PathOutsideRoot("a path is required")
     # POSIX reads "..\outside.csv" as one filename; normalise before parsing.
+    # shortcut: a POSIX file whose name contains "\" is unreachable from the root;
+    # upgrade if a workspace ever has to expose such names.
     candidate = Path(text.replace("\\", "/"))
     if candidate.drive and not _same(candidate.drive, root.drive):
         raise PathOutsideRoot("path is outside the workspace root")
