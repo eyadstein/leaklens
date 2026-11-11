@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 import joblib
@@ -302,33 +304,33 @@ def scan_code(req: ScanReq):
     return payload
 
 
+@lru_cache(maxsize=8)
+def _load_model(path: Path):
+    """Load one operator-fixed model per resolved path; the cache survives requests."""
+    return joblib.load(path)
+
+
 @app.post("/predict")
 def predict(req: PredictReq):
-    p = Path(req.model_path)
-    # Reject absolute or traversal paths; the model must live under the deployer's
-    # models/ tree so callers cannot load arbitrary (e.g. attacker-supplied) jobs.
-    # WARNING: joblib.load() unpickles the file; it is pickle-based deserialization
-    # and can execute arbitrary code if the model file is malicious. Only place
-    # model artifacts you trust in ./models/. Path validation alone does not make
-    # an untrusted joblib file safe.
-    resolved = (Path.cwd() / p).resolve()
-    models_root = (Path.cwd() / "models").resolve()
-    if models_root not in resolved.parents:
+    # The model is fixed by the server, never selected by a request (G1 / M-S0).
+    # joblib.load() unpickles the file, so a request-selected path would let anyone
+    # who can write under ./models/ execute code in this process. Keep the fixed
+    # path operator-controlled, and only load artifacts the operator trusts.
+    configured = Path(os.environ.get("LEAKLENS_MODEL_PATH", "models/best.joblib"))
+    if Path(req.model_path) != configured:
         raise HTTPException(
-            422, f"model_path must be under ./models/ (got: {req.model_path})"
+            422, "model_path is fixed by the server (LEAKLENS_MODEL_PATH)"
         )
-    if not resolved.exists():
+    resolved = configured.resolve()
+    if not resolved.is_file():
         raise HTTPException(
             404, "model not found; run: leaklens data.csv --target T --arena"
         )
     try:
-        b = joblib.load(resolved)
+        b = _load_model(resolved)
     except Exception:  # noqa: BLE001 - re-wrap as HTTP 400 (fail closed)
-        # Corrupt/malicious pickle surfaces as EOFError, UnpicklingError
-        # (KeyError/ValueError inside) or OSError; treat any load failure
-        # as invalid model rather than leaking internal traces. pickle
-        # can execute arbitrary code, but the trusted ./models/ gate
-        # above already ensures only operator-placed artifacts reach here.
+        # Corrupt/malicious pickle surfaces as EOFError, UnpicklingError or OSError;
+        # treat any load failure as an invalid model rather than leaking internals.
         raise HTTPException(400, "invalid model file") from None
     df = pd.DataFrame(req.rows)
     miss = [c for c in b["features"] if c not in df.columns]

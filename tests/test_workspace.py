@@ -1015,7 +1015,8 @@ def test_info_reports_config_and_invalid_config_fails_closed(tmp_path):
 
     (tmp_path / ".leaklens.toml").write_text("unknown = true\n", encoding="utf-8")
     info = client.get("/api/info").json()["config"]
-    assert "unknown configuration keys" in info["error"]
+    assert info["error"] == "configuration could not be loaded"
+    assert "unknown" not in info["error"]
     for endpoint, body in (
         ("/api/scans", {"path": "."}),
         ("/api/datasets", {"path": "train.csv", "target": "y"}),

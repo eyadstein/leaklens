@@ -14,6 +14,7 @@ dataset audits go through the public API's ``run_audit_job``.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import threading
@@ -36,6 +37,7 @@ from .fingerprint import LOCATION, normalize_path
 from .fixes import advice
 from .intelligence import analyze_findings
 from .leakage import Finding, score
+from .paths import PathOutsideRoot, contained, resolve_within
 from .policy import PolicyOutcome, apply_policy
 from .public_api import GuardLimits, _threshold, run_audit_job, run_inspect_job
 from .report import render
@@ -44,6 +46,8 @@ from .sqlscan import SqlSettings, scan_sql_file
 from .sqlscan import available as sql_available
 from .suppression import SuppressionRule
 from .upload_guard import UploadRejected, available_formats, guard_upload
+
+_log = logging.getLogger(__name__)
 
 MAX_FILES = 5_000
 MAX_SOURCE_BYTES = 1_000_000
@@ -1096,18 +1100,10 @@ class WorkspaceScanManager:
         self._lock = threading.Lock()
 
     def resolve(self, value: str) -> Path:
-        text = (value or "").strip()
-        if not text:
-            raise WorkspacePathError("a path is required")
-        # POSIX reads "..\outside.csv" as one filename, so a Windows separator must be
-        # normalized before parsing or the traversal never reaches the containment check.
-        # shortcut: a POSIX file whose name contains "\" is unreachable from the workspace.
-        candidate = Path(text.replace("\\", "/"))
-        target = candidate if candidate.is_absolute() else self.root / candidate
-        target = target.resolve()
-        if target != self.root and not target.is_relative_to(self.root):
-            raise WorkspacePathError("path is outside the workspace root")
-        return target
+        try:
+            return resolve_within(self.root, value)
+        except PathOutsideRoot as exc:
+            raise WorkspacePathError(str(exc)) from None
 
     def _policy(
         self, value: str | None
@@ -1126,7 +1122,7 @@ class WorkspaceScanManager:
             label = _relative(path, self.root)
         else:
             return None, cfg.suppressions, None
-        if path != self.root and not path.is_relative_to(self.root):
+        if path != self.root and not contained(self.root, path):
             raise WorkspacePathError("baseline is outside the workspace root")
         try:
             baseline = Baseline.load(path)
@@ -1671,11 +1667,12 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
                 "error": None,
             }
         except ConfigError as exc:
+            _log.warning("workspace config could not be loaded: %r", exc)
             config_info = {
                 "path": None,
                 "baseline": None,
                 "suppressions": 0,
-                "error": str(exc),
+                "error": "configuration could not be loaded",
             }
         return {
             "version": __version__,
