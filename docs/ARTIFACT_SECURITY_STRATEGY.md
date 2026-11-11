@@ -189,6 +189,11 @@ Fixed automatically by the remediation:
 Still open at `9b301bd` (14 `py/path-injection`, 2 `py/stack-trace-exposure`). Each is
 dispositioned below from its source-to-sink path; none is dismissed or suppressed.
 
+Re-read after Phase 14 at `fe75897`: **14 `py/path-injection` alerts are open, 0 alerts are
+dismissed**, and both `py/stack-trace-exposure` alerts (19/20) are closed by the G5 fix. The
+remaining sinks are `workspace.py:232,1149,1151,1301,1303,1310,1926,1928,1930`,
+`scanner.py:882,886`, `baseline.py:236` and `paths.py:41`.
+
 | Alert | Sink | Input class | Protection in the path | Disposition |
 |---:|---|---|---|---|
 | 4, 5 | `scanner.py:882` `is_file`, `:886` `rglob` | Operator (CLI path) or a workspace target already resolved by `resolve_within` | `scan_path` is a public API whose contract is "scan what the operator names"; the workspace never passes a raw request path | Documented risk: operator-controlled by design, no request-only path reaches it |
