@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .availability import EngineUnavailable
 from .evidence import Evidence
 from .leakage import Finding
 
@@ -40,7 +41,7 @@ MAX_STATEMENTS = 20
 MAX_PROJECTIONS = 200
 
 
-class SqlUnavailable(ImportError):
+class SqlUnavailable(EngineUnavailable):
     """SQLGlot is not installed; SQL analysis cannot run."""
 
 

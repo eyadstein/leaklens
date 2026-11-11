@@ -19,8 +19,23 @@ from pathlib import Path
 from .fixes import FIXES
 
 SURFACES = frozenset({"dataset", "split", "code", "notebook", "image"})
+MODALITIES = frozenset({"tabular", "code", "sql", "image", "text", "artifact"})
 SEVERITIES = frozenset({"high", "medium", "low"})
+EXTRAS = frozenset({"images", "sql"})
 INTRODUCED = "0.13.0"
+
+# Historical diagnostic kinds score nothing; every other shipped kind is scored.
+# New kinds must pass scored=False explicitly until a labelled benchmark graduates
+# them (ADR-006).
+_DIAGNOSTIC_KINDS = frozenset({"distribution_shift", "sql_unresolved_column"})
+
+_SURFACE_MODALITIES = {
+    "dataset": ("tabular",),
+    "split": ("tabular",),
+    "code": ("code",),
+    "notebook": ("code",),
+    "image": ("image",),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +48,11 @@ class Detector:
     no_bench_reason: str | None
     docs_anchor: str
     introduced: str
+    scored: bool = False
+    requires: str | None = None
+    modalities: frozenset[str] = frozenset()
 
-    def to_dict(self) -> dict[str, str | None]:
+    def to_dict(self) -> dict[str, object]:
         return {
             "kind": self.kind,
             "surface": self.surface,
@@ -44,6 +62,9 @@ class Detector:
             "no_bench_reason": self.no_bench_reason,
             "docs_anchor": self.docs_anchor,
             "introduced": self.introduced,
+            "scored": self.scored,
+            "requires": self.requires,
+            "modalities": sorted(self.modalities),
         }
 
 
@@ -54,6 +75,10 @@ def _entry(
     advice: str,
     benchmark: str | None = None,
     no_bench_reason: str | None = None,
+    *,
+    scored: bool | None = None,
+    requires: str | None = None,
+    modalities: tuple[str, ...] | None = None,
 ) -> Detector:
     return Detector(
         kind=kind,
@@ -64,6 +89,9 @@ def _entry(
         no_bench_reason=no_bench_reason,
         docs_anchor=f"#{kind}",
         introduced=INTRODUCED,
+        scored=kind not in _DIAGNOSTIC_KINDS if scored is None else scored,
+        requires=requires,
+        modalities=frozenset(modalities or _SURFACE_MODALITIES[surface]),
     )
 
 
@@ -161,6 +189,7 @@ DETECTORS: tuple[Detector, ...] = (
         "image",
         "high",
         "image_overlap",
+        requires="images",
         no_bench_reason=(
             "Requires Pillow and image fixtures; covered by tests/test_images.py, not "
             "the numeric data benchmark."
@@ -182,6 +211,8 @@ DETECTORS: tuple[Detector, ...] = (
         "high",
         "sql_target_as_feature",
         "target expression in projection",
+        requires="sql",
+        modalities=("sql",),
     ),
     _entry(
         "sql_split_predicate_missing",
@@ -189,6 +220,8 @@ DETECTORS: tuple[Detector, ...] = (
         "low",
         "sql_split_predicate_missing",
         "split predicate missing",
+        requires="sql",
+        modalities=("sql",),
     ),
     _entry(
         "sql_unresolved_column",
@@ -196,6 +229,8 @@ DETECTORS: tuple[Detector, ...] = (
         "low",
         "sql_unresolved_column",
         "ambiguous join is a diagnostic",
+        requires="sql",
+        modalities=("sql",),
     ),
     _entry(
         "sql_future_window",
@@ -203,6 +238,8 @@ DETECTORS: tuple[Detector, ...] = (
         "medium",
         "sql_future_window",
         "window reads following rows",
+        requires="sql",
+        modalities=("sql",),
     ),
     _entry(
         "notebook_out_of_order_execution",
@@ -394,6 +431,44 @@ DETECTORS: tuple[Detector, ...] = (
 BY_KIND: dict[str, Detector] = {entry.kind: entry for entry in DETECTORS}
 
 
+@dataclass(frozen=True, slots=True)
+class Engine:
+    """One shipped engine id and the finding kinds it can emit (ADR-005)."""
+
+    id: str
+    surface: str
+    requires: str | None
+    kinds: frozenset[str]
+
+
+def _engine(
+    engine_id: str, surface: str, surfaces: frozenset[str], requires: str | None = None
+) -> Engine:
+    return Engine(
+        engine_id,
+        surface,
+        requires,
+        frozenset(entry.kind for entry in DETECTORS if entry.surface in surfaces),
+    )
+
+
+# Frozen public ids: literals, never derived from __module__ (ADR-005).
+ENGINES: dict[str, Engine] = {
+    "leaklens.python": _engine(
+        "leaklens.python", "dataset", frozenset({"dataset", "split"})
+    ),
+    "leaklens.scanner.scan_source": _engine(
+        "leaklens.scanner.scan_source", "code", frozenset({"code", "notebook"})
+    ),
+    "leaklens.ai.experimental": Engine(
+        "leaklens.ai.experimental", "dataset", None, frozenset()
+    ),
+    "leaklens.intelligence.deterministic": Engine(
+        "leaklens.intelligence.deterministic", "dataset", None, frozenset()
+    ),
+}
+
+
 def require_kind(kind: str) -> Detector:
     """Return the manifest entry, or raise ``KeyError`` for an unknown kind."""
     return BY_KIND[kind]
@@ -434,6 +509,26 @@ def validate_manifest() -> None:
             raise ValueError(f"{entry.kind}: unexpected documentation anchor")
         if not entry.introduced:
             raise ValueError(f"{entry.kind}: missing introduced version")
+        if type(entry.scored) is not bool:
+            raise ValueError(f"{entry.kind}: scored must be a bool")
+        if entry.kind in _DIAGNOSTIC_KINDS and entry.scored:
+            raise ValueError(f"{entry.kind}: diagnostic kinds are not scored")
+        if not entry.modalities:
+            raise ValueError(f"{entry.kind}: needs at least one modality")
+        if not entry.modalities <= MODALITIES:
+            raise ValueError(
+                f"{entry.kind}: unknown modalities {sorted(entry.modalities - MODALITIES)}"
+            )
+        if entry.requires is not None and entry.requires not in EXTRAS:
+            raise ValueError(f"{entry.kind}: unknown extra {entry.requires!r}")
+    for engine_id, engine in ENGINES.items():
+        if not engine_id or engine.id != engine_id:
+            raise ValueError(f"engine registry key/id mismatch: {engine_id!r}")
+        unknown = engine.kinds - set(BY_KIND)
+        if unknown:
+            raise ValueError(f"{engine_id}: unregistered kinds {sorted(unknown)}")
+        if engine.requires is not None and engine.requires not in EXTRAS:
+            raise ValueError(f"{engine_id}: unknown extra {engine.requires!r}")
 
 
 def render_docs() -> str:
@@ -445,12 +540,13 @@ def render_docs() -> str:
         "",
         f"LeakLens emits {len(DETECTORS)} deterministic finding kinds. Each entry "
         "records the detector surface, default severity, advice key, benchmark "
-        "coverage (or why no benchmark case exists), documentation anchor and the "
-        "release in which the kind was first tracked. The contract test proves the "
-        "manifest matches the emitters.",
+        "coverage (or why no benchmark case exists), documentation anchor, the "
+        "release in which the kind was first tracked, whether it participates in the "
+        "trust score, the optional extra it needs and the data modalities it reads. "
+        "The contract test proves the manifest matches the emitters.",
         "",
-        "| Kind | Surface | Default severity | Advice key | Benchmark coverage | Introduced |",
-        "| --- | --- | --- | --- | --- | --- |",
+        "| Kind | Surface | Default severity | Scored | Requires | Modalities | Advice key | Benchmark coverage | Introduced |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for entry in DETECTORS:
         if entry.benchmark:
@@ -459,7 +555,9 @@ def render_docs() -> str:
             coverage = f"no benchmark case - {entry.no_bench_reason}"
         lines.append(
             f"| [`{entry.kind}`](#{entry.kind}) | {entry.surface} | "
-            f"{entry.severity} | `{entry.advice}` | {coverage} | {entry.introduced} |"
+            f"{entry.severity} | {'yes' if entry.scored else 'no'} | "
+            f"{entry.requires or '-'} | {', '.join(sorted(entry.modalities))} | "
+            f"`{entry.advice}` | {coverage} | {entry.introduced} |"
         )
     lines += ["", "## Fingerprint canonical form", ""]
     lines += [
@@ -483,11 +581,15 @@ def render_docs() -> str:
         "",
     ]
     for entry in DETECTORS:
+        requires = f"`{entry.requires}`" if entry.requires else "nothing"
         lines += [
             f"### {entry.kind}",
             "",
             f"- Surface: `{entry.surface}`",
             f"- Default severity: `{entry.severity}`",
+            f"- Scored: {'yes' if entry.scored else 'no'}",
+            f"- Requires: {requires}",
+            f"- Modalities: {', '.join(sorted(entry.modalities))}",
             f"- Advice key: `{entry.advice}`",
         ]
         if entry.benchmark:

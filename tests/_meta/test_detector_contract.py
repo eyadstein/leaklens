@@ -109,6 +109,28 @@ def test_manifest_entries_are_structurally_valid():
         assert entry.docs_anchor == f"#{entry.kind}"
         assert entry.introduced
         assert bool(entry.benchmark) ^ bool(entry.no_bench_reason)
+        assert isinstance(entry.scored, bool)
+        assert entry.modalities <= manifest.MODALITIES
+        assert entry.requires in (None, "images", "sql")
+
+
+def test_diagnostic_kinds_are_not_scored():
+    assert {e.kind for e in manifest.DETECTORS if not e.scored} == {
+        "distribution_shift",
+        "sql_unresolved_column",
+    }
+
+
+def test_optional_kinds_declare_their_extra():
+    assert manifest.BY_KIND["image_overlap"].requires == "images"
+    for kind in (
+        "sql_target_as_feature",
+        "sql_split_predicate_missing",
+        "sql_unresolved_column",
+        "sql_future_window",
+    ):
+        assert manifest.BY_KIND[kind].requires == "sql"
+        assert manifest.BY_KIND[kind].modalities == {"sql"}
 
 
 def test_manifest_benchmark_cases_exist():

@@ -4,20 +4,25 @@ from pathlib import Path
 
 import numpy as np
 
+from .availability import EngineUnavailable, probe
 from .evidence import Evidence
 from .leakage import Finding
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp", ".tif", ".tiff"}
 
 
+class ImageUnavailable(EngineUnavailable):
+    """Pillow is not installed; image checks cannot run."""
+
+
 def _pil():
-    try:
-        from PIL import Image
-    except ImportError:
-        raise ImportError(
-            'image checks need Pillow: pip install "leaklens-ml[images]"'
-        ) from None
-    return Image
+    return probe(
+        "PIL.Image",
+        "images",
+        purpose="image checks",
+        label="Pillow",
+        error=ImageUnavailable,
+    )
 
 
 def dhash(path, size=8) -> int:
