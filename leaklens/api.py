@@ -212,7 +212,7 @@ async def audit_csv(
     if target not in df.columns:
         raise HTTPException(422, f"target '{target}' not in columns")
     fs = scan(df, target, threshold)
-    missing = audit_missingness(df, target)
+    missing = audit_missingness(df, target, test=test_df)
     fs += missing.findings
     drift_report = None
     if drift:

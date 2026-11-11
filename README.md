@@ -456,6 +456,17 @@ Endpoints: `GET /health`, `POST /audit`, `POST /scan`, `POST /predict`.
 
 > `POST /predict` never accepts a model path from the request. The server loads one operator-chosen artifact at startup: `LEAKLENS_MODEL_PATH` (default `models/best.joblib`). Any other `model_path` in the body is rejected with 422 before the filesystem is touched. `joblib` uses pickle, which can execute arbitrary code while loading; only point the server at a model you built or otherwise trust, and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
 
+To serve a different artifact, pick it on the server instead of in the request:
+
+```sh
+LEAKLENS_MODEL_PATH=models/churn-v2.joblib uvicorn leaklens.api:app --port 8000
+curl -s localhost:8000/predict -H 'content-type: application/json' \
+  -d '{"rows": [{"tenure": 12, "plan": "pro"}]}'
+```
+
+The response reports the model family (`"model"`) and task, never the filesystem path.
+
+
 ### Upload and archive limits
 
 The API and the Streamlit CSV uploaders are meant for local or trusted use and enforce the same dataset limits:

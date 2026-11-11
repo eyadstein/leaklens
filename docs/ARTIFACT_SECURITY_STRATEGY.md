@@ -186,17 +186,40 @@ Fixed automatically by the remediation:
 | 7 | `py/path-injection` | `workspace.py:1107` (old `WorkspaceManager.resolve`) |
 | 18 | `py/stack-trace-exposure` | `workspace.py:1680` (old `/api/config` body) |
 
-Still open (14 `py/path-injection`, 2 `py/stack-trace-exposure`):
-`paths.py:39` (new, the shared sanitizer's own `resolve()` call), `baseline.py:236`,
-`scanner.py:882,886`, `workspace.py:232,1148,1150 (x2),1300,1302,1309,1925,1927,1929`, and
-`workspace.py:1709,1713`. Alert 7's downstream readers remain because CodeQL does not model
-`resolve()` + containment as a sanitizer; `paths.py:39` is the same unmodeled pattern, now with one
-home and regression tests instead of ten scattered call sites. The two stack-trace alerts (G5) map
-to a handler whose only exception text is a fixed `unknown {kind} session` string.
+Still open at `9b301bd` (14 `py/path-injection`, 2 `py/stack-trace-exposure`). Each is
+dispositioned below from its source-to-sink path; none is dismissed or suppressed.
 
-`py/path-injection` may still be reported for `baseline.py`/`scanner.py` because CodeQL follows
-operator-supplied CLI/config paths into file reads. Those are not request-controlled in this threat
-model, and no suppression or query filter was added.
+| Alert | Sink | Input class | Protection in the path | Disposition |
+|---:|---|---|---|---|
+| 4, 5 | `scanner.py:882` `is_file`, `:886` `rglob` | Operator (CLI path) or a workspace target already resolved by `resolve_within` | `scan_path` is a public API whose contract is "scan what the operator names"; the workspace never passes a raw request path | Documented risk: operator-controlled by design, no request-only path reaches it |
+| 6 | `workspace.py:232` `resolve()` in `_relative` | Engine-produced result path | Values come from scan/audit results produced under `manager.root`; the `ValueError` fallback returns `as_posix()` | Documented: not request-controlled; unmodeled sanitizer |
+| 8, 9, 10 | `workspace.py:1148` `exists`, `:1150` `is_file`/`is_dir` | Request path | `manager.resolve` → `paths.resolve_within` (rejects traversal, absolute escapes, foreign drive/anchor, symlink escape) | Unmodeled sanitizer; `tests/test_paths.py`, `tests/test_workspace.py` |
+| 11, 12, 13 | `workspace.py:1925` `is_file`, `:1927` `stat`, `:1929` `read_text` (`/api/source`) | Request path | `manager.resolve` before every sink; preview capped by `MAX_SOURCE_BYTES` | Unmodeled sanitizer; containment tests |
+| 14, 15, 16 | `workspace.py:1300` `is_file`, `:1302` `stat`, `:1309` `read_bytes` | Request path | `open_dataset` → `manager.resolve`, then the upload guard and size limit | Unmodeled sanitizer; containment + upload-limit tests |
+| 17 | `baseline.py:236` `read_text` | Operator (`--baseline`, `[baseline].path`) | Operator chooses the file; reading it is the feature | Documented risk: not request-controlled |
+| 19, 20 | `workspace.py:1709`, `:1713` compare responses | Request-triggered, exception provenance | The `except` branch used to echo `{exc}`; it now returns a fixed reason and logs the detail | **Remediated in the Phase 14 audit** (see below) |
+| 21 | `paths.py:41` `resolve()` inside the sanitizer | Request path | Drive/anchor compared *before* `resolve()`; result containment-checked after | Unmodeled sanitizer: this is the check itself; `tests/test_paths.py` |
+
+Alert 7's downstream readers remain because CodeQL does not model `resolve()` + containment as a
+sanitizer; `paths.py:41` is the same unmodeled pattern, now with one home and regression tests
+instead of ten scattered call sites. `py/path-injection` may also be reported for
+`baseline.py`/`scanner.py` because CodeQL follows operator-supplied CLI/config paths into file reads.
+Those are not request-controlled in this threat model, and no suppression or query filter was added.
+
+### Phase 14 audit additions (2026-11-11)
+
+- **G5 (alerts 19/20) — fixed.** `_compare_sessions` no longer interpolates exception text into the
+  response; it returns `the saved findings cannot be compared` and logs the exception server-side,
+  matching the G4 rule. `tests/test_response_parity.py` and `tests/test_workspace.py` cover the
+  compare responses.
+- **One containment helper.** `config._output_path` used a second `relative_to` containment check;
+  it now calls `paths.contained`, so `paths.py` is the only containment implementation.
+- **Complete-response parity.** `public_api.run_audit_job` did not run the missingness audit while
+  the CLI and `/audit` did, so the same dataset produced different findings in the workspace.
+  It now runs `audit_missingness` with the same inputs and returns the same section.
+  `tests/test_response_parity.py` proves CLI, `/audit`, public API and workspace agree on finding
+  identity, trust, counts and policy effects.
+
 
 ---
 

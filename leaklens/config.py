@@ -15,6 +15,7 @@ from typing import Any
 from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
 from .drift import DriftSettings
 from .missingness import DEFAULT_SETTINGS, MissingnessSettings
+from .paths import contained
 from .sqlscan import DEFAULT_SETTINGS as DEFAULT_SQL_SETTINGS
 from .sqlscan import SUPPORTED_DIALECTS, SqlSettings
 from .suppression import SuppressionError, SuppressionRule, parse_rules
@@ -163,12 +164,10 @@ def _output_path(data: dict, key: str, path: Path, base: Path) -> Path:
             f"{path}: {key} must be relative to the configuration directory"
         )
     resolved = (base / candidate).resolve()
-    try:
-        resolved.relative_to(base)
-    except ValueError:
+    if not contained(base, resolved):
         raise ConfigError(
             f"{path}: {key} must stay inside the project directory {base}"
-        ) from None
+        )
     if not resolved.parent.is_dir():
         raise ConfigError(
             f"{path}: {key} parent directory does not exist: {resolved.parent}"

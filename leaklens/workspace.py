@@ -951,11 +951,12 @@ def _compare_sessions(
             ],
         )
     except (BaselineError, KeyError, TypeError) as exc:
+        _log.warning("saved findings cannot be compared: %r", exc)
         return {
             **base,
             "available": False,
             "compatible": False,
-            "reason": f"the saved findings cannot be compared: {exc}",
+            "reason": "the saved findings cannot be compared",
         }
 
     previous_complete = previous_state == "done" and not previous_errors

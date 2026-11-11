@@ -62,6 +62,7 @@ from .leakage import (
     split_overlap,
     temporal_overlap,
 )
+from .missingness import audit_missingness
 from .ratelimit import SlidingWindowLimiter
 from .report import render
 from .scanner import scan_source
@@ -640,6 +641,8 @@ def run_audit_job(
         ) from None
 
     audit_data = audit(df, target)
+    missing = audit_missingness(df, target, test=test_df, group=group_col)
+    findings += missing.findings
     impact = None
     if test_df is not None:
         try:
@@ -657,6 +660,7 @@ def run_audit_job(
         "findings": sections.findings,
         "counts": sections.counts,
         "audit": audit_data,
+        "missingness": missing.to_dict(),
         "impact": impact,
         "summary": {
             "file": upload.filename,
