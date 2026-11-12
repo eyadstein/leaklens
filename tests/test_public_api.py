@@ -1023,7 +1023,7 @@ def test_ai_is_opt_in_for_dataset_audits(client):
     ai = payload["ai"]
 
     assert payload["ai_unavailable"] is False
-    assert ai["schema_version"] == "1.1"
+    assert ai["schema_version"] == "1.2"
     assert ai["engine"] == "leaklens.ai.experimental"
     assert ai["scope"] == "dataset"
     assert ai["target"] == "y"

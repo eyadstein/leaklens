@@ -138,7 +138,7 @@ def test_legacy_spans_and_payloads_stay_valid():
 
     assert span.graph_node_id is None
     assert span.to_dict()["graph_node_id"] is None
-    assert SCHEMA_VERSION == "1.1"
+    assert SCHEMA_VERSION == "1.2"
     assert EvidenceSpan(**span.to_dict()) == span
 
     with pytest.raises(ValueError, match="graph_node_id"):

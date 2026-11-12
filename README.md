@@ -340,6 +340,28 @@ leaklens train.csv --target label --test test.csv --drift --json
 
 Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls: [`docs/DRIFT_BENCHMARK.md`](docs/DRIFT_BENCHMARK.md).
 
+## Pipeline and MLOps intelligence (opt-in)
+
+`--pipeline` reads the metadata a training pipeline leaves in the repository (DVC stages and locks, serialized DAG JSON, notebook cell order, dependency declarations) and asks whether the evaluation is circular. It is **off by default**, **read-only**, and needs no orchestrator: nothing is executed and no service is contacted. `pip install "leaklens-ml[yaml]"` adds `safe_load`-only YAML parsing for DVC files; without it, directory audits skip DVC metadata and naming a DVC file raises an actionable `PipelineUnavailable`.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `pipeline_split_overlap` | high | train and eval read the same data artifact, or eval reads a data artifact train produced |
+| `pipeline_unresolved_lineage` | low | a declared dependency has no producing stage and no file |
+| `pipeline_param_drift` | low | `dvc.lock` and the current parameter file disagree |
+| `pipeline_missing_digest` | low | a locked output has no content digest |
+| `pipeline_unpinned_dependency` | low | a requirements entry has no exact pin |
+| `no_random_state` | low | a training stage declares model parameters but no seed |
+
+Every pipeline finding is `diagnostic: true` and `scored: false`: it never changes the trust score, the exit code or an existing finding. Only a confirmed lineage path reaches `high`. Edge and stage output is deterministic and sorted.
+
+```sh
+leaklens --scan . --pipeline
+leaklens --scan pipelines/dvc.yaml --pipeline --json
+```
+
+Rules, formats and limits: [`docs/PIPELINE.md`](docs/PIPELINE.md); measured controls: [`docs/PIPELINE_BENCHMARK.md`](docs/PIPELINE_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
 `leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
@@ -454,7 +476,18 @@ streamlit run leaklens/ui.py
 
 Endpoints: `GET /health`, `POST /audit`, `POST /scan`, `POST /predict`.
 
-> `POST /predict` loads model files with `joblib` only from `./models/` below the API's working directory. Absolute paths and traversal outside that directory are rejected. `joblib` uses pickle, which can execute arbitrary code while loading; only load models you trust and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
+> `POST /predict` never accepts a model path from the request. The server loads one operator-chosen artifact at startup: `LEAKLENS_MODEL_PATH` (default `models/best.joblib`). Any other `model_path` in the body is rejected with 422 before the filesystem is touched. `joblib` uses pickle, which can execute arbitrary code while loading; only point the server at a model you built or otherwise trust, and do not expose the API to untrusted users or networks. See [SECURITY.md](SECURITY.md).
+
+To serve a different artifact, pick it on the server instead of in the request:
+
+```sh
+LEAKLENS_MODEL_PATH=models/churn-v2.joblib uvicorn leaklens.api:app --port 8000
+curl -s localhost:8000/predict -H 'content-type: application/json' \
+  -d '{"rows": [{"tenure": 12, "plan": "pro"}]}'
+```
+
+The response reports the model family (`"model"`) and task, never the filesystem path.
+
 
 ### Upload and archive limits
 
@@ -599,6 +632,15 @@ flowchart LR
   F --> G[FastAPI /predict]
   D --> H[CLI / Streamlit / GitHub Action]
 ```
+
+The long-term design (multi-modal engines, shared evidence core, phase plan) is documented
+separately and is **not implemented**: [FUTURE_VISION.md](docs/FUTURE_VISION.md),
+[FUTURE_ARCHITECTURE.md](docs/FUTURE_ARCHITECTURE.md),
+[AI_ML_EXPANSION_ROADMAP.md](docs/AI_ML_EXPANSION_ROADMAP.md),
+[ARCHITECTURE_DECISIONS.md](docs/ARCHITECTURE_DECISIONS.md), with supporting research in
+[AI_ML_ECOSYSTEM_RESEARCH.md](docs/AI_ML_ECOSYSTEM_RESEARCH.md),
+[ARTIFACT_SECURITY_STRATEGY.md](docs/ARTIFACT_SECURITY_STRATEGY.md) and
+[WORKSPACE_DESIGN_VISION.md](docs/WORKSPACE_DESIGN_VISION.md).
 
 ## How the Trust Score Is Calculated
 

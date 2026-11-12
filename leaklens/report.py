@@ -333,7 +333,7 @@ def _ai_section(data: dict) -> str:
     """Render the optional experimental AI layer with every value escaped."""
     if not data:
         return ""
-    from .ai.schemas import confidence_label
+    from .ai.schemas import confidence_label, sufficiency_label
 
     hypotheses = data.get("hypotheses", [])
     plan = data.get("plan", {}) or {}
@@ -341,6 +341,7 @@ def _ai_section(data: dict) -> str:
     models = data.get("models", [])
     limitations = data.get("limitations", [])
     deterministic_score = data.get("deterministic_trust_score")
+    selection = data.get("selection") or {}
 
     sections = [
         "<h2>AI intelligence (experimental)</h2>",
@@ -360,6 +361,43 @@ def _ai_section(data: dict) -> str:
         f"{html.escape(str(data.get('deterministic_findings', 0)))}"
         "</p></div>"
     )
+
+    if selection:
+        applied = bool(selection.get("applied"))
+        threshold = float(selection.get("threshold", 0) or 0)
+        decision = (
+            f"applied at p &ge; {threshold:.2f}"
+            if applied
+            else (
+                f"not applied; unselective output at p &ge; {threshold:.2f} is kept "
+                "because no candidate met the acceptance rule"
+            )
+        )
+        interval = selection.get("risk_interval") or (0.0, 1.0)
+        selection_limitations = "".join(
+            f"<li>{html.escape(str(value))}</li>"
+            for value in selection.get("limitations", [])
+        )
+        sections.append(
+            '<div class="card"><h3>Selective reporting</h3>'
+            f"<p><b>Decision:</b> {decision}. "
+            f"<b>Coverage:</b> "
+            f"{float(selection.get('coverage', 0) or 0):.1%} of emitted hypotheses "
+            f"({html.escape(str(selection.get('accepted', 0)))} of "
+            f"{html.escape(str(selection.get('emitted', 0)))}) · "
+            f"{float(selection.get('unit_coverage', 0) or 0):.1%} of all development "
+            "units.</p>"
+            f"<p><b>Empirical selective risk:</b> "
+            f"{float(selection.get('selective_risk', 0) or 0):.3f} "
+            "(cluster-bootstrap 95% interval "
+            f"{float(interval[0]):.3f}-{float(interval[1]):.3f}) · "
+            "<b>Unselective error rate:</b> "
+            f"{float(selection.get('unselective_error_rate', 0) or 0):.3f}. "
+            "This is a measured diagnostic on the authored development corpus, not "
+            "an independent estimate.</p>"
+            f"<p>{html.escape(str(selection.get('protocol', '')))}</p>"
+            f"<ul>{selection_limitations}</ul></div>"
+        )
 
     if plan.get("summary"):
         sections.append(
@@ -452,10 +490,12 @@ def _ai_section(data: dict) -> str:
             concept = html.escape(str(item.get("concept", "")))
             confidence = html.escape(str(item.get("confidence", "")))
             basis = html.escape(confidence_label(item.get("confidence_basis")))
+            sufficiency = html.escape(sufficiency_label(item.get("sufficiency")))
             severity = html.escape(str(item.get("severity_hint", "")))
             location = html.escape(str(item.get("location", "")))
             corroborates = item.get("corroborates")
             explanation = html.escape(str(item.get("explanation", "")))
+            ranking_only = item.get("sufficiency") == "insufficient"
             evidence = "".join(
                 f"<li><code>{html.escape(str(span.get('kind', '')))}</code> "
                 f"at {html.escape(str(span.get('location', '')))}: "
@@ -470,11 +510,19 @@ def _ai_section(data: dict) -> str:
                 f'<div class="card"><h3>{title}</h3>'
                 f"<p><b>Concept:</b> {concept} · "
                 f"<b>Confidence ({basis}): {confidence}</b> · "
+                f"<b>Sufficiency:</b> {sufficiency} · "
                 f"<b>Severity hint:</b> {severity} · <b>Location:</b> {location}</p>"
                 + (
                     f"<p><b>Corroborates deterministic finding:</b> "
                     f"{html.escape(str(corroborates))}</p>"
                     if corroborates
+                    else ""
+                )
+                + (
+                    '<p class="sub"><b>Ranking only:</b> the calibration data is '
+                    "insufficient for a decision on this unit; the hypothesis is "
+                    "kept for transparency and cannot raise severity.</p>"
+                    if ranking_only
                     else ""
                 )
                 + f"<p>{explanation}</p>"

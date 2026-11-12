@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .availability import EngineUnavailable
 from .evidence import Evidence
 from .leakage import Finding
 
@@ -40,7 +41,7 @@ MAX_STATEMENTS = 20
 MAX_PROJECTIONS = 200
 
 
-class SqlUnavailable(ImportError):
+class SqlUnavailable(EngineUnavailable):
     """SQLGlot is not installed; SQL analysis cannot run."""
 
 
@@ -248,6 +249,19 @@ def _sql_finding(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SqlAnalysis:
+    """Findings plus the column map resolved in the same parse (Phase 14 M2).
+
+    ``column_map`` maps each output alias to the sorted source columns its
+    expression derives from. It is built once here so downstream lineage (the
+    pipeline engine) never re-parses the query.
+    """
+
+    findings: tuple[Finding, ...]
+    column_map: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
 def scan_sql(
     text: str,
     label: str = "<sql>",
@@ -258,6 +272,32 @@ def scan_sql(
     split_column: str | None = None,
 ) -> list[Finding]:
     """Analyze SQL text for target-derived features and temporal leakage.
+
+    Kept as the findings-only entry point; ``analyze_sql`` also exposes the
+    resolved column map.
+    """
+    return list(
+        analyze_sql(
+            text,
+            label,
+            dialect=dialect,
+            target=target,
+            schema=schema,
+            split_column=split_column,
+        ).findings
+    )
+
+
+def analyze_sql(
+    text: str,
+    label: str = "<sql>",
+    *,
+    dialect: str = "ansi",
+    target: str | None = None,
+    schema: Any = None,
+    split_column: str | None = None,
+) -> SqlAnalysis:
+    """Analyze SQL text; return findings and the resolved output column map.
 
     ``schema`` is an optional ``{table: {column: type}}`` map. Without it,
     ``SELECT *`` and ambiguous joins stay unresolved and are reported as a low
@@ -272,27 +312,30 @@ def scan_sql(
         statements = sqlglot.parse(text, read=read)
     except Exception as exc:  # noqa: BLE001 - any parser error is a syntax finding
         reason = " ".join(str(exc).split())[:300]
-        return [
-            Finding(
-                "low",
-                "parse_error",
-                _location(label, 1),
-                f"SQL could not be parsed as {dialect}: {reason}",
-                evidence=(
-                    Evidence(
-                        source="code",
-                        kind="parse",
-                        description="the SQL parser rejected this input",
-                        observed=f"dialect={dialect}",
-                        expected="valid SQL for the declared dialect",
+        return SqlAnalysis(
+            (
+                Finding(
+                    "low",
+                    "parse_error",
+                    _location(label, 1),
+                    f"SQL could not be parsed as {dialect}: {reason}",
+                    evidence=(
+                        Evidence(
+                            source="code",
+                            kind="parse",
+                            description="the SQL parser rejected this input",
+                            observed=f"dialect={dialect}",
+                            expected="valid SQL for the declared dialect",
+                        ),
                     ),
+                    stable_key=f"parse:{dialect}",
                 ),
-                stable_key=f"parse:{dialect}",
             )
-        ]
+        )
 
     lines = _statement_lines(text, read)
     findings: list[Finding] = []
+    column_map: dict[str, tuple[str, ...]] = {}
     unresolved_count = 0
     unresolved_line = 1
     analysed = 0
@@ -352,25 +395,33 @@ def scan_sql(
                 # source; fail safe instead of guessing.
                 mark_unresolved(line)
                 continue
-            if not target_cf or not _references_target(expression, target_cf, exp):
-                continue
+            relevant = bool(target_cf) and _references_target(
+                expression, target_cf, exp
+            )
             if isinstance(expression, exp.Column):
-                # A bare target projection (including a rename) is not leakage.
+                # A bare target projection (including a rename) is not leakage;
+                # it is still useful identity lineage for downstream consumers.
+                if alias:
+                    column_map[alias] = (expression.name.casefold(),)
                 continue
             if not alias:
                 # No stable output name: lineage cannot be requested safely.
-                mark_unresolved(line)
+                if relevant:
+                    mark_unresolved(line)
                 continue
             try:
                 node = lineage(alias, statement_sql, schema=schema_map, dialect=read)
             except Exception:  # noqa: BLE001 - unresolved lineage is a diagnostic
-                mark_unresolved(line)
+                if relevant:
+                    mark_unresolved(line)
                 continue
             leaves, unresolved = _leaf_state(node)
             if unresolved:
-                mark_unresolved(line)
+                if relevant:
+                    mark_unresolved(line)
                 continue
-            if target_cf in leaves:
+            column_map[alias] = tuple(sorted(leaves))
+            if relevant and target_cf in leaves:
                 findings.append(
                     _sql_finding(
                         "high",
@@ -508,7 +559,7 @@ def scan_sql(
     unique: dict[str, Finding] = {}
     for finding in findings:
         unique.setdefault(finding.fingerprint, finding)
-    return list(unique.values())
+    return SqlAnalysis(tuple(unique.values()), dict(sorted(column_map.items())))
 
 
 def scan_sql_file(path, *, settings: SqlSettings | None = None, target=None):

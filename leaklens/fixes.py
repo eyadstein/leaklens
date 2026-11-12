@@ -13,7 +13,7 @@ FIXES = {
     "temporal_leakage": "Split by time: train on earlier data and test on later data.",
     "group_overlap": "Split by entity with GroupShuffleSplit or GroupKFold so no entity appears in both splits.",
     "group_leakage_risk": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
-    "no_random_state": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it. For torch.utils.data.random_split(), pass generator=torch.Generator().manual_seed(<int>) (or call torch.manual_seed(<int>) first).",
+    "no_random_state": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
     "target_encode_before_split": "Compute the target encoding from the training fold only (sklearn.preprocessing.TargetEncoder in a Pipeline, or out-of-fold encoding) so held-out rows never help build it.",
     "manual_scale_before_split": "Compute the statistics (mean, std, min, max, ...) on the training split only and apply them to the test split, or use a scaler inside a Pipeline so held-out rows never help set the scale.",
     "fillna_before_split": "Impute using training data only: split first, then compute the mean/median on the training split and apply it to both splits, or use SimpleImputer inside a Pipeline.",
@@ -44,6 +44,11 @@ FIXES = {
     "sql_future_window": "Restrict window frames to ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW (or a trailing window) so features never read future rows.",
     "distribution_shift": "Investigate why the train and test distributions differ (time window, sampling, filter, join). Drift does not prove leakage; fix the cause before trusting held-out metrics.",
     "parse_error": "Fix the syntax error (or the notebook cell that cannot be parsed) before relying on this scan.",
+    "pipeline_split_overlap": "Make the evaluation inputs independent of the training run: split the source data once into disjoint train/eval artifacts, and have the evaluation stage read only the eval artifact. Never point an eval stage at a training stage output or at the same raw input the training stage consumed.",
+    "pipeline_unresolved_lineage": "Fix the dependency path or add the stage that produces it, then re-run the pipeline audit. Until the producer is resolved, do not treat this dependency as verified lineage.",
+    "pipeline_param_drift": "Re-run the pipeline (or commit the new lock) so dvc.lock and the parameter files agree, and keep parameter changes in the same commit as the run they produced.",
+    "pipeline_missing_digest": "Re-run the stage so the lock records an md5/hash for every output, and commit the lock. Without a digest the artifact cannot be tied to the evaluated model.",
+    "pipeline_unpinned_dependency": "Pin exact versions (package==version) in the requirements file, or record them in a lock file, so re-running the pipeline installs the same environment.",
 }
 
 

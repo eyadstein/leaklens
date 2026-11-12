@@ -59,6 +59,18 @@ The project profile extracts features from every Python file under `leaklens/` a
 The detector is CPU-only, single-process, has no GPU or network path, loads digest-checked
 plain-JSON parameters (never pickle) and keeps its state in memory.
 
+## Selective reporting
+
+The selective threshold and its risk interval are fitted once, at fit time, from grouped
+out-of-fold development probabilities: one sort over the 263 development scores plus a
+deterministic 200-sample group bootstrap. Runtime only compares a probability to the stored
+threshold, so a scan adds no measurable prediction work.
+
+Measured on the authored development corpus: threshold p >= 0.923, coverage 95.3% of emitted
+hypotheses, empirical selective risk 0.008 (cluster-bootstrap 95% interval 0.000-0.026) and
+unselective error rate 0.053. Repository-level shift violates the exchangeability assumption
+behind selective-risk bounds, so **no distribution-free guarantee is claimed**.
+
 ## Reading these numbers
 
 - These are single-machine measurements, not a guarantee.

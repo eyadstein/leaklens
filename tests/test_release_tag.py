@@ -1,8 +1,31 @@
 """Tests for release tag/version and workflow ref validation."""
 
+import re
+import zipfile
+from pathlib import Path
+
 import pytest
 
-from scripts.validate_release import main, package_version, validate
+from scripts.validate_release import (
+    main,
+    package_version,
+    validate,
+    validate_wheel,
+    wheel_version,
+)
+
+WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+
+
+def _wheel_names(version="0.13.0"):
+    return [
+        "leaklens/__init__.py",
+        "leaklens/leakage.py",
+        "leaklens/ai/semantics.py",
+        f"leaklens_ml-{version}.dist-info/METADATA",
+        f"leaklens_ml-{version}.dist-info/RECORD",
+        f"leaklens_ml-{version}.dist-info/licenses/LICENSE",
+    ]
 
 
 def _pyproject(tmp_path, version="0.13.0"):
@@ -78,3 +101,66 @@ def test_cli_rejects_mismatch_and_unauthorized_dispatch(tmp_path, capsys):
     ]
     assert main(argv) == 1
     assert "refs/heads/main" in capsys.readouterr().err
+
+
+def test_wheel_allowlist_accepts_package_and_dist_info():
+    validate_wheel(_wheel_names(), "0.13.0")
+    validate_wheel(_wheel_names("0.14.0"), "0.14.0")
+
+
+def test_wheel_allowlist_rejects_anything_else():
+    names = [*_wheel_names(), "tests/secret.csv"]
+    with pytest.raises(ValueError, match=r"tests/secret\.csv"):
+        validate_wheel(names, "0.13.0")
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "pyproject.toml",
+        "README.md",
+        "leaklens/../evil.py",
+        "/etc/passwd",
+        "leaklens_ml-0.13.0.dist-info/../../evil.py",
+        "leaklens_other-0.13.0.dist-info/METADATA",
+    ],
+)
+def test_wheel_allowlist_rejects_odd_entries(name):
+    with pytest.raises(ValueError):
+        validate_wheel([*_wheel_names(), name], "0.13.0")
+
+
+def test_wheel_allowlist_rejects_an_empty_archive():
+    with pytest.raises(ValueError, match="empty"):
+        validate_wheel([], "0.13.0")
+
+
+def test_wheel_version_comes_from_the_filename(tmp_path):
+    wheel = tmp_path / "leaklens_ml-0.14.0-py3-none-any.whl"
+    assert wheel_version(wheel) == "0.14.0"
+    with pytest.raises(ValueError, match="not a leaklens wheel"):
+        wheel_version(tmp_path / "other-0.14.0-py3-none-any.whl")
+
+
+def test_cli_wheel_mode_is_independent_of_the_tag(tmp_path, capsys):
+    wheel = tmp_path / "leaklens_ml-0.13.0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for name in _wheel_names():
+            archive.writestr(name, "")
+    assert main(["--wheel", str(wheel)]) == 0
+    assert "only package and dist-info" in capsys.readouterr().out
+
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr("tests/secret.csv", "x")
+    assert main(["--wheel", str(wheel)]) == 1
+    assert "tests/secret.csv" in capsys.readouterr().err
+
+
+def test_every_workflow_action_is_sha_pinned():
+    pattern = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+?)(?:\s*#.*)?$", re.MULTILINE)
+    unpinned = []
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for ref in pattern.findall(path.read_text(encoding="utf-8")):
+            if "@" not in ref or not re.search(r"@[0-9a-f]{40}$", ref):
+                unpinned.append(f"{path.name}: {ref}")
+    assert not unpinned, "unpinned action(s):\n" + "\n".join(unpinned)

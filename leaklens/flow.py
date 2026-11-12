@@ -4,7 +4,7 @@ import ast
 import warnings
 
 from .leakage import Finding
-from .scanner import (
+from .source import (
     BENIGN,
     FEATURE_SELECTION,
     FUNCS,

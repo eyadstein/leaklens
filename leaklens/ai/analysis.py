@@ -261,6 +261,7 @@ def analyze(
         target=dataset.target if dataset else None,
         deterministic_trust_score=deterministic_score,
         limitations=tuple(limitations),
+        selection=model.selection,
     )
 
 

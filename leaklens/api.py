@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 import joblib
@@ -11,7 +13,7 @@ import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from . import __version__
+from . import __version__, assemble
 from .audit import audit
 from .baseline import BaselineError
 from .drift import DEFAULT_SETTINGS as DEFAULT_DRIFT_SETTINGS
@@ -23,7 +25,7 @@ from .intelligence import (
     compare_graph_snapshots,
     snapshot_context,
 )
-from .leakage import scan, score
+from .leakage import scan
 from .missingness import audit_missingness
 from .policy import apply_policy, parse_baseline, parse_suppressions
 from .readers import DatasetLimitError, read_dataset
@@ -67,15 +69,14 @@ def validate_upload_size(name: str, byte_count: int) -> None:
 
 def _finding_payloads(outcome) -> list[dict]:
     """Existing fields plus optional status/suppression; never mutates findings."""
-    return [outcome.finding_payload(finding) for finding in outcome.findings]
+    return assemble.from_outcome(outcome).findings
 
 
-def _policy_payload(outcome) -> tuple[dict, dict | None]:
-    if outcome.diff is None and outcome.suppression is None:
-        return {}
-    payload = {"policy": outcome.summary()}
-    if outcome.diff is not None and outcome.diff.resolved:
-        payload["resolved"] = [entry.to_dict() for entry in outcome.diff.resolved]
+def _policy_payload(outcome) -> dict:
+    sections = assemble.from_outcome(outcome)
+    payload = {"policy": sections.policy} if sections.policy else {}
+    if sections.resolved:
+        payload["resolved"] = sections.resolved
     return payload
 
 
@@ -211,7 +212,7 @@ async def audit_csv(
     if target not in df.columns:
         raise HTTPException(422, f"target '{target}' not in columns")
     fs = scan(df, target, threshold)
-    missing = audit_missingness(df, target)
+    missing = audit_missingness(df, target, test=test_df)
     fs += missing.findings
     drift_report = None
     if drift:
@@ -228,7 +229,7 @@ async def audit_csv(
         suppressions=_json_form(suppressions, "suppressions"),
     )
     payload = {
-        "trust_score": score(outcome.active),
+        "trust_score": assemble.from_outcome(outcome).trust_score,
         "audit": audit(df, target),
         "missingness": missing.to_dict(),
         "findings": _finding_payloads(outcome),
@@ -280,7 +281,7 @@ def scan_code(req: ScanReq):
         fs = scan_source(req.source, req.name)
     outcome = _apply_policy(fs, baseline=req.baseline, suppressions=req.suppressions)
     payload = {
-        "trust_score": score(outcome.active),
+        "trust_score": assemble.from_outcome(outcome).trust_score,
         "findings": _finding_payloads(outcome),
         **_policy_payload(outcome),
     }
@@ -302,33 +303,33 @@ def scan_code(req: ScanReq):
     return payload
 
 
+@lru_cache(maxsize=8)
+def _load_model(path: Path):
+    """Load one operator-fixed model per resolved path; the cache survives requests."""
+    return joblib.load(path)
+
+
 @app.post("/predict")
 def predict(req: PredictReq):
-    p = Path(req.model_path)
-    # Reject absolute or traversal paths; the model must live under the deployer's
-    # models/ tree so callers cannot load arbitrary (e.g. attacker-supplied) jobs.
-    # WARNING: joblib.load() unpickles the file; it is pickle-based deserialization
-    # and can execute arbitrary code if the model file is malicious. Only place
-    # model artifacts you trust in ./models/. Path validation alone does not make
-    # an untrusted joblib file safe.
-    resolved = (Path.cwd() / p).resolve()
-    models_root = (Path.cwd() / "models").resolve()
-    if models_root not in resolved.parents:
+    # The model is fixed by the server, never selected by a request (G1 / M-S0).
+    # joblib.load() unpickles the file, so a request-selected path would let anyone
+    # who can write under ./models/ execute code in this process. Keep the fixed
+    # path operator-controlled, and only load artifacts the operator trusts.
+    configured = Path(os.environ.get("LEAKLENS_MODEL_PATH", "models/best.joblib"))
+    if Path(req.model_path) != configured:
         raise HTTPException(
-            422, f"model_path must be under ./models/ (got: {req.model_path})"
+            422, "model_path is fixed by the server (LEAKLENS_MODEL_PATH)"
         )
-    if not resolved.exists():
+    resolved = configured.resolve()
+    if not resolved.is_file():
         raise HTTPException(
             404, "model not found; run: leaklens data.csv --target T --arena"
         )
     try:
-        b = joblib.load(resolved)
+        b = _load_model(resolved)
     except Exception:  # noqa: BLE001 - re-wrap as HTTP 400 (fail closed)
-        # Corrupt/malicious pickle surfaces as EOFError, UnpicklingError
-        # (KeyError/ValueError inside) or OSError; treat any load failure
-        # as invalid model rather than leaking internal traces. pickle
-        # can execute arbitrary code, but the trusted ./models/ gate
-        # above already ensures only operator-placed artifacts reach here.
+        # Corrupt/malicious pickle surfaces as EOFError, UnpicklingError or OSError;
+        # treat any load failure as an invalid model rather than leaking internals.
         raise HTTPException(400, "invalid model file") from None
     df = pd.DataFrame(req.rows)
     miss = [c for c in b["features"] if c not in df.columns]

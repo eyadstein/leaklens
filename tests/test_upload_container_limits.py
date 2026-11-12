@@ -212,12 +212,10 @@ def test_scan_source_size_rejected():
 
 def test_predict_invalid_model_rejected(tmp_path, monkeypatch):
     (tmp_path / "models").mkdir()
-    (tmp_path / "models" / "bad.joblib").write_bytes(b"not a joblib")
+    (tmp_path / "models" / "best.joblib").write_bytes(b"not a joblib")
     monkeypatch.chdir(tmp_path)
-    r = c.post(
-        "/predict",
-        json={"rows": [{"x": 1}], "model_path": "models/bad.joblib"},
-    )
+    monkeypatch.delenv("LEAKLENS_MODEL_PATH", raising=False)
+    r = c.post("/predict", json={"rows": [{"x": 1}]})
     assert r.status_code == 400, r.text
     assert "invalid model" in r.text
 

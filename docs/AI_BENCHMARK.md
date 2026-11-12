@@ -323,6 +323,17 @@ Known limitation: `xgboost_early_stopping_on_test` previously scored as leaky on
 leaving a genuine false negative with no existing early-stopping indicator. Recall on H1 is
 unchanged at 0.9167. Adding such an indicator is deferred because M6 must not tune on H1.
 
+## Selective reporting
+
+- Decision: applied at p >= 0.923.
+- Coverage: 95.3% of emitted hypotheses (122 of 128); 46.4% of all development units.
+- Empirical selective risk: 0.008 (cluster-bootstrap 95% interval 0.000-0.026).
+- Unselective error rate: 0.053.
+- Smallest threshold whose Wilson 95% upper bound on selective risk is at or below the unselective error rate, requiring at least 50% coverage of emitted units; fitted on grouped out-of-fold development probabilities.
+- Measured on grouped out-of-fold development probabilities from the authored corpus, not on an independent corpus.
+- Repository-level shift violates the exchangeability assumption behind selective-risk bounds; no distribution-free guarantee is claimed.
+- Hypotheses below the selective threshold stay visible and are labelled insufficient (ranking only); they are not suppressed.
+
 ## Overfitting checks
 
 - Grouped out-of-fold train metrics are lower than validation and locked-test metrics.

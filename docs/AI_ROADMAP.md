@@ -10,14 +10,20 @@ and `leaklens/ai/learned.py`. **M3** (explicit confidence semantics) shipped in
 as a **documented shortfall** in `docs/AI_REALWORLD_H2.md`: no H2 corpus exists, so no H2 number
 is published and H1 remains the Phase 6 record. **M6** (false-positive reduction) shipped in
 `ai/features.py`, `ai/corpus.py` and the regenerated `ai/model.json`; it is a diagnostic
-improvement, not an H2 score. **M7–M8 remain proposals** and none of them is implemented.
+improvement, not an H2 score. **M7** (selective reporting with explicit insufficiency) shipped
+in `ai/learned.py`, `ai/schemas.py`, `ai/artifact.py`, `report.py`, `cli.py` and the regenerated
+`ai/model.json`; it is an authored-corpus diagnostic, not an H2 score. **M8** (opt-in AI surface
+in the workspace) shipped in `workspace.py` and `workspace_ui.py` with a pass-through request
+flag; the AI layer remains additive and off by default.
 
 This is an audit of the AI layer as shipped (`leaklens-ai-p7-2026.11`) plus an ordered
 roadmap derived from its measured gaps. It exists so the next phase starts from evidence
 instead of ambition. The architecture, safety invariants and limitations of the current
 layer are documented in [AI_INTELLIGENCE.md](AI_INTELLIGENCE.md); measured results live in
 [AI_BENCHMARK.md](AI_BENCHMARK.md), [AI_REALWORLD.md](AI_REALWORLD.md) and
-[AI_PERFORMANCE.md](AI_PERFORMANCE.md).
+[AI_PERFORMANCE.md](AI_PERFORMANCE.md). The phases that follow Phase 12 (foundation, pipeline/MLOps,
+text, deep learning, vision, investigation, remediation) are planned in
+[AI_ML_EXPANSION_ROADMAP.md](AI_ML_EXPANSION_ROADMAP.md) and are not commitments.
 
 ## How this document was produced
 

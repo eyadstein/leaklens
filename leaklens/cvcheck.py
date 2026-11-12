@@ -5,7 +5,7 @@ import warnings
 
 from .leakage import Finding
 from .partition import any_test, infer_roles, name_role
-from .scanner import (
+from .source import (
     BENIGN,
     FUNCS,
     HINTS,

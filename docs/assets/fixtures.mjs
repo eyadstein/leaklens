@@ -81,7 +81,7 @@ export const fixtures = {
       "trustScore": 0,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -260,7 +260,7 @@ export const fixtures = {
           "kind": "no_random_state",
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
-          "fix": "Pass random_state=<int> to train_test_split() and to KFold-family constructors (KFold(..., shuffle=True, random_state=...)); RepeatedKFold and RepeatedStratifiedKFold shuffle too and need it. For torch.utils.data.random_split(), pass generator=torch.Generator().manual_seed(<int>) (or call torch.manual_seed(<int>) first).",
+          "fix": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
           "line": 9
         }
       ],
@@ -273,7 +273,7 @@ export const fixtures = {
       "trustScore": 25,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",
@@ -399,7 +399,7 @@ export const fixtures = {
       "trustScore": 100,
       "ai": {
         "engine": "leaklens.ai.experimental",
-        "schemaVersion": "1.1",
+        "schemaVersion": "1.2",
         "changesDeterministicFindings": false,
         "model": {
           "name": "leaklens-ai-p7",

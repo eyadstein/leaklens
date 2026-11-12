@@ -9,7 +9,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__, llm
+from . import __version__, assemble, llm
 from .audit import audit
 from .baseline import Baseline, BaselineError
 from .config import ConfigError, load_config
@@ -26,7 +26,6 @@ from .leakage import (
     temporal_overlap,
 )
 from .missingness import audit_missingness
-from .policy import apply_policy
 from .readers import read_dataset
 from .scanner import SKIP, scan_path
 
@@ -301,6 +300,7 @@ def doctor(argv) -> int:
         "excel": "openpyxl",
         "images": "PIL",
         "app": "fastapi",
+        "yaml": "yaml",
         "taintwatch": "taintwatch",
     }
 
@@ -409,6 +409,24 @@ def doctor(argv) -> int:
     return 0
 
 
+def _gate_failure(
+    outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
+) -> bool:
+    """Failure predicates ignore ``diagnostic=True``, matching ``leakage.score()``."""
+    if any(
+        f.severity == "high" and not getattr(f, "diagnostic", False)
+        for f in outcome.active
+    ):
+        return True
+    if fail_under is not None and trust_score < fail_under:
+        return True
+    return bool(
+        fail_on_new
+        and outcome.diff is not None
+        and any(not getattr(f, "diagnostic", False) for f in outcome.diff.new)
+    )
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     if argv and argv[0] == "init":
@@ -454,6 +472,15 @@ def main(argv=None) -> int:
         choices=("ansi", "postgres", "bigquery", "snowflake"),
         default=None,
         help="declared dialect for SQL lineage (default: ansi)",
+    )
+    p.add_argument(
+        "--pipeline",
+        action="store_true",
+        help=(
+            "audit pipeline metadata (dvc.yaml/.dvc/dvc.lock, *.dag.json, notebook "
+            "cell order, requirements) under --scan paths; opt-in diagnostics, "
+            "needs the yaml extra for DVC files"
+        ),
     )
     p.add_argument(
         "--drift",
@@ -720,8 +747,38 @@ def main(argv=None) -> int:
                 fs += scan_path(source)
         except ImportError as exc:
             p.error(str(exc))
+    if a.pipeline and not scan_targets:
+        p.error("--pipeline audits --scan paths; add --scan PATH")
+    if a.pipeline:
+        from .pipeline import PipelineUnavailable, audit_pipeline, is_yaml_metadata
 
-    outcome = apply_policy(fs, baseline=baseline, rules=cfg.suppressions)
+        reports = []
+        for source in scan_targets:
+            try:
+                report = audit_pipeline(
+                    source,
+                    strict_yaml=Path(source).is_file() and is_yaml_metadata(source),
+                )
+            except PipelineUnavailable as exc:
+                p.error(str(exc))
+            fs += report.findings
+            reports.append(report.to_dict())
+            if report.skipped.get("yaml_not_installed"):
+                print(
+                    "leaklens: DVC metadata skipped; install it with "
+                    'pip install "leaklens-ml[yaml]"',
+                    file=sys.stderr,
+                )
+        rep["pipeline"] = reports[0] if len(reports) == 1 else {"reports": reports}
+
+    sections = assemble.build(
+        fs,
+        baseline=baseline,
+        rules=cfg.suppressions,
+        baseline_path=baseline_path,
+        fail_on_new=fail_on_new,
+    )
+    outcome = sections.outcome
     fs = list(outcome.findings)
     active = list(outcome.active)
     policy_active = baseline is not None or bool(cfg.suppressions)
@@ -743,16 +800,14 @@ def main(argv=None) -> int:
             )
 
     rep = {
-        "trust_score": score(active),
+        "trust_score": sections.trust_score,
         **rep,
-        "findings": [outcome.finding_payload(f) for f in fs],
+        "findings": sections.findings,
     }
     if policy_active:
-        rep["policy"] = outcome.summary(
-            baseline_path=baseline_path, fail_on_new=fail_on_new
-        )
-        if outcome.diff is not None and outcome.diff.resolved:
-            rep["resolved"] = [entry.to_dict() for entry in outcome.diff.resolved]
+        rep["policy"] = sections.policy
+        if sections.resolved:
+            rep["resolved"] = sections.resolved
     ai_report = None
     if use_ai:
         try:
@@ -1051,6 +1106,40 @@ def main(argv=None) -> int:
                     bases.append(label)
             if bases:
                 print(f"    AI confidence bases: {', '.join(bases)}")
+            selection = ai_report.get("selection")
+            if selection:
+                threshold = float(selection.get("threshold", 0) or 0)
+                state = (
+                    f"applied at p>={threshold:.2f}"
+                    if selection.get("applied")
+                    else f"not applied (no candidate met the acceptance rule); "
+                    f"unselective output at p>={threshold:.2f} kept"
+                )
+                low, high = selection.get("risk_interval", (0.0, 1.0))
+                print(
+                    f"    AI selective reporting: {state} · coverage "
+                    f"{float(selection.get('coverage', 0)):.1%} of emitted "
+                    f"({selection.get('accepted')} of {selection.get('emitted')}) · "
+                    f"selective risk {float(selection.get('selective_risk', 0)):.3f} "
+                    f"(95% cluster-bootstrap {float(low):.3f}-{float(high):.3f}) · "
+                    f"unselective error "
+                    f"{float(selection.get('unselective_error_rate', 0)):.3f}; "
+                    "no distribution-free guarantee."
+                )
+            buckets = {"supported": 0, "weak": 0, "insufficient": 0}
+            for hypothesis in hypotheses:
+                value = hypothesis.get("sufficiency")
+                buckets[value if value in buckets else "weak"] += 1
+            words = {
+                "supported": "supported",
+                "weak": "weak",
+                "insufficient": "ranking only (insufficient calibration data)",
+            }
+            summary = ", ".join(
+                f"{count} {words[key]}" for key, count in buckets.items() if count
+            )
+            if summary:
+                print(f"    AI sufficiency: {summary}")
             for group in groups[:3]:
                 print(
                     f"    AI root cause [{group['priority']}]: {group['title']} "
@@ -1062,8 +1151,13 @@ def main(argv=None) -> int:
                 print(
                     f"    AI hypothesis "
                     f"[{confidence_label(hypothesis.get('confidence_basis'))}: "
-                    f"{hypothesis['confidence']:.2f}]: "
-                    f"{hypothesis['title']} :: {hypothesis['location']}"
+                    f"{hypothesis['confidence']:.2f}"
+                    + (
+                        ", ranking only"
+                        if hypothesis.get("sufficiency") == "insufficient"
+                        else ""
+                    )
+                    + f"]: {hypothesis['title']} :: {hypothesis['location']}"
                 )
         for index, f in enumerate(fs):
             suffix = ""
@@ -1106,11 +1200,9 @@ def main(argv=None) -> int:
                 f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
             )
             print(res.round(4).to_string(index=False))
-    gate = any(f.severity == "high" for f in active) or (
-        fail_under is not None and rep["trust_score"] < fail_under
+    gate = _gate_failure(
+        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
     )
-    if fail_on_new and outcome.diff is not None and outcome.diff.new:
-        gate = True
     if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
         gate = True
     return 1 if gate else 0

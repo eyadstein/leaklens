@@ -308,3 +308,34 @@ def test_diagnostic_flag_is_serialized_only_when_true():
     diagnostic = _scan("SELECT * FROM orders", schema=None)[0]
     assert "diagnostic" not in normal.to_dict()
     assert diagnostic.to_dict()["diagnostic"] is True
+
+
+@requires_sql
+def test_analyze_sql_exposes_one_resolved_column_map():
+    """Phase 14 M2: lineage is resolved once and exported, not re-parsed."""
+    from leaklens.sqlscan import analyze_sql
+
+    result = analyze_sql(
+        "SELECT customer_id, amount * 2 AS double_amount, label * 2 AS label_score "
+        "FROM orders",
+        "q.sql",
+        schema=SCHEMA,
+        target="label",
+    )
+    assert result.column_map == {
+        "customer_id": ("customer_id",),
+        "double_amount": ("amount",),
+        "label_score": ("label",),
+    }
+    assert [finding.kind for finding in result.findings] == ["sql_target_as_feature"]
+    # The findings-only entry point is unchanged for every existing caller.
+    assert [
+        f.fingerprint
+        for f in scan_sql(
+            "SELECT customer_id, amount * 2 AS double_amount, label * 2 AS label_score "
+            "FROM orders",
+            "q.sql",
+            schema=SCHEMA,
+            target="label",
+        )
+    ] == [finding.fingerprint for finding in result.findings]

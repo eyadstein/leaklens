@@ -14,6 +14,7 @@ dataset audits go through the public API's ``run_audit_job``.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
 import threading
@@ -36,6 +37,7 @@ from .fingerprint import LOCATION, normalize_path
 from .fixes import advice
 from .intelligence import analyze_findings
 from .leakage import Finding, score
+from .paths import PathOutsideRoot, contained, resolve_within
 from .policy import PolicyOutcome, apply_policy
 from .public_api import GuardLimits, _threshold, run_audit_job, run_inspect_job
 from .report import render
@@ -44,6 +46,8 @@ from .sqlscan import SqlSettings, scan_sql_file
 from .sqlscan import available as sql_available
 from .suppression import SuppressionRule
 from .upload_guard import UploadRejected, available_formats, guard_upload
+
+_log = logging.getLogger(__name__)
 
 MAX_FILES = 5_000
 MAX_SOURCE_BYTES = 1_000_000
@@ -115,6 +119,7 @@ class ScanSession:
     scan_id: str
     files: tuple[Path, ...]
     include_sql: bool
+    include_ai: bool = False
     target: str = "."
     baseline: Baseline | None = None
     rules: tuple[SuppressionRule, ...] = ()
@@ -184,6 +189,7 @@ class DatasetSession:
     test_path: Path | None = None
     time_col: str | None = None
     group_col: str | None = None
+    include_ai: bool = False
     baseline: Baseline | None = None
     rules: tuple[SuppressionRule, ...] = ()
     baseline_path: str | None = None
@@ -945,11 +951,12 @@ def _compare_sessions(
             ],
         )
     except (BaselineError, KeyError, TypeError) as exc:
+        _log.warning("saved findings cannot be compared: %r", exc)
         return {
             **base,
             "available": False,
             "compatible": False,
-            "reason": f"the saved findings cannot be compared: {exc}",
+            "reason": "the saved findings cannot be compared",
         }
 
     previous_complete = previous_state == "done" and not previous_errors
@@ -1094,18 +1101,10 @@ class WorkspaceScanManager:
         self._lock = threading.Lock()
 
     def resolve(self, value: str) -> Path:
-        text = (value or "").strip()
-        if not text:
-            raise WorkspacePathError("a path is required")
-        # POSIX reads "..\outside.csv" as one filename, so a Windows separator must be
-        # normalized before parsing or the traversal never reaches the containment check.
-        # shortcut: a POSIX file whose name contains "\" is unreachable from the workspace.
-        candidate = Path(text.replace("\\", "/"))
-        target = candidate if candidate.is_absolute() else self.root / candidate
-        target = target.resolve()
-        if target != self.root and not target.is_relative_to(self.root):
-            raise WorkspacePathError("path is outside the workspace root")
-        return target
+        try:
+            return resolve_within(self.root, value)
+        except PathOutsideRoot as exc:
+            raise WorkspacePathError(str(exc)) from None
 
     def _policy(
         self, value: str | None
@@ -1124,7 +1123,7 @@ class WorkspaceScanManager:
             label = _relative(path, self.root)
         else:
             return None, cfg.suppressions, None
-        if path != self.root and not path.is_relative_to(self.root):
+        if path != self.root and not contained(self.root, path):
             raise WorkspacePathError("baseline is outside the workspace root")
         try:
             baseline = Baseline.load(path)
@@ -1139,7 +1138,12 @@ class WorkspaceScanManager:
         self._active = session
 
     def start(
-        self, path: str = ".", *, sql: bool = False, baseline: str | None = None
+        self,
+        path: str = ".",
+        *,
+        sql: bool = False,
+        baseline: str | None = None,
+        include_ai: bool = False,
     ) -> ScanSession:
         target = self.resolve(path)
         if not target.exists():
@@ -1164,6 +1168,7 @@ class WorkspaceScanManager:
                 scan_id=secrets.token_hex(6),
                 files=files,
                 include_sql=sql,
+                include_ai=include_ai,
                 target=_relative(target, self.root),
                 baseline=baseline_doc,
                 rules=rules,
@@ -1250,12 +1255,38 @@ class WorkspaceScanManager:
         }
         if resolved:
             payload["resolved"] = resolved
+        if session.include_ai:
+            # Policy runs first so the optional layer never sees a suppressed
+            # finding as active; failure stays a normal result, never an error.
+            active = [
+                finding
+                for finding, item in zip(findings, items)
+                if item["fingerprint"] not in outcome.suppressed
+            ]
+            ai_payload = None
+            try:
+                from .ai import analyze, collect_code_sources
+
+                ai_payload = analyze(
+                    active,
+                    code=collect_code_sources(
+                        path
+                        for path in session.files
+                        if path.suffix.lower() in {".py", ".ipynb"}
+                    ),
+                    trust_score=payload["trust_score"],
+                ).to_dict()
+            except Exception:  # noqa: BLE001 - optional AI must not break the scan
+                ai_payload = None
+            payload["ai"] = ai_payload
+            payload["ai_unavailable"] = ai_payload is None
         report_html = render(
             {
                 "trust_score": payload["trust_score"],
                 "findings": _report_findings(payload["findings"]),
                 "intelligence": intelligence,
                 "policy": _report_policy(policy),
+                "ai": payload.get("ai"),
             },
             title="LeakLens workspace report",
         )
@@ -1298,6 +1329,7 @@ class WorkspaceScanManager:
         time_col: str | None = None,
         group_col: str | None = None,
         baseline: str | None = None,
+        include_ai: bool = False,
     ) -> DatasetSession:
         threshold = _threshold(threshold)
         upload = self.open_dataset(path)
@@ -1317,6 +1349,7 @@ class WorkspaceScanManager:
                 test_path=self.resolve(test_path) if test_path else None,
                 time_col=(time_col or "").strip() or None,
                 group_col=(group_col or "").strip() or None,
+                include_ai=include_ai,
                 baseline=baseline_doc,
                 rules=rules,
                 baseline_path=baseline_label,
@@ -1509,6 +1542,7 @@ class WorkspaceScanManager:
                 session.time_col,
                 session.group_col,
                 include_intelligence=True,
+                include_ai=session.include_ai,
             )
         except UploadRejected as exc:
             with session.lock:
@@ -1583,6 +1617,7 @@ class ScanRequest(BaseModel):
     path: str = Field(default=".", max_length=1000)
     sql: bool = Field(default=False)
     baseline: str | None = Field(default=None, max_length=1000)
+    include_ai: bool = Field(default=False)
 
 
 class DatasetPathRequest(BaseModel):
@@ -1597,6 +1632,7 @@ class DatasetRequest(BaseModel):
     time_col: str | None = Field(default=None, max_length=200)
     group_col: str | None = Field(default=None, max_length=200)
     baseline: str | None = Field(default=None, max_length=1000)
+    include_ai: bool = Field(default=False)
 
 
 def create_workspace_app(root: str | Path | None = None) -> FastAPI:
@@ -1632,11 +1668,12 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
                 "error": None,
             }
         except ConfigError as exc:
+            _log.warning("workspace config could not be loaded: %r", exc)
             config_info = {
                 "path": None,
                 "baseline": None,
                 "suppressions": 0,
-                "error": str(exc),
+                "error": "configuration could not be loaded",
             }
         return {
             "version": __version__,
@@ -1679,7 +1716,9 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
     @app.post("/api/scans", status_code=202)
     def start_scan(req: ScanRequest) -> dict[str, str]:
         try:
-            session = manager.start(req.path, sql=req.sql, baseline=req.baseline)
+            session = manager.start(
+                req.path, sql=req.sql, baseline=req.baseline, include_ai=req.include_ai
+            )
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None
         except WorkspaceBusy as exc:
@@ -1787,6 +1826,7 @@ def create_workspace_app(root: str | Path | None = None) -> FastAPI:
                 time_col=req.time_col,
                 group_col=req.group_col,
                 baseline=req.baseline,
+                include_ai=req.include_ai,
             )
         except WorkspacePathError as exc:
             raise HTTPException(422, str(exc)) from None

@@ -273,11 +273,11 @@ def test_audit_accepts_policy_form_fields():
 
 
 def test_predict_missing_model(tmp_path, monkeypatch):
-    # Isolated sandbox: the API only accepts models under ./models/ relative to
-    # CWD, so chdir there and request a nonexistent file inside models/.
+    # The model is fixed by the server; a missing default artifact is a 404.
     (tmp_path / "models").mkdir()
     monkeypatch.chdir(tmp_path)
-    r = c.post("/predict", json={"rows": [{"x": 1}], "model_path": "models/x.joblib"})
+    monkeypatch.delenv("LEAKLENS_MODEL_PATH", raising=False)
+    r = c.post("/predict", json={"rows": [{"x": 1}]})
     assert r.status_code == 404
 
 
@@ -286,6 +286,7 @@ def test_predict_roundtrip(tmp_path, monkeypatch):
     from leaklens.arena import run
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("LEAKLENS_MODEL_PATH", raising=False)
     r = np.random.default_rng(0)
     n = 400
     x = r.normal(size=n)
