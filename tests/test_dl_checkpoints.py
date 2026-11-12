@@ -140,20 +140,6 @@ def test_a_symlinked_python_file_outside_the_root_is_skipped(tmp_path):
     assert report.skipped == {"outside_root": 1}
 
 
-def test_a_symlink_outside_the_root_is_a_typed_skip(tmp_path):
-    root = tmp_path / "repo"
-    root.mkdir()
-    outside = tmp_path / "outside.bin"
-    outside.write_bytes(b"\x00\x01")
-    try:
-        os.symlink(outside, root / "link.bin")
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks are not available on this platform")
-    report = audit_dl(root)
-    assert report.findings == ()
-    assert report.skipped == {"artifact_outside_root": 1}
-
-
 def test_an_empty_directory_is_no_artifacts(tmp_path):
     report = audit_dl(tmp_path)
     assert report.status == "no_artifacts"

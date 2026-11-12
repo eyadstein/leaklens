@@ -15,7 +15,9 @@ from pathlib import Path
 from ...evidence import Evidence
 from ...leakage import Finding
 from ...paths import PathOutsideRoot, resolve_within
-from . import ArtifactMeta, ArtifactParseError, onnx, pickle_guard, safetensors
+
+# Local module name only; this file never imports the pickle package.
+from . import ArtifactMeta, ArtifactParseError, onnx, pickle_guard, safetensors  # nosec B403
 
 MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024

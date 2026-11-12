@@ -309,18 +309,20 @@ def _split_signals(tree: ast.AST, path: str) -> list[TrainingSignal]:
                                 line=node.lineno,
                             )
                         )
-            elif isinstance(target, ast.Attribute) and target.attr == "transform":
-                if _role(_name(target.value)) == "eval" and _is_random(
-                    node.value, random_names
-                ):
-                    out.append(
-                        TrainingSignal(
-                            "eval_augmentation",
-                            _describe(node.value),
-                            path,
-                            line=node.lineno,
-                        )
+            elif (
+                isinstance(target, ast.Attribute)
+                and target.attr == "transform"
+                and _role(_name(target.value)) == "eval"
+                and _is_random(node.value, random_names)
+            ):
+                out.append(
+                    TrainingSignal(
+                        "eval_augmentation",
+                        _describe(node.value),
+                        path,
+                        line=node.lineno,
                     )
+                )
     return out
 
 
