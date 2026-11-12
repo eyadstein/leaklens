@@ -24,6 +24,16 @@ jobs:
       - run: python -m leaklens.bench_pipeline
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
+  spelling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      # The codespell hook config (.pre-commit-config.yaml) is the single
+      # source of truth; the action runs every hook, which today is codespell.
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
   sql:
     runs-on: ubuntu-latest
     steps:

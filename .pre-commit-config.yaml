@@ -1,0 +1,10 @@
+# Runs the same codespell invocation as CI (see ci.yml): the pre-commit hook
+# and the CI job share this config, so a local run matches the gate.
+repos:
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+        # realworld/notebooks is a corpus of third-party notebooks kept
+        # verbatim as fixtures; everything else is spell-checked.
+        args: ["--skip=realworld", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used"]
