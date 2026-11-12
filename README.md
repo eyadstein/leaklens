@@ -362,6 +362,29 @@ leaklens --scan pipelines/dvc.yaml --pipeline --json
 
 Rules, formats and limits: [`docs/PIPELINE.md`](docs/PIPELINE.md); measured controls: [`docs/PIPELINE_BENCHMARK.md`](docs/PIPELINE_BENCHMARK.md).
 
+## Text and LLM intelligence (opt-in)
+
+`leaklens text TRAIN TEST` compares declared text corpora for evaluation contamination. It is deterministic, offline and CPU-only for exact/near duplicates, hash-only contamination and static RAG wiring; embedding similarity is optional and consumes caller-supplied vectors only.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `text_exact_duplicate` | high | a test document's normalised text also appears in train |
+| `text_near_duplicate` | medium | a test document's shingle sketch matches a train document above the threshold |
+| `text_eval_contamination` | high | a train digest matches a user-supplied eval fingerprint |
+| `rag_index_leakage` | high | an index loads a literal root that contains the declared eval path |
+| `text_embedding_similarity` | medium | caller-supplied eval vectors are cosine-similar to train vectors |
+
+Evidence carries counts, 16-hex digests, relative paths and call names, never document text. Every text finding is `diagnostic: true` and `scored: false`; the subcommand exits `0` unless you pass `--fail-on-findings`. LeakLens never loads an embedding model, downloads an eval corpus or executes scanned code.
+
+```sh
+leaklens text train.jsonl eval.jsonl --json
+leaklens text train.parquet eval.parquet --field instruction
+leaklens text train.jsonl eval.jsonl --eval-fingerprints eval.fp
+leaklens text train.jsonl eval.jsonl --rag . --eval-path data/eval
+```
+
+Formats, parameters, normalisation and limits: [`docs/TEXT.md`](docs/TEXT.md); measured controls: [`docs/TEXT_BENCHMARK.md`](docs/TEXT_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
 `leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
