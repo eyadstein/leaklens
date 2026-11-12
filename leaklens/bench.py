@@ -301,6 +301,32 @@ LOW_CASES: list[tuple[str, str, bool]] = [
         False,
     ),
 ]
+TORCH = "import torch\nfrom torch.utils.data import random_split\n"
+LOW_CASES += [
+    (
+        "torch random_split without generator",
+        TORCH + "tr, va = random_split(ds, [0.8, 0.2])\n",
+        True,
+    ),
+    (
+        "torch random_split with seeded generator",
+        TORCH
+        + "g = torch.Generator().manual_seed(42)\n"
+        + "tr, va = random_split(ds, [0.8, 0.2], generator=g)\n",
+        False,
+    ),
+    (
+        "torch random_split with positional generator",
+        TORCH
+        + "tr, va = random_split(ds, [0.8, 0.2], torch.Generator().manual_seed(0))\n",
+        False,
+    ),
+    (
+        "torch random_split after torch.manual_seed",
+        TORCH + "torch.manual_seed(0)\ntr, va = random_split(ds, [0.8, 0.2])\n",
+        False,
+    ),
+]
 LOW_CASES += [
     (
         "train_test_split shuffle=False is deterministic",

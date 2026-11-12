@@ -148,6 +148,53 @@ def _kw_false(c, name: str) -> bool:
     )
 
 
+# Calls that seed torch's global generator (what random_split uses when it is given no generator).
+GLOBAL_SEEDERS = {"seed_everything", "set_seed"}
+
+
+def _imports_torch(index: dict[type, list[ast.AST]]) -> bool:
+    """Whether the file imports torch (keeps random_split from matching unrelated libraries)."""
+    for n in index.get(ast.Import, ()):
+        if any(al.name.split(".")[0] == "torch" for al in n.names):
+            return True
+    return any(
+        (n.module or "").split(".")[0] == "torch" for n in index.get(ast.ImportFrom, ())
+    )
+
+
+def _seeds_torch_globally(c: ast.Call) -> bool:
+    """torch.manual_seed(...) or a seed_everything()/set_seed() helper: seeds the global generator."""
+    f = c.func
+    if _name(c) in GLOBAL_SEEDERS:
+        return True
+    if _name(c) != "manual_seed":
+        return False
+    if isinstance(f, ast.Name):  # from torch import manual_seed
+        return True
+    root = f.value if isinstance(f, ast.Attribute) else None
+    while isinstance(root, ast.Attribute):
+        root = root.value
+    return isinstance(root, ast.Name) and root.id == "torch"
+
+
+def _random_split_unseeded(c: ast.Call) -> bool:
+    """random_split(dataset, lengths) with no generator: the split comes from the global RNG.
+
+    generator is the third positional parameter. A *args/**kwargs expansion might carry it,
+    so assume it does (same rule as _has_seed). An explicit generator is the caller's choice
+    and is never flagged; only a missing generator or a literal generator=None is.
+    """
+    if any(isinstance(a, ast.Starred) for a in c.args):
+        return False
+    if any(kw.arg is None for kw in c.keywords):
+        return False
+    gen = c.args[2] if len(c.args) >= 3 else None
+    for kw in c.keywords:
+        if kw.arg == "generator":
+            gen = kw.value
+    return gen is None or (isinstance(gen, ast.Constant) and gen.value is None)
+
+
 def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     from .cvcheck import scan_cv
     from .flow import merge, scan_flow
@@ -393,6 +440,12 @@ def _scan_core(
                     )
                 )
 
+    # random_split() draws from torch's global RNG unless given a generator, so a
+    # torch.manual_seed()/seed_everything() call anywhere in the file makes it reproducible.
+    torch_unseeded_global = _imports_torch(index) and not any(
+        _seeds_torch_globally(c) for c in calls
+    )
+
     for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
         f = c.func
         nm = _name(c)
@@ -455,6 +508,19 @@ def _scan_core(
                     "no_random_state",
                     loc(c.lineno),
                     f"{nm}() without random_state: it always shuffles, so folds differ on every run, so results are not reproducible",
+                    stable_key=keys[id(c)],
+                )
+            )
+        elif (
+            nm == "random_split" and torch_unseeded_global and _random_split_unseeded(c)
+        ):
+            out.append(
+                Finding(
+                    "low",
+                    "no_random_state",
+                    loc(c.lineno),
+                    "random_split() without a generator: the split comes from torch's global RNG, "
+                    "so it differs on every run, so results are not reproducible",
                     stable_key=keys[id(c)],
                 )
             )

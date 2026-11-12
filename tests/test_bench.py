@@ -54,7 +54,7 @@ def test_additional_cases_have_unique_names_and_snippets():
 def test_low_severity_cases_are_scored_separately():
     metrics = evaluate()
 
-    assert metrics["low_n"] == 14
-    assert metrics["low_tp"] + metrics["low_tn"] == 14
+    assert metrics["low_n"] == 18
+    assert metrics["low_tp"] + metrics["low_tn"] == 18
     assert metrics["low_fp"] == 0
     assert metrics["low_fn"] == 0
