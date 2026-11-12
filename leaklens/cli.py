@@ -290,6 +290,230 @@ def images(argv) -> int:
     return 1 if fs else 0
 
 
+def text(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens text",
+        description=(
+            "Check text corpora for cross-split duplicates, eval contamination "
+            "and RAG index leakage"
+        ),
+    )
+    p.add_argument(
+        "train", help="training corpus (.jsonl, .json, .txt, .parquet, .arrow)"
+    )
+    p.add_argument("test", help="evaluation corpus")
+    p.add_argument("--field", help="document field in JSON/JSONL/parquet rows")
+    p.add_argument(
+        "--min-chars",
+        type=int,
+        default=32,
+        help="minimum normalised characters per document (default 32)",
+    )
+    p.add_argument(
+        "--max-docs",
+        type=int,
+        default=10_000,
+        help="maximum documents per split (default 10000)",
+    )
+    p.add_argument(
+        "--threshold",
+        type=float,
+        default=0.8,
+        help="near-duplicate similarity threshold (default 0.8)",
+    )
+    p.add_argument(
+        "--shingle-size", type=int, default=5, help="word shingle size (default 5)"
+    )
+    p.add_argument(
+        "--boilerplate", help="file of boilerplate lines to strip before hashing"
+    )
+    p.add_argument(
+        "--eval-fingerprints", help="file of eval digests, one per line (hash-only)"
+    )
+    p.add_argument(
+        "--write-fingerprints",
+        help="write this evaluation split's digests for --eval-fingerprints",
+    )
+    p.add_argument(
+        "--rag", metavar="ROOT", help="scan a Python root for RAG index leakage"
+    )
+    p.add_argument(
+        "--eval-path", help="declared evaluation path for --rag (repo-relative)"
+    )
+    p.add_argument(
+        "--embeddings",
+        nargs=2,
+        metavar=("TRAIN_VECTORS", "TEST_VECTORS"),
+        help="optional .npy matrices of user-supplied vectors",
+    )
+    p.add_argument(
+        "--embedding-model", help="model id that produced the --embeddings vectors"
+    )
+    p.add_argument(
+        "--embedding-threshold",
+        type=float,
+        default=0.95,
+        help="cosine threshold for --embeddings (default 0.95)",
+    )
+    p.add_argument("--json", action="store_true")
+    p.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="exit 1 when any diagnostic text finding is reported",
+    )
+    a = p.parse_args(argv)
+
+    if not 0.0 <= a.threshold <= 1.0:
+        p.error("--threshold must be between 0 and 1")
+    if not 0.0 <= a.embedding_threshold <= 1.0:
+        p.error("--embedding-threshold must be between 0 and 1")
+    if a.min_chars < 0:
+        p.error("--min-chars must be non-negative")
+    if a.max_docs < 1:
+        p.error("--max-docs must be positive")
+    if a.shingle_size < 1:
+        p.error("--shingle-size must be positive")
+    if bool(a.rag) != bool(a.eval_path):
+        p.error("--rag and --eval-path must be used together")
+    if bool(a.embeddings) != bool(a.embedding_model):
+        p.error("--embeddings and --embedding-model must be used together")
+
+    from .analysis.text.contamination import (
+        contamination_findings,
+        load_fingerprints,
+        write_fingerprints,
+    )
+    from .analysis.text.dedup import exact_findings, near_findings
+    from .analysis.text.embeddings import embedding_findings, load_vectors
+    from .analysis.text.normalize import load_documents, normalize_text
+    from .analysis.text.rag import scan_rag
+
+    field = a.field or "text"
+    boilerplate = frozenset()
+    if a.boilerplate:
+        try:
+            lines = (
+                Path(a.boilerplate)
+                .read_text(encoding="utf-8-sig", errors="replace")
+                .splitlines()
+            )
+        except OSError as exc:
+            p.error(str(exc))
+        boilerplate = frozenset(
+            normalize_text(line) for line in lines if normalize_text(line)
+        )
+
+    try:
+        train_docs, train_skipped = load_documents(
+            a.train,
+            "train",
+            field=a.field,
+            min_chars=a.min_chars,
+            max_docs=a.max_docs,
+            boilerplate=boilerplate,
+        )
+        test_docs, test_skipped = load_documents(
+            a.test,
+            "test",
+            field=a.field,
+            min_chars=a.min_chars,
+            max_docs=a.max_docs,
+            boilerplate=boilerplate,
+        )
+    except (OSError, ValueError, ImportError) as exc:
+        p.error(str(exc))
+
+    try:
+        findings = [
+            *exact_findings(train_docs, test_docs, field),
+            *near_findings(
+                train_docs,
+                test_docs,
+                field,
+                shingle_size=a.shingle_size,
+                threshold=a.threshold,
+            ),
+        ]
+    except ValueError as exc:
+        p.error(str(exc))
+    extra: dict[str, object] = {}
+
+    if a.eval_fingerprints:
+        try:
+            fingerprints = load_fingerprints(a.eval_fingerprints)
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+        findings.extend(contamination_findings(train_docs, fingerprints, field))
+
+    if a.write_fingerprints:
+        try:
+            written = write_fingerprints(a.write_fingerprints, test_docs)
+        except OSError as exc:
+            p.error(str(exc))
+        extra["fingerprints"] = {"path": a.write_fingerprints, "count": written}
+
+    if a.rag:
+        try:
+            rag_findings, hits = scan_rag(a.rag, [a.eval_path])
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+        findings.extend(rag_findings)
+        extra["rag"] = {"hits": len(hits)}
+
+    if a.embeddings:
+        try:
+            train_vectors = load_vectors(a.embeddings[0])
+            test_vectors = load_vectors(a.embeddings[1])
+            findings.extend(
+                embedding_findings(
+                    train_docs,
+                    test_docs,
+                    train_vectors,
+                    test_vectors,
+                    model=a.embedding_model,
+                    threshold=a.embedding_threshold,
+                    field=field,
+                )
+            )
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+
+    sections = assemble.build(findings)
+    rep = {
+        "trust_score": sections.trust_score,
+        "counts": sections.counts,
+        "findings": sections.findings,
+        "policy": sections.policy,
+        "resolved": sections.resolved,
+        "field": field,
+        "documents": {"train": len(train_docs), "test": len(test_docs)},
+        "skipped": {"train": train_skipped, "test": test_skipped},
+        **extra,
+    }
+
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"LeakLens trust score: {rep['trust_score']}/100")
+        print(
+            f"{len(train_docs)} train documents, {len(test_docs)} test documents"
+            + (
+                f", {train_skipped + test_skipped} skipped"
+                if train_skipped + test_skipped
+                else ""
+            )
+        )
+        for finding in sections.findings:
+            print(
+                f"[{finding['severity'].upper()}] {finding['kind']} :: "
+                f"{finding['column']} :: {finding['detail']}"
+            )
+        if not findings:
+            print("No leakage found.")
+
+    return 1 if a.fail_on_findings and findings else 0
+
+
 def doctor(argv) -> int:
     from importlib import metadata as _meta
 
@@ -433,6 +657,8 @@ def main(argv=None) -> int:
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "text":
+        return text(argv[1:])
     if argv and argv[0] == "doctor":
         return doctor(argv[1:])
     if argv and argv[0] == "workspace":

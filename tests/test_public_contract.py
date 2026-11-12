@@ -73,6 +73,7 @@ def test_engine_ids_are_frozen():
         "leaklens.ai.experimental",
         "leaklens.intelligence.deterministic",
         "leaklens.pipeline",
+        "leaklens.text",
     }
 
 

@@ -22,6 +22,7 @@ jobs:
       - run: python -m leaklens.bench_missing
       - run: python -m leaklens.bench_drift
       - run: python -m leaklens.bench_pipeline
+      - run: python -m leaklens.bench_text
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
   sql:

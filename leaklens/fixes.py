@@ -49,6 +49,11 @@ FIXES = {
     "pipeline_param_drift": "Re-run the pipeline (or commit the new lock) so dvc.lock and the parameter files agree, and keep parameter changes in the same commit as the run they produced.",
     "pipeline_missing_digest": "Re-run the stage so the lock records an md5/hash for every output, and commit the lock. Without a digest the artifact cannot be tied to the evaluated model.",
     "pipeline_unpinned_dependency": "Pin exact versions (package==version) in the requirements file, or record them in a lock file, so re-running the pipeline installs the same environment.",
+    "text_exact_duplicate": "Remove the duplicated documents from one split (or deduplicate before splitting) so an evaluation item cannot also be a training item. Compare the reported hashes, not the raw text.",
+    "text_near_duplicate": "Deduplicate near-identical documents before splitting, or group related documents and split by group. Lower --threshold increases recall and false positives; check the reported examples.",
+    "text_eval_contamination": "Remove every training document whose fingerprint matches the evaluation set, or re-collect the evaluation set. Fingerprints are hashes only; LeakLens never receives the eval corpus itself.",
+    "rag_index_leakage": "Build the retrieval index from training documents only, or keep the evaluation documents out of the loader root. A retriever that can return a test document makes the evaluation score meaningless.",
+    "text_embedding_similarity": "Treat these matches as model-version-specific evidence, not proof: re-check the reported pairs with the deterministic exact/near checks. Deduplicate or group-split before fine-tuning or retrieval evaluation.",
 }
 
 
