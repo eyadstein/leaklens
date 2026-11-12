@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Customizable LLM prompt templates (#256)
+
+- The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).
+- Added `--llm-prompt-template PATH`, the `LEAKLENS_LLM_PROMPT_TEMPLATE` environment variable, and a project-level `.leaklens/prompt.txt` override.
+- Providers render findings through the selected template using the `{severity}`, `{kind}`, `{location}`, `{location_label}` and `{detail}` placeholders; unknown placeholders are preserved and braces that are not valid placeholders are left untouched.
+
+
 ### AI model artifact and provenance
 
 - The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.
