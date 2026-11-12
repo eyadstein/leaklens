@@ -83,6 +83,7 @@ def benchmark_case_names() -> set[str]:
         bench_advanced,
         bench_cases,
         bench_data,
+        bench_dl,
         bench_drift,
         bench_missing,
         bench_pipeline,
@@ -100,6 +101,7 @@ def benchmark_case_names() -> set[str]:
     names |= {case.name for case in bench_drift._build_cases()}
     names |= {case.name for case in bench_pipeline._build_cases()}
     names |= {case.name for case in bench_text._build_cases()}
+    names |= {case.name for case in bench_dl._build_cases()}
     return names
 
 
@@ -142,6 +144,9 @@ def test_diagnostic_kinds_are_not_scored():
         "text_eval_contamination",
         "rag_index_leakage",
         "text_embedding_similarity",
+        "dl_split_overlap",
+        "dl_training_protocol_mismatch",
+        "artifact_unsafe_format",
     }
 
 

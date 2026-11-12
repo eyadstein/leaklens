@@ -74,6 +74,7 @@ def test_engine_ids_are_frozen():
         "leaklens.intelligence.deterministic",
         "leaklens.pipeline",
         "leaklens.text",
+        "leaklens.dl",
     }
 
 
@@ -92,3 +93,47 @@ def test_surface_fingerprints_are_frozen():
     for surface, (finding, expected) in GOLDEN_FINGERPRINTS.items():
         assert manifest.surface_for(finding.kind) == surface
         assert fingerprint_for(finding) == expected, surface
+
+
+PHASE16_FINGERPRINTS = {
+    "dl_split_overlap": (
+        Finding(
+            "high",
+            "dl_split_overlap",
+            "train.py",
+            "the same dataset is used for training and evaluation; "
+            "every evaluated sample was trained on",
+            stable_key="split:train.py:same_dataset",
+            diagnostic=True,
+        ),
+        "5dd4284d341d301c0866aced2d253a8089c105907b442858754f14c253e10596",
+    ),
+    "dl_training_protocol_mismatch": (
+        Finding(
+            "medium",
+            "dl_training_protocol_mismatch",
+            "train.py",
+            "early stopping patience=5 is not smaller than max_epochs=5",
+            stable_key="protocol:train.py:early_stop",
+            diagnostic=True,
+        ),
+        "24278149417d9154b39489d8bac4cd95afbe5513b2bb68fd15db9e2b35ce0ba3",
+    ),
+    "artifact_unsafe_format": (
+        Finding(
+            "high",
+            "artifact_unsafe_format",
+            "model.pkl",
+            "serialized checkpoint refused without loading it: pickle format",
+            stable_key="artifact:model.pkl:pickle",
+            diagnostic=True,
+        ),
+        "374601910d5f065ece938212768ea0e69626329aea1bc24f743b77df63b5a93f",
+    ),
+}
+
+
+def test_phase16_kind_fingerprints_are_frozen():
+    for kind, (finding, expected) in PHASE16_FINGERPRINTS.items():
+        assert finding.kind == kind
+        assert fingerprint_for(finding) == expected, kind

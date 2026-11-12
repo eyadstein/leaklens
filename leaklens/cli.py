@@ -514,6 +514,85 @@ def text(argv) -> int:
     return 1 if a.fail_on_findings and findings else 0
 
 
+def dl(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens dl",
+        description=(
+            "Audit deep-learning training code, configs and model artifacts "
+            "for split overlap, reproducibility and unsafe checkpoints"
+        ),
+    )
+    p.add_argument("path", help="repository root to audit")
+    p.add_argument("--json", action="store_true")
+    p.add_argument(
+        "--max-files",
+        type=int,
+        default=5000,
+        help="maximum files walked (default 5000)",
+    )
+    p.add_argument(
+        "--max-artifact-mb",
+        type=int,
+        default=64,
+        help="maximum artifact size in MiB (default 64)",
+    )
+    p.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="exit 1 when any diagnostic deep-learning finding is reported",
+    )
+    a = p.parse_args(argv)
+    if a.max_files < 1:
+        p.error("--max-files must be positive")
+    if a.max_artifact_mb < 1:
+        p.error("--max-artifact-mb must be positive")
+    root = Path(a.path)
+    if not root.is_dir():
+        p.error(f"not a directory: {a.path}")
+
+    from .analysis.dl import audit_dl
+
+    report = audit_dl(
+        root,
+        max_files=a.max_files,
+        max_artifact_bytes=a.max_artifact_mb * 1024 * 1024,
+    )
+    findings = list(report.findings)
+    sections = assemble.build(findings)
+    rep = {
+        "trust_score": sections.trust_score,
+        "counts": sections.counts,
+        "findings": sections.findings,
+        "policy": sections.policy,
+        "resolved": sections.resolved,
+        "dl": report.to_dict(),
+    }
+
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"LeakLens trust score: {rep['trust_score']}/100")
+        print(
+            f"{len(findings)} diagnostic findings, "
+            f"{len(report.artifacts)} artifacts inspected"
+            + (f", {sum(report.skipped.values())} skipped" if report.skipped else "")
+        )
+        if report.skipped.get("yaml_not_installed"):
+            print(
+                'warning: YAML configs were skipped; pip install "leaklens-ml[yaml]"',
+                file=sys.stderr,
+            )
+        for finding in sections.findings:
+            print(
+                f"[{finding['severity'].upper()}] {finding['kind']} :: "
+                f"{finding['column']} :: {finding['detail']}"
+            )
+        if not findings:
+            print("No deep-learning leakage found.")
+
+    return 1 if a.fail_on_findings and findings else 0
+
+
 def doctor(argv) -> int:
     from importlib import metadata as _meta
 
@@ -659,6 +738,8 @@ def main(argv=None) -> int:
         return images(argv[1:])
     if argv and argv[0] == "text":
         return text(argv[1:])
+    if argv and argv[0] == "dl":
+        return dl(argv[1:])
     if argv and argv[0] == "doctor":
         return doctor(argv[1:])
     if argv and argv[0] == "workspace":

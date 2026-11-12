@@ -41,6 +41,9 @@ _DIAGNOSTIC_KINDS = frozenset(
         "text_eval_contamination",
         "rag_index_leakage",
         "text_embedding_similarity",
+        "dl_split_overlap",
+        "dl_training_protocol_mismatch",
+        "artifact_unsafe_format",
     }
 )
 
@@ -527,6 +530,31 @@ DETECTORS: tuple[Detector, ...] = (
         scored=False,
         modalities=("text",),
     ),
+    _entry(
+        "dl_split_overlap",
+        "code",
+        "high",
+        "dl_split_overlap",
+        "same dataset on both sides",
+        scored=False,
+    ),
+    _entry(
+        "dl_training_protocol_mismatch",
+        "code",
+        "medium",
+        "dl_training_protocol_mismatch",
+        "early stopping can never fire",
+        scored=False,
+    ),
+    _entry(
+        "artifact_unsafe_format",
+        "code",
+        "high",
+        "artifact_unsafe_format",
+        "pickle checkpoint refused",
+        scored=False,
+        modalities=("artifact",),
+    ),
 )
 
 BY_KIND: dict[str, Detector] = {entry.kind: entry for entry in DETECTORS}
@@ -593,6 +621,20 @@ ENGINES: dict[str, Engine] = {
                 "text_eval_contamination",
                 "rag_index_leakage",
                 "text_embedding_similarity",
+            }
+        ),
+    ),
+    "leaklens.dl": Engine(
+        "leaklens.dl",
+        "code",
+        None,
+        frozenset(
+            {
+                "dl_split_overlap",
+                "dl_training_protocol_mismatch",
+                "artifact_unsafe_format",
+                "no_random_state",
+                "pipeline_unpinned_dependency",
             }
         ),
     ),
