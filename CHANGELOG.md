@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### CI covers Python 3.14 (#543)
+
+- The test matrix in `.github/workflows/ci.yml` now runs the suite, the LeakLens self-scan and all benchmarks on Python 3.14 alongside 3.10–3.12, matching the versions the README already lists as locally verified. 3.13 remains outside the matrix and is still not claimed as verified.
+
 ### Customizable LLM prompt templates (#256)
 
 - The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).
