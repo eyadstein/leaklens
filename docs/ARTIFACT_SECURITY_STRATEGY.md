@@ -306,6 +306,14 @@ Planned, in order:
 | M-S6 | Prompt-injection corpus | 18 | A corpus of documents containing instructions aimed at the LLM produces no change to findings/score; the LLM output is discarded or ignored, and a test asserts it |
 | M-S7 | Dependency admission rule | every phase | A new dependency requires: license check, maintenance check, install-size note, optional-extra placement, and a labelled benchmark or test — documented in the PR template |
 
+Status (Phase 16, 2026-11-13): the **artifact half of M-S1** and all of **M-S2**
+are shipped in `analysis/artifacts/` and recorded in
+[PHASE16_ACCEPTANCE.md](PHASE16_ACCEPTANCE.md). One typed intake refuses pickle
+and archive input before any parser, with a reason on every skip, and a 30-case
+hostile corpus proves no crash and no write. `upload_guard` itself is unchanged:
+it is the dataset-upload boundary, not an artifact decoder. The image-decoder half
+of M-S1 and M-S5 remain with Phase 17.
+
 ---
 
 ## 7. What this strategy refuses
