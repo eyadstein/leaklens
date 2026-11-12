@@ -549,6 +549,11 @@ def main(argv=None) -> int:
     p.add_argument("--llm-base-url", help="LLM provider base URL")
     p.add_argument("--llm-model", help="LLM model name")
     p.add_argument(
+        "--llm-prompt-template",
+        metavar="PATH",
+        help="custom prompt template file for LLM explanations",
+    )
+    p.add_argument(
         "--llm-max-findings",
         type=int,
         default=10,
@@ -671,6 +676,8 @@ def main(argv=None) -> int:
         p.error("graph.fail_on_new needs graph.baseline in config")
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
+    if a.llm_prompt_template and not a.llm:
+        p.error("--llm-prompt-template requires --llm")
     if not a.train and not scan_targets:
         p.error("give a CSV and/or --scan PATH")
     if a.train and not target:
@@ -788,7 +795,12 @@ def main(argv=None) -> int:
     explanations = None
     if a.llm:
         try:
-            provider = llm.create_provider(a.llm_provider, a.llm_base_url, a.llm_model)
+            provider = llm.create_provider(
+                a.llm_provider,
+                a.llm_base_url,
+                a.llm_model,
+                prompt_template=a.llm_prompt_template,
+            )
             explanations = llm.explain_findings(fs, provider, a.llm_max_findings)
         except llm.LLMError as exc:
             p.error(str(exc))
