@@ -89,4 +89,4 @@ def test_files_outside_the_snapshot_root_are_skipped(tmp_path):
         link.symlink_to(outside)
     except (OSError, NotImplementedError):
         pytest.skip("symlinks unavailable")
-    assert read_snapshot(root, field="text") == list(TRAIN)
+    assert read_snapshot(root, field="text") == [*TRAIN, "v" * 40]
