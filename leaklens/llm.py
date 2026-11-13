@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -111,12 +112,31 @@ UNSAFE_CLAIM = re.compile(
     r"|\bfindings?\b[^.\n]{0,30}\b(?:hidden|suppressed|removed|deleted|cleared|dismissed)\b"
     r"|\b(?:severity|risk)\s+(?:should|must|is|was)\s+(?:be\s+)?"
     r"(?:low|none|zero|cleared)\b"
+    r"|\bseverity\s+(?:should|must|needs?\s+to|has\s+to)\s+be\b"
+    r"|\b(?:raise|lower|increase|reduce|change|set)\s+(?:the\s+)?severity\b"
+    r"|\bfindings?\b[^.;\n]{0,20}\b(?:can|may|should|must)\s+be\s+"
+    r"(?:ignored|dismissed|discarded|removed|deleted|dropped|cleared)\b"
     r"|\b(?:finding|leak)\s+(?:is|was)\s+(?:a\s+)?false\s+positive\b"
-    r"|\bmark\s+(?:this|it|the\s+\w+)\s+(?:as\s+)?(?:safe|clean)\b"
+    r"|\bmark\s+(?:this|it|the)\b[^.\n]{0,30}\b(?:as\s+)?(?:safe|clean)\b"
     r"|\b(?:this|the)\s+(?:dataset|pipeline|model)\s+(?:is|looks)\s+"
     r"(?:safe|clean)\b",
     re.IGNORECASE,
 )
+# Formatting-only variants must not hide a claim from the denylist.  Fold
+# fullwidth letters, zero-width format characters and dash variants for
+# matching; width characters keep their display form, format characters are
+# also stripped from output.
+_CLAIM_DASHES = re.compile(r"[-\u2010\u2011\u2012\u2013\u2014\u2015]")
+
+
+def _claim_view(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return _UNTRUSTED_WHITESPACE.sub(" ", _CLAIM_DASHES.sub(" ", text)).strip()
+
+
+def _unsafe_claim(text: str) -> bool:
+    return UNSAFE_CLAIM.search(_claim_view(text)) is not None
 
 
 def _safe_location(value: str) -> str:
@@ -249,7 +269,9 @@ def _prompt(finding, template: str | None = None) -> str:
 
 def _sanitize_llm_output(value: str) -> str:
     """Render model output as plain text without terminal control or ANSI escapes."""
-    return _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", str(value))).strip()
+    text = _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", str(value)))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return text.strip()
 
 
 class OllamaProvider:
@@ -440,5 +462,5 @@ def explain_findings(
         text = _sanitize_llm_output(provider.explain(finding))
         # Output is display-only, but an injected reply must not narrate a
         # safety or severity verdict the deterministic engine did not make.
-        explanations[index] = None if UNSAFE_CLAIM.search(text) else text
+        explanations[index] = None if _unsafe_claim(text) else text
     return explanations

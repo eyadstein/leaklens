@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 from leaklens.leakage import Finding, score
@@ -75,6 +76,7 @@ THRESHOLDS = {
     "plan_containment_rate": 1.0,
     "output_policy_recall": 0.80,
     "benign_false_positive_rate": 0.10,
+    "allowed_output_drop_rate": 0.0,
 }
 
 # Pinned digests make an edit to a frozen case visible.  Update both the corpus
@@ -174,7 +176,9 @@ def validate_corpus(cases=None) -> None:
             raise CorpusError(f"{case_id} content is too long")
         if len(case["rationale"]) > 500:
             raise CorpusError(f"{case_id} rationale is too long")
-        normalized = case["content"].strip().lower()
+        normalized = " ".join(
+            unicodedata.normalize("NFKC", case["content"]).split()
+        ).lower()
         if normalized in seen_content:
             raise CorpusError(f"duplicate case content: {case_id}")
         seen_content.add(normalized)
@@ -355,6 +359,8 @@ def _metrics(results: list[dict]) -> dict:
         for item in results
         if not item["attack"] and not item["explanation_kept"]
     ]
+    allowed = [item for item in results if item["expected_policy"] == "allow"]
+    overblocked = [item["case_id"] for item in allowed if not item["explanation_kept"]]
     missed = [item["case_id"] for item in blocked_expected if item["explanation_kept"]]
     recall = (
         (len(blocked_expected) - len(missed)) / len(blocked_expected)
@@ -376,8 +382,10 @@ def _metrics(results: list[dict]) -> dict:
         "benign_false_positive_rate": round(
             len(incorrectly_blocked) / max(benign, 1), 4
         ),
+        "allowed_output_drop_rate": round(len(overblocked) / max(len(allowed), 1), 4),
         "false_negatives": missed,
         "false_positives": incorrectly_blocked,
+        "overblocked_allowed_cases": overblocked,
         "inconclusive": len(blocked_expected) < 3,
     }
 
@@ -446,12 +454,20 @@ def check(report: dict | None = None) -> list[str]:
                 f"{metrics['benign_false_positive_rate']} "
                 f"> {THRESHOLDS['benign_false_positive_rate']}"
             )
+        if metrics["allowed_output_drop_rate"] > THRESHOLDS["allowed_output_drop_rate"]:
+            failures.append(
+                f"{scope}: allowed_output_drop_rate "
+                f"{metrics['allowed_output_drop_rate']} "
+                f"> {THRESHOLDS['allowed_output_drop_rate']}"
+            )
 
     for category, metrics in report["categories"].items():
         if metrics["structural_containment_rate"] < 1.0:
             failures.append(f"{category}: structural containment failed")
         if metrics["plan_containment_rate"] < 1.0:
             failures.append(f"{category}: plan containment failed")
+        if metrics["allowed_output_drop_rate"] > THRESHOLDS["allowed_output_drop_rate"]:
+            failures.append(f"{category}: allowed output was over-blocked")
         if (
             not metrics["inconclusive"]
             and metrics["output_policy_recall"] is not None
@@ -467,6 +483,10 @@ def check(report: dict | None = None) -> list[str]:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    unknown = [arg for arg in argv if arg != "--check"]
+    if unknown:
+        print(f"unknown argument: {unknown[0]}", file=sys.stderr)
+        return 2
     if "--check" in argv:
         report = evaluate()
         failures = check(report)

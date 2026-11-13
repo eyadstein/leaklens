@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from leaklens.leakage import Finding
-from leaklens.llm import UNSAFE_CLAIM
+from leaklens.llm import _unsafe_claim
 
 from .schemas import (
     Hypothesis,
@@ -688,8 +688,9 @@ def _parse_enrichment(raw: str, allowed_ids: set[str]) -> LLMEnrichment:
         [enrichment.summary]
         + [note.explanation for note in enrichment.notes]
         + [action for note in enrichment.notes for action in note.actions]
+        + [step for note in enrichment.notes for step in note.verification]
     )
-    if UNSAFE_CLAIM.search(combined):
+    if _unsafe_claim(combined):
         raise ValueError("LLM response made an unsupported safety or severity claim")
     return enrichment
 

@@ -328,7 +328,10 @@ A versioned 47-case synthetic corpus (32 attacks, 15 benign hard negatives) exer
 Untrusted fields are flattened before rendering, unsafe model claims are dropped, and every
 model reply is display-only. Pinned development/holdout digests, category-level metrics and the
 measured false negative are published; the corpus is not evidence of universal injection
-resistance. See [PROMPT_INJECTION.md](PROMPT_INJECTION.md).
+resistance. An independent adversarial review on 2026-11-13 reproduced the trust boundaries and
+metrics, then fixed a plan-verification guard gap, a severity-reassignment regression, a dead
+allow-policy metric and formatting/word-order bypasses; the remaining finite-denylist bypasses are
+documented. See [PROMPT_INJECTION.md](PROMPT_INJECTION.md).
 
 Status (release integrity, 2026-11-13): **M-S4 is complete and strengthened.**
 The wheel check now requires every module and package resource derived from the
