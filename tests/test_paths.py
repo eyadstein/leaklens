@@ -47,7 +47,7 @@ def test_absolute_path_outside_is_refused(tmp_path):
 
 
 def test_unc_and_device_paths_are_refused_before_resolution(tmp_path):
-    # These must not touch the network; the anchor check runs before resolve().
+    # These must not touch the network; the anchor check runs before realpath.
     for value in ("//server/share/x.csv", "//?/C:/x.csv", r"\\server\share\x.csv"):
         with pytest.raises(PathOutsideRoot, match="outside the workspace root"):
             resolve_within(tmp_path, value)
