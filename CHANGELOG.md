@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Dataflow tracking of derived variables (#19)
+
+- Enhanced the scanner's dataflow analysis to track multi-hop variables derived from the full dataset (e.g. `X2 = X.copy(); X3 = f(X2)` and column selections) via fixed-point propagation.
+- Initialized split tracking from all splitters (including cross-validation splitters like `KFold`) to accurately flag full-data fits and derived-variable leakage across the split lifecycle.
+- Added dataflow test cases and expanded the regression benchmark.
+
+
 ### AI model artifact and provenance
 
 - The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.

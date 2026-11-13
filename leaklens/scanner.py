@@ -84,6 +84,41 @@ def _names(expr) -> set:
     return _all_names(expr)
 
 
+def _is_column_selection_or_full_slice(node: ast.Subscript) -> bool:
+    """True if subscript selects columns or full rows rather than partitioning rows."""
+    sl = node.slice
+    if isinstance(sl, ast.Tuple) and len(sl.elts) >= 1:
+        first_dim = sl.elts[0]
+        if (
+            isinstance(first_dim, ast.Slice)
+            and first_dim.lower is None
+            and first_dim.upper is None
+        ):
+            return True
+    if isinstance(sl, ast.Constant) and isinstance(sl.value, str):
+        return True
+    if isinstance(sl, (ast.List, ast.Set, ast.Tuple)):
+        if sl.elts and all(
+            isinstance(e, ast.Constant) and isinstance(e.value, str) for e in sl.elts
+        ):
+            return True
+    return False
+
+
+def _derives_from_full(expr, full_set: set) -> bool:
+    """True if expression derives from full dataset without row-level partitioning."""
+    if not full_set:
+        return False
+    if _names(expr) & full_set:
+        return True
+    for n in ast.walk(expr):
+        if isinstance(n, ast.Subscript):
+            base_names = _all_names(n.value)
+            if (base_names & full_set) and _is_column_selection_or_full_slice(n):
+                return True
+    return False
+
+
 def _parse_source(
     src: str,
 ) -> tuple[
@@ -227,21 +262,31 @@ def _scan_core(
             and any(k in ctor.get(f.value.id, "") for k in ("Fold", "Split"))
         )
 
-    splits = [c.lineno for c in calls if is_split(c)]
+    split_calls = sorted((c for c in calls if is_split(c)), key=lambda c: c.lineno)
+    splits = [c.lineno for c in split_calls]
     first = min(splits) if splits else None
 
-    # dataflow: which names hold the FULL dataset that train_test_split divides?
+    # dataflow: which names hold the FULL dataset that a split divides?
     tts = sorted(
         (c for c in calls if _name(c) == "train_test_split"), key=lambda c: c.lineno
     )
-    tts_line, full = None, set()
-    if tts:
-        tts_line = tts[0].lineno
-        for a in tts[0].args:
-            full |= _all_names(a)
+    tts_line = tts[0].lineno if tts else first
+    full = set()
+    if split_calls:
+        for s in split_calls:
+            if _name(s) == "train_test_split":
+                for a in s.args:
+                    full |= _all_names(a)
+            else:
+                if s.args:
+                    full |= _all_names(s.args[0])
+            for kw in s.keywords:
+                if kw.arg in ("X", "y"):
+                    full |= _all_names(kw.value)
+
         defs = {}
         for a in assigns:
-            if a.lineno < tts_line and not _is_tts(a.value):
+            if not _is_tts(a.value):
                 for t in a.targets:
                     for nm in _tnames(t):
                         defs.setdefault(nm, []).append(a.value)
@@ -250,15 +295,25 @@ def _scan_core(
             nm = work.pop()
             for v in defs.get(nm, []):
                 for x in _all_names(v):
-                    if x in defs and x not in full:
-                        full.add(x)
-                        work.append(x)
-        for a in assigns:
-            if _is_tts(a.value):
-                continue
-            if _names(a.value) & full:
-                for t in a.targets:
-                    full |= _tnames(t)
+                    if x not in full:
+                        if x in defs or isinstance(
+                            v, (ast.Call, ast.Attribute, ast.Subscript)
+                        ):
+                            full.add(x)
+                            work.append(x)
+
+        changed = True
+        while changed:
+            changed = False
+            for a in assigns:
+                if _is_tts(a.value):
+                    continue
+                if _derives_from_full(a.value, full):
+                    for t in a.targets:
+                        for nm in _tnames(t):
+                            if nm not in full:
+                                full.add(nm)
+                                changed = True
 
     # names and string columns the split treats as the label (label argument(s) only, args[1:]):
     # train_test_split(X, y) -> y; df["target"] -> "target"; X's columns are features, never the label
@@ -510,7 +565,7 @@ def _scan_core(
         elif (
             tts_line is not None
             and c.lineno > tts_line
-            and any(_names(a) & full for a in c.args)
+            and any((_names(a) & full) or _derives_from_full(a, full) for a in c.args)
         ):
             out.append(
                 Finding(
