@@ -280,6 +280,9 @@ def images(argv) -> int:
             f"{stats['test_images']} test images"
             + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else "")
         )
+        if stats["refused"]:
+            reasons = ", ".join(f"{k}: {v}" for k, v in stats["refused"].items())
+            print(f"    refused {sum(stats['refused'].values())} image(s): {reasons}")
         for f in fs:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
         for m in pairs[: a.samples]:

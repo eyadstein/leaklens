@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Image decode budgets (M-S5)
+
+- `leaklens images` now bounds every image before decoding: 64 MiB encoded bytes, 20,000 px per side, 64 MP per file, 64 animation frames, and a 2 GP pixel budget shared by both splits. Refusals are reported by stable reason in the new `refused` map and text line, separately from `unreadable`; `--json` also gains `decoded_pixels`.
+- A corrupt image no longer crashes the audit; decoder exceptions are counted as unreadable. Pillow's global decompression-bomb limit is unchanged. See `docs/IMAGE_DECODE_BUDGETS.md`.
+
 ### Customizable LLM prompt templates (#256)
 
 - The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).

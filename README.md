@@ -244,7 +244,7 @@ Exit code is 1 when a high-severity finding is present, so it gates CI.
 
 ### `leaklens images TRAIN_DIR TEST_DIR`
 
-Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra.
+Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra. Decoding is bounded per file and per audit; refused files are reported by reason, separately from `unreadable` (see [IMAGE_DECODE_BUDGETS.md](docs/IMAGE_DECODE_BUDGETS.md)). A refused image is not compared, so an all-refused run can still score 100/100.
 
 ```sh
 leaklens images data/train data/test
