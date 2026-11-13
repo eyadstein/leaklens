@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from leaklens.leakage import Finding
+from leaklens.llm import UNSAFE_CLAIM
 
 from .schemas import (
     Hypothesis,
@@ -30,12 +31,6 @@ _PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "info": 3}
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _WHITESPACE = re.compile(r"\s+")
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-_UNSAFE_CLAIM = re.compile(
-    r"(no|zero)\s+risk|trust\s+score\s+(?:is|should|must)|"
-    r"remove\s+(?:the\s+)?finding|ignore\s+(?:the\s+)?finding|"
-    r"safe\s+to\s+(?:deploy|ship|release)|severity\s+(?:should|must)\s+be",
-    re.IGNORECASE,
-)
 
 
 class CompletionProvider(Protocol):
@@ -694,7 +689,7 @@ def _parse_enrichment(raw: str, allowed_ids: set[str]) -> LLMEnrichment:
         + [note.explanation for note in enrichment.notes]
         + [action for note in enrichment.notes for action in note.actions]
     )
-    if _UNSAFE_CLAIM.search(combined):
+    if UNSAFE_CLAIM.search(combined):
         raise ValueError("LLM response made an unsupported safety or severity claim")
     return enrichment
 
