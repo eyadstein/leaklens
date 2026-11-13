@@ -54,6 +54,7 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Path containment | `leaklens/paths.py` (`resolve_within`, `contained`); refuses foreign drives/UNC anchors before `resolve()` |
 | Missingness audit | `leaklens/missingness.py`; benchmark `leaklens/bench_missing.py` + `docs/MISSINGNESS_BENCHMARK.md` |
 | Experimental AI layer | `leaklens/ai/` (`semantics.py`, `features.py`, `corpus.py`, `learned.py`, `reasoning.py`, `schemas.py`, `analysis.py`); benchmark `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md`; design `docs/AI_INTELLIGENCE.md` |
+| Prompt-injection corpus (M-S6) | `leaklens/ai/prompt_injection.py` + `prompt_injection_corpus.json`; `tests/test_prompt_injection.py`; `python -m leaklens.ai.prompt_injection --check`; docs `docs/PROMPT_INJECTION.md` |
 
 New detectors: data → `leakage.py`, code → `scanner.py`, SQL → `sqlscan.py`. Add a test in `tests/`. `Finding.severity` is one of `high|medium|low`; trust score (100 − 35/15/5 per finding) is computed centrally in `leakage.score()` — don't duplicate it. `Finding.diagnostic=True` marks opt-in diagnostics that `score()` and the default exit gate ignore.
 

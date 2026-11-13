@@ -466,6 +466,11 @@ confidence semantics; Phase 13 M2 for the assembler that emits the manifest.
 **Tests.** Evidence-anchoring tests for every statement, injection corpus, manifest tamper matrix,
 fallback tests, cross-run comparison, accessibility checks on new workspace panels.
 
+**Security note.** The M-S6 prompt-injection corpus ([PROMPT_INJECTION.md](PROMPT_INJECTION.md))
+already ships against the existing `llm` and `ai/reasoning` prompts. M4 must reuse that corpus
+when narration moves onto `investigation.py`; it is not a second deliverable, and M-S6 did not
+require M1 or redesign the Phase 18 plan type.
+
 **Benchmarks.** Investigation quality on a fixed set of audited repositories (does the plan name
 the real cause?), measured and published with misses; LLM-on vs LLM-off equality of findings/score.
 
