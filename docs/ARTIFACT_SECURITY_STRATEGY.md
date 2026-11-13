@@ -60,11 +60,11 @@ and source; (c) the integrity of the audit result a user relies on; (d) the user
 | T2 | Path traversal in upload names | `upload_guard.sanitize_filename` | Strips path components, NULs, caps length | — |
 | T3 | Formula/CSV injection in exported reports | `report`, `sarif`, planned workspace CSV export | Values are HTML-escaped; no spreadsheet export today | The planned selection CSV export must neutralise cells starting with `= + - @` and quote per RFC 4180 before it ships; a test covers a malicious finding detail |
 | T4 | Malicious serialized model (pickle/RCE) | future artifact engine; `POST /predict` | Scan path loads no pickle; `api.py` loads operator-placed joblib models from `./models/` only (see §2.2 G1) | Roadmap must forbid `pickle`, `torch.load` without `weights_only`, and request-time joblib loads; the prediction endpoint needs an explicit opt-in or a safe format; see M-S2 |
-| T5 | Malicious image decoder payload | `images` extra (Pillow) | Pillow `>=9.1`; no decode limits set by LeakLens | Needs `Image.MAX_IMAGE_PIXELS`, per-file and total pixel budgets, format allowlist |
+| T5 | Malicious image decoder payload | `images` extra (Pillow) | Pillow `>=9.1`; LeakLens preflight rejects oversized bytes, dimensions, pixels, frames and unsupported formats before decode; Pillow bomb warnings/errors are refusals | Video decoding and multi-frame content beyond the frame count are out of scope; limits are constants, not per-call options |
 | T6 | Malicious `.pyc`/native payload in a scanned project | code scanner | Source is parsed, never imported or executed | Keep it that way: the artifact engine must parse only |
 | T7 | Prompt injection via scanned source or dataset text | `--llm`, `--ai-llm` | Only sanitized finding metadata is sent; never raw rows or full source; schema-validated reply; deterministic fallback | Keep the ban on raw text; add an explicit injection test corpus |
 | T8 | Workspace exposure beyond localhost | `workspace` | Binds `127.0.0.1`, documents that any reachable client can read the workspace root | No auth by design; keep `--host` an explicit, documented risk |
-| T9 | Audit-result tampering / non-reproducibility | reports, manifests | Fingerprints, provenance records, artifact digests, deterministic scoring | No signed, offline-verifiable audit manifest yet (M-S3) |
+| T9 | Audit-result tampering / non-reproducibility | reports, manifests | Fingerprints, provenance records, artifact digests, deterministic scoring; opt-in unsigned audit manifest and stdlib-only offline `leaklens verify` (M-S3) | No signature or creator authentication; a deliberate rewrite can recompute the digest |
 | T10 | Supply chain: dependency or action compromise | `pyproject.toml`, workflows | Dependabot, CodeQL, `scripts/generate_sbom.py`, `scripts/validate_release.py` | GitHub Actions are referenced by major tag (`actions/checkout@v7`), not by commit SHA |
 | T11 | Accidental release of test corpora, benchmarks or fixtures | sdist/wheel | `bench_realworld` digest guard, `validate_release.py` | No explicit allowlist diff of wheel contents before publish (M-S4) |
 | T12 | Bad dependency pulled in by an optional extra | extras | Extras are small and pinned by major (`sqlglot>=25`, `pillow>=9.1`, …) | New heavy extras (vision/DL/text) need a written dependency admission rule |
@@ -302,9 +302,37 @@ Planned, in order:
 | M-S2 | Serialized-artifact policy enforced in code | 16 | Pickle/`.pt` produce a refusal finding; `safetensors` and JSON parse with caps; an AST check over `leaklens/**/*.py` resolves direct and aliased `torch.load` imports (docs excluded) |
 | M-S3 | Audit manifest emitted by `assemble.py` + offline verifier (`leaklens verify`) | 18 | Manifest digest stable across two runs on identical inputs; verifier detects a changed score, changed evidence and a changed detector version; verification uses stdlib only |
 | M-S4 | Release allowlist + SHA-pinned actions | 13 | Wheel diff fails the build if an unexpected file ships; all actions pinned; Dependabot keeps pins fresh |
-| M-S5 | Image decode budgets | 17 | `MAX_IMAGE_PIXELS` set, per-audit pixel budget enforced, decompression-bomb image refused with a skip |
+| M-S5 | Image decode budgets | 17 | LeakLens preflight pixel limit set (Pillow's global limit untouched), per-file and per-audit pixel budget enforced, decompression-bomb image refused with a skip |
 | M-S6 | Prompt-injection corpus | 18 | A corpus of documents containing instructions aimed at the LLM produces no change to findings/score; the LLM output is discarded or ignored, and a test asserts it |
 | M-S7 | Dependency admission rule | every phase | A new dependency requires: license check, maintenance check, install-size note, optional-extra placement, and a labelled benchmark or test — documented in the PR template |
+
+Status (Phase 16, 2026-11-13): the **artifact half of M-S1** and all of **M-S2**
+are shipped in `analysis/artifacts/` and recorded in
+[PHASE16_ACCEPTANCE.md](PHASE16_ACCEPTANCE.md). One typed intake refuses pickle
+and archive input before any parser, with a reason on every skip, and a 30-case
+hostile corpus proves no crash and no write. `upload_guard` itself is unchanged:
+it is the dataset-upload boundary, not an artifact decoder.
+
+Status (image intake, 2026-11-13): **M-S5 is complete and the image half of M-S1
+is complete for the existing intake.** `images.py` enforces per-file compressed
+bytes, side, pixel and animation-frame limits before decoding, plus one pixel
+budget shared by both splits of an audit; a refused image carries a stable reason
+(`too_large`, `too_large_dimensions`, `too_many_pixels`, `too_many_frames`,
+`unsupported_format`, `decompression_bomb`, `budget_exhausted`) that is reported
+separately from `unreadable`. Pillow's own decompression-bomb limit is not
+weakened. See [IMAGE_DECODE_BUDGETS.md](IMAGE_DECODE_BUDGETS.md).
+
+Status (release integrity, 2026-11-13): **M-S4 is complete and strengthened.**
+The wheel check now requires every module and package resource derived from the
+tagged tree, the sdist is validated too, and a `package` CI job builds and
+validates both distributions on every pull request ([ADR-026](ARCHITECTURE_DECISIONS.md)).
+
+Status (audit manifest, 2026-11-13): **M-S3 is complete, unsigned by design.**
+`--manifest` writes a deterministic digest manifest of the inputs, options,
+detector catalogue, findings, policy outcome, score and gate; `leaklens verify`
+recomputes it offline with the standard library and names a changed section or a
+missing/modified input. It proves content integrity, not authenticity or
+provenance. See [AUDIT_MANIFEST.md](AUDIT_MANIFEST.md).
 
 ---
 

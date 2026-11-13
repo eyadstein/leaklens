@@ -13,7 +13,7 @@ FIXES = {
     "temporal_leakage": "Split by time: train on earlier data and test on later data.",
     "group_overlap": "Split by entity with GroupShuffleSplit or GroupKFold so no entity appears in both splits.",
     "group_leakage_risk": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
-    "no_random_state": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
+    "no_random_state": "Record the run's randomness and determinism settings: a seed wherever randomness enters (seed=<int> in PyTorch/Lightning, seed_everything, set_random_seed, or random_state=<int> in scikit-learn/XGBoost/LightGBM), deterministic-algorithm flags (torch.use_deterministic_algorithms, enable_op_determinism) when mixed precision or distributed training is used, and the precision/topology itself (precision, strategy, devices) in the pipeline metadata so the same run can be compared.",
     "target_encode_before_split": "Compute the target encoding from the training fold only (sklearn.preprocessing.TargetEncoder in a Pipeline, or out-of-fold encoding) so held-out rows never help build it.",
     "manual_scale_before_split": "Compute the statistics (mean, std, min, max, ...) on the training split only and apply them to the test split, or use a scaler inside a Pipeline so held-out rows never help set the scale.",
     "fillna_before_split": "Impute using training data only: split first, then compute the mean/median on the training split and apply it to both splits, or use SimpleImputer inside a Pipeline.",
@@ -49,6 +49,14 @@ FIXES = {
     "pipeline_param_drift": "Re-run the pipeline (or commit the new lock) so dvc.lock and the parameter files agree, and keep parameter changes in the same commit as the run they produced.",
     "pipeline_missing_digest": "Re-run the stage so the lock records an md5/hash for every output, and commit the lock. Without a digest the artifact cannot be tied to the evaluated model.",
     "pipeline_unpinned_dependency": "Pin exact versions (package==version) in the requirements file, or record them in a lock file, so re-running the pipeline installs the same environment.",
+    "text_exact_duplicate": "Remove the duplicated documents from one split (or deduplicate before splitting) so an evaluation item cannot also be a training item. Compare the reported hashes, not the raw text.",
+    "text_near_duplicate": "Deduplicate near-identical documents before splitting, or group related documents and split by group. Lower --threshold increases recall and false positives; check the reported examples.",
+    "text_eval_contamination": "Remove every training document whose fingerprint matches the evaluation set, or re-collect the evaluation set. Fingerprints are hashes only; LeakLens never receives the eval corpus itself.",
+    "rag_index_leakage": "Build the retrieval index from training documents only, or keep the evaluation documents out of the loader root. A retriever that can return a test document makes the evaluation score meaningless.",
+    "text_embedding_similarity": "Treat these matches as model-version-specific evidence, not proof: re-check the reported pairs with the deterministic exact/near checks. Deduplicate or group-split before fine-tuning or retrieval evaluation.",
+    "dl_split_overlap": "Split the source data once into disjoint train/eval datasets (or group-split before augmentation) and never evaluate on the training objects. For a Subset split, verify the index sets are disjoint; for transforms, use a deterministic evaluation transform without random resize, crop, flip or jitter.",
+    "dl_training_protocol_mismatch": "Make the declared protocol executable: an early-stopping patience smaller than max_epochs, a positive learning rate, and a scheduler horizon (T_max/total_steps/step_size) that covers the planned steps. Otherwise the run cannot follow the protocol the config claims.",
+    "artifact_unsafe_format": "Do not load the checkpoint. Re-export metadata as safetensors, ONNX or JSON, or provide a checksum and the training config, so LeakLens can audit the artifact without deserializing it. Treat any pickle-based model file from an untrusted source as executable code.",
 }
 
 

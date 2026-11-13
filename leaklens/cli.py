@@ -280,6 +280,9 @@ def images(argv) -> int:
             f"{stats['test_images']} test images"
             + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else "")
         )
+        if stats["refused"]:
+            reasons = ", ".join(f"{k}: {v}" for k, v in stats["refused"].items())
+            print(f"    refused {sum(stats['refused'].values())} image(s): {reasons}")
         for f in fs:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
         for m in pairs[: a.samples]:
@@ -288,6 +291,309 @@ def images(argv) -> int:
             print("No leakage found.")
 
     return 1 if fs else 0
+
+
+def text(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens text",
+        description=(
+            "Check text corpora for cross-split duplicates, eval contamination "
+            "and RAG index leakage"
+        ),
+    )
+    p.add_argument(
+        "train", help="training corpus (.jsonl, .json, .txt, .parquet, .arrow)"
+    )
+    p.add_argument("test", help="evaluation corpus")
+    p.add_argument("--field", help="document field in JSON/JSONL/parquet rows")
+    p.add_argument(
+        "--min-chars",
+        type=int,
+        default=32,
+        help="minimum normalised characters per document (default 32)",
+    )
+    p.add_argument(
+        "--max-docs",
+        type=int,
+        default=10_000,
+        help="maximum documents per split (default 10000)",
+    )
+    p.add_argument(
+        "--threshold",
+        type=float,
+        default=0.8,
+        help="near-duplicate similarity threshold (default 0.8)",
+    )
+    p.add_argument(
+        "--shingle-size", type=int, default=5, help="word shingle size (default 5)"
+    )
+    p.add_argument(
+        "--boilerplate", help="file of boilerplate lines to strip before hashing"
+    )
+    p.add_argument(
+        "--eval-fingerprints", help="file of eval digests, one per line (hash-only)"
+    )
+    p.add_argument(
+        "--write-fingerprints",
+        help="write this evaluation split's digests for --eval-fingerprints",
+    )
+    p.add_argument(
+        "--rag", metavar="ROOT", help="scan a Python root for RAG index leakage"
+    )
+    p.add_argument(
+        "--eval-path", help="declared evaluation path for --rag (repo-relative)"
+    )
+    p.add_argument(
+        "--embeddings",
+        nargs=2,
+        metavar=("TRAIN_VECTORS", "TEST_VECTORS"),
+        help="optional .npy matrices of user-supplied vectors",
+    )
+    p.add_argument(
+        "--embedding-model", help="model id that produced the --embeddings vectors"
+    )
+    p.add_argument(
+        "--embedding-threshold",
+        type=float,
+        default=0.95,
+        help="cosine threshold for --embeddings (default 0.95)",
+    )
+    p.add_argument("--json", action="store_true")
+    p.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="exit 1 when any diagnostic text finding is reported",
+    )
+    a = p.parse_args(argv)
+
+    if not 0.0 <= a.threshold <= 1.0:
+        p.error("--threshold must be between 0 and 1")
+    if not 0.0 <= a.embedding_threshold <= 1.0:
+        p.error("--embedding-threshold must be between 0 and 1")
+    if a.min_chars < 0:
+        p.error("--min-chars must be non-negative")
+    if a.max_docs < 1:
+        p.error("--max-docs must be positive")
+    if a.shingle_size < 1:
+        p.error("--shingle-size must be positive")
+    if bool(a.rag) != bool(a.eval_path):
+        p.error("--rag and --eval-path must be used together")
+    if bool(a.embeddings) != bool(a.embedding_model):
+        p.error("--embeddings and --embedding-model must be used together")
+
+    from .analysis.text.contamination import (
+        contamination_findings,
+        load_fingerprints,
+        write_fingerprints,
+    )
+    from .analysis.text.dedup import exact_findings, near_findings
+    from .analysis.text.embeddings import embedding_findings, load_vectors
+    from .analysis.text.normalize import load_documents, normalize_text
+    from .analysis.text.rag import scan_rag
+
+    field = a.field or "text"
+    boilerplate = frozenset()
+    if a.boilerplate:
+        try:
+            lines = (
+                Path(a.boilerplate)
+                .read_text(encoding="utf-8-sig", errors="replace")
+                .splitlines()
+            )
+        except OSError as exc:
+            p.error(str(exc))
+        boilerplate = frozenset(
+            normalize_text(line) for line in lines if normalize_text(line)
+        )
+
+    try:
+        train_docs, train_skipped = load_documents(
+            a.train,
+            "train",
+            field=a.field,
+            min_chars=a.min_chars,
+            max_docs=a.max_docs,
+            boilerplate=boilerplate,
+        )
+        test_docs, test_skipped = load_documents(
+            a.test,
+            "test",
+            field=a.field,
+            min_chars=a.min_chars,
+            max_docs=a.max_docs,
+            boilerplate=boilerplate,
+        )
+    except (OSError, ValueError, ImportError) as exc:
+        p.error(str(exc))
+
+    try:
+        findings = [
+            *exact_findings(train_docs, test_docs, field),
+            *near_findings(
+                train_docs,
+                test_docs,
+                field,
+                shingle_size=a.shingle_size,
+                threshold=a.threshold,
+            ),
+        ]
+    except ValueError as exc:
+        p.error(str(exc))
+    extra: dict[str, object] = {}
+
+    if a.eval_fingerprints:
+        try:
+            fingerprints = load_fingerprints(a.eval_fingerprints)
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+        findings.extend(contamination_findings(train_docs, fingerprints, field))
+
+    if a.write_fingerprints:
+        try:
+            written = write_fingerprints(a.write_fingerprints, test_docs)
+        except OSError as exc:
+            p.error(str(exc))
+        extra["fingerprints"] = {"path": a.write_fingerprints, "count": written}
+
+    if a.rag:
+        try:
+            rag_findings, hits = scan_rag(a.rag, [a.eval_path])
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+        findings.extend(rag_findings)
+        extra["rag"] = {"hits": len(hits)}
+
+    if a.embeddings:
+        try:
+            train_vectors = load_vectors(a.embeddings[0])
+            test_vectors = load_vectors(a.embeddings[1])
+            findings.extend(
+                embedding_findings(
+                    train_docs,
+                    test_docs,
+                    train_vectors,
+                    test_vectors,
+                    model=a.embedding_model,
+                    threshold=a.embedding_threshold,
+                    field=field,
+                )
+            )
+        except (OSError, ValueError) as exc:
+            p.error(str(exc))
+
+    sections = assemble.build(findings)
+    rep = {
+        "trust_score": sections.trust_score,
+        "counts": sections.counts,
+        "findings": sections.findings,
+        "policy": sections.policy,
+        "resolved": sections.resolved,
+        "field": field,
+        "documents": {"train": len(train_docs), "test": len(test_docs)},
+        "skipped": {"train": train_skipped, "test": test_skipped},
+        **extra,
+    }
+
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"LeakLens trust score: {rep['trust_score']}/100")
+        print(
+            f"{len(train_docs)} train documents, {len(test_docs)} test documents"
+            + (
+                f", {train_skipped + test_skipped} skipped"
+                if train_skipped + test_skipped
+                else ""
+            )
+        )
+        for finding in sections.findings:
+            print(
+                f"[{finding['severity'].upper()}] {finding['kind']} :: "
+                f"{finding['column']} :: {finding['detail']}"
+            )
+        if not findings:
+            print("No leakage found.")
+
+    return 1 if a.fail_on_findings and findings else 0
+
+
+def dl(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens dl",
+        description=(
+            "Audit deep-learning training code, configs and model artifacts "
+            "for split overlap, reproducibility and unsafe checkpoints"
+        ),
+    )
+    p.add_argument("path", help="repository root to audit")
+    p.add_argument("--json", action="store_true")
+    p.add_argument(
+        "--max-files",
+        type=int,
+        default=5000,
+        help="maximum files walked (default 5000)",
+    )
+    p.add_argument(
+        "--max-artifact-mb",
+        type=int,
+        default=64,
+        help="maximum artifact size in MiB (default 64)",
+    )
+    p.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="exit 1 when any diagnostic deep-learning finding is reported",
+    )
+    a = p.parse_args(argv)
+    if a.max_files < 1:
+        p.error("--max-files must be positive")
+    if a.max_artifact_mb < 1:
+        p.error("--max-artifact-mb must be positive")
+    root = Path(a.path)
+    if not root.is_dir():
+        p.error(f"not a directory: {a.path}")
+
+    from .analysis.dl import audit_dl
+
+    report = audit_dl(
+        root,
+        max_files=a.max_files,
+        max_artifact_bytes=a.max_artifact_mb * 1024 * 1024,
+    )
+    findings = list(report.findings)
+    sections = assemble.build(findings)
+    rep = {
+        "trust_score": sections.trust_score,
+        "counts": sections.counts,
+        "findings": sections.findings,
+        "policy": sections.policy,
+        "resolved": sections.resolved,
+        "dl": report.to_dict(),
+    }
+
+    if a.json:
+        print(json.dumps(rep, indent=2))
+    else:
+        print(f"LeakLens trust score: {rep['trust_score']}/100")
+        print(
+            f"{len(findings)} diagnostic findings, "
+            f"{len(report.artifacts)} artifacts inspected"
+            + (f", {sum(report.skipped.values())} skipped" if report.skipped else "")
+        )
+        if report.skipped.get("yaml_not_installed"):
+            print(
+                'warning: YAML configs were skipped; pip install "leaklens-ml[yaml]"',
+                file=sys.stderr,
+            )
+        for finding in sections.findings:
+            print(
+                f"[{finding['severity'].upper()}] {finding['kind']} :: "
+                f"{finding['column']} :: {finding['detail']}"
+            )
+        if not findings:
+            print("No deep-learning leakage found.")
+
+    return 1 if a.fail_on_findings and findings else 0
 
 
 def doctor(argv) -> int:
@@ -409,6 +715,43 @@ def doctor(argv) -> int:
     return 0
 
 
+def verify(argv) -> int:
+    """Verify an audit manifest offline with the standard library."""
+    from . import audit_manifest
+
+    p = argparse.ArgumentParser(
+        prog="leaklens verify",
+        description=(
+            "Verify an audit manifest offline. Detects a manifest or declared "
+            "input changed after it was written; does not prove who wrote it."
+        ),
+    )
+    p.add_argument("manifest", help="audit manifest JSON to verify")
+    p.add_argument(
+        "--root",
+        help=("containment root for declared inputs (default: the current directory)"),
+    )
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+    try:
+        issues = audit_manifest.verify(a.manifest, root=a.root)
+    except audit_manifest.ManifestError as exc:
+        if a.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"leaklens verify: {exc}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps({"ok": not issues, "issues": issues}, indent=2))
+    elif issues:
+        print(f"manifest FAILED: {len(issues)} issue(s)")
+        for issue in issues:
+            print(f"    {issue}")
+    else:
+        print(f"manifest OK: {a.manifest}")
+    return 0 if not issues else 1
+
+
 def _gate_failure(
     outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
 ) -> bool:
@@ -433,17 +776,24 @@ def main(argv=None) -> int:
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "text":
+        return text(argv[1:])
+    if argv and argv[0] == "dl":
+        return dl(argv[1:])
     if argv and argv[0] == "doctor":
         return doctor(argv[1:])
     if argv and argv[0] == "workspace":
         return workspace(argv[1:])
+    if argv and argv[0] == "verify":
+        return verify(argv[1:])
     p = argparse.ArgumentParser(
         prog="leaklens",
         description="Audit datasets and ML code for leakage",
         epilog=(
             "Run 'leaklens doctor' to check your install, 'leaklens init' to write "
-            "a starter .leaklens.toml config, and 'leaklens workspace' for a "
-            "local interactive scan view."
+            "a starter .leaklens.toml config, 'leaklens workspace' for a "
+            "local interactive scan view, and 'leaklens verify' to check an "
+            "audit manifest offline."
         ),
     )
     p.add_argument("--version", action="version", version=__version__)
@@ -549,6 +899,11 @@ def main(argv=None) -> int:
     p.add_argument("--llm-base-url", help="LLM provider base URL")
     p.add_argument("--llm-model", help="LLM model name")
     p.add_argument(
+        "--llm-prompt-template",
+        metavar="PATH",
+        help="custom prompt template file for LLM explanations",
+    )
+    p.add_argument(
         "--llm-max-findings",
         type=int,
         default=10,
@@ -596,6 +951,11 @@ def main(argv=None) -> int:
         "--badge", help="write a shields.io endpoint JSON with the trust score"
     )
     p.add_argument(
+        "--manifest",
+        metavar="PATH",
+        help="write an unsigned, offline-verifiable audit manifest (leaklens verify)",
+    )
+    p.add_argument(
         "--fail-under", type=float, help="exit with code 1 if trust score is below N"
     )
     a = p.parse_args(argv)
@@ -626,6 +986,7 @@ def main(argv=None) -> int:
     sarif_path = choose(a.sarif, cfg.sarif)
     html_path = choose(a.html, cfg.html)
     badge_path = choose(a.badge, cfg.badge)
+    manifest_path = a.manifest
     use_ai = choose(a.ai, cfg.ai, False)
     use_ai_llm = choose(a.ai_llm, cfg.ai_llm, False)
     if use_ai_llm:
@@ -671,6 +1032,8 @@ def main(argv=None) -> int:
         p.error("graph.fail_on_new needs graph.baseline in config")
     if a.llm and a.llm_max_findings < 1:
         p.error("--llm-max-findings must be at least 1")
+    if a.llm_prompt_template and not a.llm:
+        p.error("--llm-prompt-template requires --llm")
     if not a.train and not scan_targets:
         p.error("give a CSV and/or --scan PATH")
     if a.train and not target:
@@ -788,7 +1151,12 @@ def main(argv=None) -> int:
     explanations = None
     if a.llm:
         try:
-            provider = llm.create_provider(a.llm_provider, a.llm_base_url, a.llm_model)
+            provider = llm.create_provider(
+                a.llm_provider,
+                a.llm_base_url,
+                a.llm_model,
+                prompt_template=a.llm_prompt_template,
+            )
             explanations = llm.explain_findings(fs, provider, a.llm_max_findings)
         except llm.LLMError as exc:
             p.error(str(exc))
@@ -990,6 +1358,53 @@ def main(argv=None) -> int:
         except (OSError, ValueError) as exc:
             print(f"leaklens: cannot write evidence graph: {exc}", file=sys.stderr)
             return 2
+    gate = _gate_failure(
+        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
+    )
+    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
+        gate = True
+    if manifest_path:
+        from . import audit_manifest
+
+        inputs = [path for path in (a.train, test_path, *scan_targets) if path]
+        if baseline is not None and baseline_path:
+            inputs.append(baseline_path)
+        options = {
+            "target": target,
+            "test": bool(test_path),
+            "group": group_col,
+            "time": time_col,
+            "threshold": threshold,
+            "sql": sql_settings.enabled,
+            "sql_dialect": sql_settings.dialect if sql_settings.enabled else None,
+            "drift": drift_settings.enabled,
+            "pipeline": bool(a.pipeline),
+            "ai": bool(use_ai),
+            "ai_llm": bool(use_ai_llm),
+            "fail_under": fail_under,
+            "fail_on_new": fail_on_new,
+        }
+        try:
+            document = audit_manifest.build(
+                sections,
+                inputs=inputs,
+                options=options,
+                gate={
+                    "failed": gate,
+                    "fail_under": fail_under,
+                    "fail_on_new": fail_on_new,
+                },
+                root=Path.cwd(),
+            )
+            with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(audit_manifest.dumps(document))
+        except (OSError, ValueError) as exc:
+            print(f"leaklens: cannot write audit manifest: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"Wrote audit manifest {manifest_path} ({document['manifest_digest']})",
+            file=sys.stderr,
+        )
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
@@ -1200,9 +1615,4 @@ def main(argv=None) -> int:
                 f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
             )
             print(res.round(4).to_string(index=False))
-    gate = _gate_failure(
-        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
-    )
-    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
-        gate = True
     return 1 if gate else 0

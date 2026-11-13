@@ -2,11 +2,21 @@
 
 ## Unreleased
 
-### Dataflow tracking of derived variables (#19)
+### Audit manifest and offline verification (M-S3)
 
-- Enhanced the scanner's dataflow analysis to track multi-hop variables derived from the full dataset (e.g. `X2 = X.copy(); X3 = f(X2)` and column selections) via fixed-point propagation.
-- Initialized split tracking from all splitters (including cross-validation splitters like `KFold`) to accurately flag full-data fits and derived-variable leakage across the split lifecycle.
-- Added dataflow test cases and expanded the regression benchmark.
+- `--manifest PATH` writes a deterministic, unsigned digest manifest of an audit: declared input digests, result-affecting options, the detector catalogue, findings, policy outcome, trust score and gate decision.
+- `leaklens verify MANIFEST` recomputes the manifest and its declared inputs offline with the standard library (exit 0 clean, 1 mismatch, 2 unreadable/unsupported), reporting changed sections plus missing, modified and unsafe-path inputs. It detects content changes, not who wrote the manifest. See `docs/AUDIT_MANIFEST.md`.
+
+### Image decode budgets (M-S5)
+
+- `leaklens images` now bounds every image before decoding: 64 MiB encoded bytes, 20,000 px per side, 64 MP per file, 64 animation frames, and a 2 GP pixel budget shared by both splits. Refusals are reported by stable reason in the new `refused` map and text line, separately from `unreadable`; `--json` also gains `decoded_pixels`.
+- A corrupt image no longer crashes the audit; decoder exceptions are counted as unreadable. Pillow's global decompression-bomb limit is unchanged. See `docs/IMAGE_DECODE_BUDGETS.md`.
+
+### Customizable LLM prompt templates (#256)
+
+- The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).
+- Added `--llm-prompt-template PATH`, the `LEAKLENS_LLM_PROMPT_TEMPLATE` environment variable, and a project-level `.leaklens/prompt.txt` override.
+- Providers render findings through the selected template using the `{severity}`, `{kind}`, `{location}`, `{location_label}` and `{detail}` placeholders; unknown placeholders are preserved and braces that are not valid placeholders are left untouched.
 
 
 ### AI model artifact and provenance

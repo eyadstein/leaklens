@@ -95,7 +95,7 @@ leaklens doctor
 leaklens --version
 ```
 
-CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
+CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `--manifest` / `verify` / `doctor` work with the base install.
 
 ### `leaklens doctor`
 
@@ -123,6 +123,7 @@ Every optional extra declared in `pyproject.toml`:
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
 | `api` | Hardened public live-scan API (FastAPI + uvicorn, no Streamlit) | `pip install "leaklens-ml[api]"` |
 | `sql` | Optional SQL lineage analysis (`--sql`) with SQLGlot | `pip install "leaklens-ml[sql]"` |
+| `yaml` | YAML pipeline and training configs (DVC, Lightning/Keras shapes) | `pip install "leaklens-ml[yaml]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
 | `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
@@ -150,6 +151,7 @@ leaklens train.feather --target label   # Feather input (pip install "leaklens-m
 leaklens images data/train data/test   # near-duplicate images across splits (pip install "leaklens-ml[images]")
 leaklens train.csv --target label --test test.csv --drift   # opt-in, diagnostic-only drift
 leaklens --scan query.sql --target label --sql-dialect postgres   # needs [sql]
+leaklens dl .   # deep-learning code, configs and model artifacts (offline)
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -208,6 +210,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
+| `--manifest` | Write an unsigned, offline-verifiable audit manifest (`leaklens verify`) |
 | `--fail-under` | Exit with code 1 if trust score is below N |
 | `--version` | Print version and exit |
 
@@ -242,11 +245,26 @@ Exit code is 1 when a high-severity finding is present, so it gates CI.
 
 ### `leaklens images TRAIN_DIR TEST_DIR`
 
-Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra.
+Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra. Decoding is bounded per file and per audit; refused files are reported by reason, separately from `unreadable` (see [IMAGE_DECODE_BUDGETS.md](docs/IMAGE_DECODE_BUDGETS.md)). A refused image is not compared, so an all-refused run can still score 100/100.
 
 ```sh
 leaklens images data/train data/test
 leaklens images data/train data/test --max-distance 10 --samples 5 --json
+```
+
+### `leaklens verify MANIFEST`
+
+`--manifest audit.json` writes a deterministic, **unsigned** digest manifest of
+an audit: declared input digests, result-affecting options, the detector
+catalogue, findings, policy outcome, trust score and gate decision.
+`leaklens verify audit.json` recomputes it offline with the standard library and
+reports a changed score, changed evidence, changed detector version, or a
+missing/modified input. It proves content integrity, not who wrote the manifest.
+See [`docs/AUDIT_MANIFEST.md`](docs/AUDIT_MANIFEST.md).
+
+```sh
+leaklens data.csv --target is_fraud --manifest audit.json
+leaklens verify audit.json
 ```
 
 ### `leaklens init`
@@ -362,6 +380,51 @@ leaklens --scan pipelines/dvc.yaml --pipeline --json
 
 Rules, formats and limits: [`docs/PIPELINE.md`](docs/PIPELINE.md); measured controls: [`docs/PIPELINE_BENCHMARK.md`](docs/PIPELINE_BENCHMARK.md).
 
+## Text and LLM intelligence (opt-in)
+
+`leaklens text TRAIN TEST` compares declared text corpora for evaluation contamination. It is deterministic, offline and CPU-only for exact/near duplicates, hash-only contamination and static RAG wiring; embedding similarity is optional and consumes caller-supplied vectors only.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `text_exact_duplicate` | high | a test document's normalised text also appears in train |
+| `text_near_duplicate` | medium | a test document's shingle sketch matches a train document above the threshold |
+| `text_eval_contamination` | high | a train digest matches a user-supplied eval fingerprint |
+| `rag_index_leakage` | high | an index loads a literal root that contains the declared eval path |
+| `text_embedding_similarity` | medium | caller-supplied eval vectors are cosine-similar to train vectors |
+
+Evidence carries counts, 16-hex digests, relative paths and call names, never document text. Every text finding is `diagnostic: true` and `scored: false`; the subcommand exits `0` unless you pass `--fail-on-findings`. LeakLens never loads an embedding model, downloads an eval corpus or executes scanned code.
+
+```sh
+leaklens text train.jsonl eval.jsonl --json
+leaklens text train.parquet eval.parquet --field instruction
+leaklens text train.jsonl eval.jsonl --eval-fingerprints eval.fp
+leaklens text train.jsonl eval.jsonl --rag . --eval-path data/eval
+```
+
+Formats, parameters, normalisation and limits: [`docs/TEXT.md`](docs/TEXT.md); measured controls: [`docs/TEXT_BENCHMARK.md`](docs/TEXT_BENCHMARK.md).
+
+## Deep-learning and artifact auditing (opt-in)
+
+`leaklens dl DIR` statically audits deep-learning training code, framework configs, requirement declarations and model artifacts. It parses Python with `ast`, never imports torch/TensorFlow/Keras/ONNX, never unpickles a checkpoint, never extracts an archive and never executes the scanned project.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `dl_split_overlap` | high | train and eval bind the same dataset, overlap literal `Subset` indices, or evaluation data is built with a random augmentation |
+| `dl_training_protocol_mismatch` | medium | early-stopping patience ≥ `max_epochs`, optimizer `lr <= 0`, or a non-positive scheduler horizon |
+| `artifact_unsafe_format` | high | a pickle-based checkpoint or archive was refused before deserialization |
+| `no_random_state` | low | training is configured without a recorded seed, or mixed precision / distributed training has no determinism flag |
+| `pipeline_unpinned_dependency` | low | a `requirements*.txt` entry has no exact version pin |
+
+The last two kinds are the Phase 14 reproducibility family, reused unchanged. Every finding is `diagnostic: true` and `scored: false`; the subcommand exits `0` unless you pass `--fail-on-findings`. Safetensors headers, ONNX graph metadata and JSON are parsed within byte/depth caps; pickle and `.pt`/`.pth`/`.bin`/`.ckpt`/`.joblib` files produce a finding without being loaded. YAML configs need the existing `[yaml]` extra.
+
+```sh
+leaklens dl .
+leaklens dl . --json
+leaklens dl . --fail-on-findings
+```
+
+Formats, checks and limits: [`docs/DL_AUDIT.md`](docs/DL_AUDIT.md); measured controls: [`docs/DL_BENCHMARK.md`](docs/DL_BENCHMARK.md).
+
 ## Configuration (`.leaklens.toml`)
 
 `leaklens init` writes a commented starter `.leaklens.toml` (one top-level key per CLI flag, plus `[baseline]`, `[[suppressions]]`, `[missingness]`, `[sql]` and `[drift]`) and prints the pre-commit snippet. Add `--force` to overwrite an existing file.
@@ -444,6 +507,16 @@ leaklens --scan notebooks/ --llm --llm-provider openai-compatible
 ```
 
 You can also pass `--llm-base-url` and `--llm-model` on the command line. The API key is read only from `LEAKLENS_LLM_API_KEY`.
+
+### Custom prompt templates
+
+By default, LeakLens uses the prompt template stored in `leaklens/prompts/explain.txt`. You can override it with a custom template file using `--llm-prompt-template` or the `LEAKLENS_LLM_PROMPT_TEMPLATE` environment variable:
+
+```sh
+leaklens --scan notebooks/ --llm --llm-prompt-template my_template.txt
+```
+
+Templates support the placeholders `{severity}`, `{kind}`, `{location}`, `{location_label}`, and `{detail}`. LeakLens will also automatically load a project-level template from `.leaklens/prompt.txt` if present; that file must be a real file inside the working directory. Missing, unreadable, empty or oversized templates (over 64 KiB) stop the run with an error instead of falling back to the default.
 
 ## Experimental AI intelligence
 

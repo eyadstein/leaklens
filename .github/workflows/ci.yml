@@ -16,14 +16,43 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev,app,yaml]"
       - run: pytest --cov=leaklens --cov-report=term-missing -q
+      # POSIX-only boundary tests (symlinks, FIFOs, the filesystem root) are
+      # skipped on Windows. Run them verbosely on Linux so the job log proves
+      # they executed instead of silently skipping.
+      - name: POSIX path-security tests
+        if: matrix.python == '3.12'
+        run: >-
+          pytest -v -rs
+          tests/test_paths.py tests/test_baseline.py
+          tests/test_scanner.py tests/test_workspace.py
+          -k "symlink or fifo or nul or regular_file or filesystem_root"
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
       - run: python -m leaklens.bench_data
       - run: python -m leaklens.bench_missing
       - run: python -m leaklens.bench_drift
       - run: python -m leaklens.bench_pipeline
+      - run: python -m leaklens.bench_text
+      - run: python -m leaklens.bench_dl
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      # A wheel can silently omit modules and still look installable; build
+      # both distributions and prove them complete against this checkout.
+      - run: pip install build
+      - run: python -m build
+      - run: python scripts/validate_release.py --wheel dist/*.whl
+      - run: python scripts/validate_release.py --sdist dist/*.tar.gz
+      - run: pip install dist/*.whl
+      # Run from a neutral directory so the checkout cannot shadow the wheel.
+      - run: python -m leaklens --version
+        working-directory: ${{ runner.temp }}
   sql:
     runs-on: ubuntu-latest
     steps:

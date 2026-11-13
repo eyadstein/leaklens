@@ -10,6 +10,7 @@ from collections import OrderedDict
 from pathlib import Path
 
 from .leakage import Finding
+from .paths import contained
 from .source import (
     BENIGN,
     FEATURE_SELECTION,
@@ -928,7 +929,9 @@ def scan_targets(path, *, sql=None) -> list[Path]:
     """Files ``scan_path`` would scan, in deterministic order.
 
     Shared so callers that need progress (or a total count) enumerate exactly
-    the same set the one-shot scan uses.
+    the same set the one-shot scan uses. A directory scan keeps only regular
+    files whose real path stays inside that directory, so a FIFO, a directory
+    named ``*.py`` or a symlink pointing outside is skipped instead of read.
     """
     p = Path(path)
     suffixes = {".py", ".ipynb"}
@@ -936,10 +939,16 @@ def scan_targets(path, *, sql=None) -> list[Path]:
         suffixes.add(".sql")
     if p.is_file():
         return [p]
+    if not p.is_dir():
+        return []
+    base = p.resolve()
     return [
         f
         for f in sorted(p.rglob("*"))
-        if f.suffix in suffixes and not (SKIP & set(f.parts))
+        if f.suffix in suffixes
+        and f.is_file()
+        and contained(base, f.resolve())
+        and not (SKIP & set(f.parts))
     ]
 
 
