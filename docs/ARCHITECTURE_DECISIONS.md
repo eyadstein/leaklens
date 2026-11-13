@@ -367,6 +367,17 @@ list meaningful. Suppression would trade a real future signal for a clean dashbo
 refusal cases, no traceback text in responses. The release allowlist and action pinning (M-S4) land
 in Phase 13 alongside the gate.
 **Status.** accepted (Phase 13).
+**Update (2026-11-13).** The containment alerts are closed by changing the
+primitive, not by suppressing them. `paths.resolve_within` now normalises both
+the root and the candidate with `os.path.realpath` and accepts the result only
+inside a `(root + separator)` prefix, with the checked variable also being the
+returned one. That is the shape CodeQL models as a path sanitizer, so every
+caller that funnels request paths through `WorkspaceScanManager.resolve` stops
+being an alert, and the same check refuses symlink and junction escapes.
+Non-regular files are now refused before they are opened: directory scans keep
+only regular files, and `Baseline.load` requires a regular file. Residual risk:
+a check-then-open race between `resolve_within` and a later `open`/`stat` is not
+eliminated; it needs local write access to the workspace to exploit.
 
 ## ADR-025 — Deterministic plans are intelligence-owned; `ai` narrates
 
