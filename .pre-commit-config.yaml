@@ -7,4 +7,4 @@ repos:
       - id: codespell
         # realworld/notebooks is a corpus of third-party notebooks kept
         # verbatim as fixtures; everything else is spell-checked.
-        args: ["--skip=realworld/*", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used"]
+        args: ["--skip=realworld/*", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used,nd"]
