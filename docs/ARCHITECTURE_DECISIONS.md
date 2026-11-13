@@ -388,6 +388,37 @@ complete and the panel shows narration as unavailable.
 
 ---
 
+## ADR-026 - Distribution completeness is proven from the tagged tree
+
+**Context.** `scripts/validate_release.py` rejected unexpected wheel members but never required an
+expected one, so a wheel that omitted 46 modules passed the release check unchanged. The local
+`dist/` artifacts are exactly that failure mode. A deny-list alone cannot prove completeness, and a
+hand-maintained file list drifts from the source it describes.
+
+**Decision.** Expected distribution membership is derived from the checked-out tree plus the
+authoritative packaging configuration: `leaklens/**/*.py`, the
+`[tool.setuptools.package-data]` globs in `pyproject.toml`, and the `MANIFEST.in` include rules that
+point inside the package. Both the wheel and the sdist must contain every derived member; the wheel
+must still carry only `leaklens/**` and its dist-info, and the sdist must contain no build, cache or
+local-artifact path. A dedicated CI job builds both distributions on every pull request and runs the
+same validator the release workflow runs.
+
+**Alternatives.** A committed expected-files list (drifts immediately; the 46-module drift is the
+proof); validating only in the release workflow (too late — a broken packaging config merges first);
+an archive-content hash allowlist (no link to the tag being published).
+
+**Rationale.** The tag is the source of truth for what must ship. Deriving membership means adding a
+module or a package resource needs no validator change, and the failure message names the exact
+missing path.
+
+**Consequences.** `leaklens/prompts/explain.txt` is a required wheel member because `llm.py` loads it
+by default; a build that drops it now fails before publishing. Archives are inspected as data and
+never imported. Python 3.10 keeps working through the existing `tomli` fallback.
+
+**Status.** accepted (release integrity wave P).
+
+---
+
 ## Open and deferred decisions
 
 | Id | Question | Why it is not decided | How it will be decided |
