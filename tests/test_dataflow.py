@@ -94,7 +94,8 @@ def test_derived_split_parent_fit_is_flagged():
 
 def test_derived_kfold_split_is_tracked():
     src = (
-        "from sklearn.preprocessing import StandardScaler\nfrom sklearn.model_selection import KFold\n"
+        "from sklearn.preprocessing import StandardScaler\n"
+        "from sklearn.model_selection import KFold\n"
         "kf = KFold(5)\nX2 = X.copy()\nX3 = f(X2)\n"
         "for tr, te in kf.split(X):\n    sc = StandardScaler()\n    sc.fit(X3)\n"
     )
