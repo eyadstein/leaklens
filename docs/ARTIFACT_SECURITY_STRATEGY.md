@@ -314,6 +314,11 @@ hostile corpus proves no crash and no write. `upload_guard` itself is unchanged:
 it is the dataset-upload boundary, not an artifact decoder. The image-decoder half
 of M-S1 and M-S5 remain with Phase 17.
 
+Status (release integrity, 2026-11-13): **M-S4 is complete and strengthened.**
+The wheel check now requires every module and package resource derived from the
+tagged tree, the sdist is validated too, and a `package` CI job builds and
+validates both distributions on every pull request ([ADR-026](ARCHITECTURE_DECISIONS.md)).
+
 ---
 
 ## 7. What this strategy refuses

@@ -100,12 +100,21 @@ jobs:
               )
           print("Publishing files:", ", ".join(files))
           PY
-      # The wheel must carry package code and dist-info only: no tests, docs or
-      # repository metadata can ride along into the published artifact.
-      - name: Verify wheel contents against the release allowlist
-        run: python scripts/validate_release.py --wheel dist/*.whl
+      # The wheel must carry every module and resource in the tagged tree: an
+      # omission is invisible to an allowlist that only rejects extra files.
+      - name: Verify wheel and sdist completeness
+        run: |
+          set -euo pipefail
+          python scripts/validate_release.py --wheel dist/*.whl
+          python scripts/validate_release.py --sdist dist/*.tar.gz
       # Install the built wheel so the SBOM can record resolved runtime versions.
       - run: pip install dist/*.whl
+      - name: Smoke-test the installed wheel
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          python -m leaklens --version
+          python -c "import leaklens.analysis.text, leaklens.analysis.dl, leaklens.analysis.artifacts"
       # Keep the SBOM outside dist/: the PyPI publish action uploads every file
       # in its packages directory, and a .json file there would fail twine check.
       - run: python scripts/generate_sbom.py sbom/sbom.json

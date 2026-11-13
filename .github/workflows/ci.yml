@@ -26,6 +26,23 @@ jobs:
       - run: python -m leaklens.bench_dl
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      # A wheel can silently omit modules and still look installable; build
+      # both distributions and prove them complete against this checkout.
+      - run: pip install build
+      - run: python -m build
+      - run: python scripts/validate_release.py --wheel dist/*.whl
+      - run: python scripts/validate_release.py --sdist dist/*.tar.gz
+      - run: pip install dist/*.whl
+      # Run from a neutral directory so the checkout cannot shadow the wheel.
+      - run: python -m leaklens --version
+        working-directory: ${{ runner.temp }}
   sql:
     runs-on: ubuntu-latest
     steps:
