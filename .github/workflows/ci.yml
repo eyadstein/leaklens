@@ -39,6 +39,7 @@ jobs:
       - run: python -m leaklens.bench_pipeline
       - run: python -m leaklens.bench_text
       - run: python -m leaklens.bench_dl
+      - run: python -m leaklens.bench_vision
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
   package:

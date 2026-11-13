@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Exact and perceptual image clustering (Phase 17 M2)
+
+- `leaklens images` now groups images as well as pairing them: byte-identical files form exact groups (SHA-256 of the file bytes, only after the M-S5 budgets accepted the file), and perceptual near-duplicates form connected-component clusters on the existing 64-bit dHash. `--json` gains a `clustering` payload (`exact_duplicates`, `exact_groups`, `clusters` with train/test counts and `exact_pairs`, `uninformative`) and the text output summarizes both. `image_overlap()` keeps its signature, cost and finding unchanged, and the exit code is untouched.
+- A cluster is a connected component, not a clique; uniform (flat-colour) hashes are excluded from clusters, and members are namespaced `train:`/`test:` with the shared `near_duplicate.cluster_key` as a stable id. See `docs/VISION_AUDIT.md` for the exact/perceptual contracts, the supported transformation envelope, the blind spots and the cluster policy.
+- Added `python -m leaklens.bench_vision` (writes only with `--write`): 180 generated cases over separate calibration and holdout seeds, a published threshold sweep (selected: 6 bits), per-family results, exact groups, a cluster check and scaling. The corpus digest is pinned, so a generator change fails instead of quietly moving the numbers. See `docs/VISION_BENCHMARK.md`.
+
 ### Audit manifest and offline verification (M-S3)
 
 - `--manifest PATH` writes a deterministic, unsigned digest manifest of an audit: declared input digests, result-affecting options, the detector catalogue, findings, policy outcome, trust score and gate decision.

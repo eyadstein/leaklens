@@ -247,6 +247,8 @@ Exit code is 1 when a high-severity finding is present, so it gates CI.
 
 Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra. Decoding is bounded per file and per audit; refused files are reported by reason, separately from `unreadable` (see [IMAGE_DECODE_BUDGETS.md](docs/IMAGE_DECODE_BUDGETS.md)). A refused image is not compared, so an all-refused run can still score 100/100.
 
+Every run also groups images: byte-identical files form exact groups (SHA-256 of the file bytes, so a re-encode is never "exact"), and perceptual near-duplicates form connected-component clusters. Clusters are not cliques — a member is not necessarily within the threshold of every other member — and a cluster is evidence for review, not proof of leakage. The supported transformation envelope, the known blind spots (colour-only differences, crops beyond 5%, letterboxing) and the calibration are in [VISION_AUDIT.md](docs/VISION_AUDIT.md) and [VISION_BENCHMARK.md](docs/VISION_BENCHMARK.md).
+
 ```sh
 leaklens images data/train data/test
 leaklens images data/train data/test --max-distance 10 --samples 5 --json

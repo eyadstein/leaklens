@@ -37,7 +37,8 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Data detectors | `leaklens/leakage.py` — returns `Finding(severity, kind, column, detail)` |
 | Code scanner (`.py`/`.ipynb`) | `leaklens/scanner.py` (`scan_path`); pairs: `leaklens/bench.py` + `bench_cases.py` |
 | Optional SQL lineage | `leaklens/sqlscan.py` (lazy SQLGlot); benchmark `leaklens/bench_sql.py` + `docs/SQL_BENCHMARK.md`; docs `docs/SQL_LINEAGE.md` |
-| Shared near-duplicate primitive | `leaklens/near_duplicate.py` (`bucket → threshold → stable cluster key`, ADR-022); consumed by text dedup, Phase 17 vision next |
+| Shared near-duplicate primitive | `leaklens/near_duplicate.py` (`bucket → threshold → stable cluster key`, ADR-022, plus streaming `clusters_from_pairs`); consumed by text dedup and Phase 17 image clustering |
+| Image engine (M2) | `leaklens/images.py` (`dhash`, `file_digest`, `pairs_within`, `cluster_signatures`, `analyze_images`; `image_overlap` unchanged); benchmark `leaklens/bench_vision.py` + `docs/VISION_BENCHMARK.md`; docs `docs/VISION_AUDIT.md`; budgets `docs/IMAGE_DECODE_BUDGETS.md` |
 | Text/LLM engine | `leaklens/analysis/text/` (`normalize.py`, `dedup.py`, `contamination.py`, `rag.py`, `embeddings.py`); local HF snapshot reader `leaklens/integrations/hf.py`; benchmark `leaklens/bench_text.py` + `docs/TEXT_BENCHMARK.md`; docs `docs/TEXT.md`; surface `leaklens text` in `cli.py` |
 | Deep-learning and artifact engine | `leaklens/analysis/dl/` (`training.py`, `config.py`, `checkpoints.py`, `__init__.py` = `audit_dl`); artifact intake `leaklens/analysis/artifacts/` (`formats.py`, `safetensors.py`, `pickle_guard.py`, `onnx.py`); benchmark `leaklens/bench_dl.py` + `docs/DL_BENCHMARK.md`; docs `docs/DL_AUDIT.md`; surface `leaklens dl` in `cli.py` |
 | Opt-in drift diagnostics | `leaklens/drift.py`; benchmark `leaklens/bench_drift.py` + `docs/DRIFT_BENCHMARK.md`; docs `docs/DRIFT.md` |
