@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Spell-check with codespell (#532)
+
+- New `.pre-commit-config.yaml` with the codespell hook (v2.4.3), skipping only the `realworld` notebook corpus that is kept verbatim as fixtures and ignoring the repository's legitimate vocabulary: the `fpr`/`FPR` metric, the `te` and `strat` abbreviations, and the `unparseable`/`disjointness`/`re-used` spellings.
+- A `spelling` job in CI runs pre-commit so the check is enforced without a local install.
+
+### CI covers Python 3.14 (#543)
+
+- The test matrix in `.github/workflows/ci.yml` now runs the suite, the LeakLens self-scan and all benchmarks on Python 3.14 alongside 3.10–3.12, matching the versions the README already lists as locally verified. 3.13 remains outside the matrix and is still not claimed as verified.
+
 ### Customizable LLM prompt templates (#256)
 
 - The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).
