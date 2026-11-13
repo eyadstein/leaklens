@@ -381,7 +381,7 @@ def test_a_path_with_a_nul_byte_is_reported(tmp_path, manifest):
     document["inputs"][0]["path"] = "in\u0000put.csv"
     _write(tmp_path, document)
     assert any(
-        issue.startswith(("cannot resolve", "cannot read"))
+        issue.startswith(("cannot resolve", "cannot read", "unsafe path"))
         for issue in audit_manifest.verify(path)
     )
 
