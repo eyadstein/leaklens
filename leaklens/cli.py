@@ -715,6 +715,43 @@ def doctor(argv) -> int:
     return 0
 
 
+def verify(argv) -> int:
+    """Verify an audit manifest offline with the standard library."""
+    from . import audit_manifest
+
+    p = argparse.ArgumentParser(
+        prog="leaklens verify",
+        description=(
+            "Verify an audit manifest offline. Detects a manifest or declared "
+            "input changed after it was written; does not prove who wrote it."
+        ),
+    )
+    p.add_argument("manifest", help="audit manifest JSON to verify")
+    p.add_argument(
+        "--root",
+        help=("containment root for declared inputs (default: the current directory)"),
+    )
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+    try:
+        issues = audit_manifest.verify(a.manifest, root=a.root)
+    except audit_manifest.ManifestError as exc:
+        if a.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"leaklens verify: {exc}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps({"ok": not issues, "issues": issues}, indent=2))
+    elif issues:
+        print(f"manifest FAILED: {len(issues)} issue(s)")
+        for issue in issues:
+            print(f"    {issue}")
+    else:
+        print(f"manifest OK: {a.manifest}")
+    return 0 if not issues else 1
+
+
 def _gate_failure(
     outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
 ) -> bool:
@@ -747,13 +784,16 @@ def main(argv=None) -> int:
         return doctor(argv[1:])
     if argv and argv[0] == "workspace":
         return workspace(argv[1:])
+    if argv and argv[0] == "verify":
+        return verify(argv[1:])
     p = argparse.ArgumentParser(
         prog="leaklens",
         description="Audit datasets and ML code for leakage",
         epilog=(
             "Run 'leaklens doctor' to check your install, 'leaklens init' to write "
-            "a starter .leaklens.toml config, and 'leaklens workspace' for a "
-            "local interactive scan view."
+            "a starter .leaklens.toml config, 'leaklens workspace' for a "
+            "local interactive scan view, and 'leaklens verify' to check an "
+            "audit manifest offline."
         ),
     )
     p.add_argument("--version", action="version", version=__version__)
@@ -911,6 +951,11 @@ def main(argv=None) -> int:
         "--badge", help="write a shields.io endpoint JSON with the trust score"
     )
     p.add_argument(
+        "--manifest",
+        metavar="PATH",
+        help="write an unsigned, offline-verifiable audit manifest (leaklens verify)",
+    )
+    p.add_argument(
         "--fail-under", type=float, help="exit with code 1 if trust score is below N"
     )
     a = p.parse_args(argv)
@@ -941,6 +986,7 @@ def main(argv=None) -> int:
     sarif_path = choose(a.sarif, cfg.sarif)
     html_path = choose(a.html, cfg.html)
     badge_path = choose(a.badge, cfg.badge)
+    manifest_path = a.manifest
     use_ai = choose(a.ai, cfg.ai, False)
     use_ai_llm = choose(a.ai_llm, cfg.ai_llm, False)
     if use_ai_llm:
@@ -1312,6 +1358,53 @@ def main(argv=None) -> int:
         except (OSError, ValueError) as exc:
             print(f"leaklens: cannot write evidence graph: {exc}", file=sys.stderr)
             return 2
+    gate = _gate_failure(
+        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
+    )
+    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
+        gate = True
+    if manifest_path:
+        from . import audit_manifest
+
+        inputs = [path for path in (a.train, test_path, *scan_targets) if path]
+        if baseline is not None and baseline_path:
+            inputs.append(baseline_path)
+        options = {
+            "target": target,
+            "test": bool(test_path),
+            "group": group_col,
+            "time": time_col,
+            "threshold": threshold,
+            "sql": sql_settings.enabled,
+            "sql_dialect": sql_settings.dialect if sql_settings.enabled else None,
+            "drift": drift_settings.enabled,
+            "pipeline": bool(a.pipeline),
+            "ai": bool(use_ai),
+            "ai_llm": bool(use_ai_llm),
+            "fail_under": fail_under,
+            "fail_on_new": fail_on_new,
+        }
+        try:
+            document = audit_manifest.build(
+                sections,
+                inputs=inputs,
+                options=options,
+                gate={
+                    "failed": gate,
+                    "fail_under": fail_under,
+                    "fail_on_new": fail_on_new,
+                },
+                root=Path.cwd(),
+            )
+            with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(audit_manifest.dumps(document))
+        except (OSError, ValueError) as exc:
+            print(f"leaklens: cannot write audit manifest: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"Wrote audit manifest {manifest_path} ({document['manifest_digest']})",
+            file=sys.stderr,
+        )
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
@@ -1522,9 +1615,4 @@ def main(argv=None) -> int:
                 f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
             )
             print(res.round(4).to_string(index=False))
-    gate = _gate_failure(
-        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
-    )
-    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
-        gate = True
     return 1 if gate else 0

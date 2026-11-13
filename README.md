@@ -95,7 +95,7 @@ leaklens doctor
 leaklens --version
 ```
 
-CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
+CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `--manifest` / `verify` / `doctor` work with the base install.
 
 ### `leaklens doctor`
 
@@ -210,6 +210,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
+| `--manifest` | Write an unsigned, offline-verifiable audit manifest (`leaklens verify`) |
 | `--fail-under` | Exit with code 1 if trust score is below N |
 | `--version` | Print version and exit |
 
@@ -249,6 +250,21 @@ Find near-duplicate images across train/test folders (64-bit dHash, `--max-dista
 ```sh
 leaklens images data/train data/test
 leaklens images data/train data/test --max-distance 10 --samples 5 --json
+```
+
+### `leaklens verify MANIFEST`
+
+`--manifest audit.json` writes a deterministic, **unsigned** digest manifest of
+an audit: declared input digests, result-affecting options, the detector
+catalogue, findings, policy outcome, trust score and gate decision.
+`leaklens verify audit.json` recomputes it offline with the standard library and
+reports a changed score, changed evidence, changed detector version, or a
+missing/modified input. It proves content integrity, not who wrote the manifest.
+See [`docs/AUDIT_MANIFEST.md`](docs/AUDIT_MANIFEST.md).
+
+```sh
+leaklens data.csv --target is_fraud --manifest audit.json
+leaklens verify audit.json
 ```
 
 ### `leaklens init`

@@ -64,7 +64,7 @@ and source; (c) the integrity of the audit result a user relies on; (d) the user
 | T6 | Malicious `.pyc`/native payload in a scanned project | code scanner | Source is parsed, never imported or executed | Keep it that way: the artifact engine must parse only |
 | T7 | Prompt injection via scanned source or dataset text | `--llm`, `--ai-llm` | Only sanitized finding metadata is sent; never raw rows or full source; schema-validated reply; deterministic fallback | Keep the ban on raw text; add an explicit injection test corpus |
 | T8 | Workspace exposure beyond localhost | `workspace` | Binds `127.0.0.1`, documents that any reachable client can read the workspace root | No auth by design; keep `--host` an explicit, documented risk |
-| T9 | Audit-result tampering / non-reproducibility | reports, manifests | Fingerprints, provenance records, artifact digests, deterministic scoring | No signed, offline-verifiable audit manifest yet (M-S3) |
+| T9 | Audit-result tampering / non-reproducibility | reports, manifests | Fingerprints, provenance records, artifact digests, deterministic scoring; opt-in unsigned audit manifest and stdlib-only offline `leaklens verify` (M-S3) | No signature or creator authentication; a deliberate rewrite can recompute the digest |
 | T10 | Supply chain: dependency or action compromise | `pyproject.toml`, workflows | Dependabot, CodeQL, `scripts/generate_sbom.py`, `scripts/validate_release.py` | GitHub Actions are referenced by major tag (`actions/checkout@v7`), not by commit SHA |
 | T11 | Accidental release of test corpora, benchmarks or fixtures | sdist/wheel | `bench_realworld` digest guard, `validate_release.py` | No explicit allowlist diff of wheel contents before publish (M-S4) |
 | T12 | Bad dependency pulled in by an optional extra | extras | Extras are small and pinned by major (`sqlglot>=25`, `pillow>=9.1`, …) | New heavy extras (vision/DL/text) need a written dependency admission rule |
@@ -326,6 +326,13 @@ Status (release integrity, 2026-11-13): **M-S4 is complete and strengthened.**
 The wheel check now requires every module and package resource derived from the
 tagged tree, the sdist is validated too, and a `package` CI job builds and
 validates both distributions on every pull request ([ADR-026](ARCHITECTURE_DECISIONS.md)).
+
+Status (audit manifest, 2026-11-13): **M-S3 is complete, unsigned by design.**
+`--manifest` writes a deterministic digest manifest of the inputs, options,
+detector catalogue, findings, policy outcome, score and gate; `leaklens verify`
+recomputes it offline with the standard library and names a changed section or a
+missing/modified input. It proves content integrity, not authenticity or
+provenance. See [AUDIT_MANIFEST.md](AUDIT_MANIFEST.md).
 
 ---
 

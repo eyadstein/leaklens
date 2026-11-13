@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Audit manifest and offline verification (M-S3)
+
+- `--manifest PATH` writes a deterministic, unsigned digest manifest of an audit: declared input digests, result-affecting options, the detector catalogue, findings, policy outcome, trust score and gate decision.
+- `leaklens verify MANIFEST` recomputes the manifest and its declared inputs offline with the standard library (exit 0 clean, 1 mismatch, 2 unreadable/unsupported), reporting changed sections plus missing, modified and unsafe-path inputs. It detects content changes, not who wrote the manifest. See `docs/AUDIT_MANIFEST.md`.
+
 ### Image decode budgets (M-S5)
 
 - `leaklens images` now bounds every image before decoding: 64 MiB encoded bytes, 20,000 px per side, 64 MP per file, 64 animation frames, and a 2 GP pixel budget shared by both splits. Refusals are reported by stable reason in the new `refused` map and text line, separately from `unreadable`; `--json` also gains `decoded_pixels`.
