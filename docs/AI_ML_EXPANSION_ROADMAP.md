@@ -1,8 +1,9 @@
 # AI/ML expansion roadmap
 
 **Status:** mixed. Phase 12 is delivered history. Phases 13–16 are shipped and recorded in their
-acceptance documents, including the deferrals listed there. Phases 17–19 are unstarted design
-proposals, not commitments.
+acceptance documents, including the deferrals listed there. Phase 17 is partly shipped: M1 is
+satisfied by security milestone M-S5 and M2 (exact and perceptual image clustering) is delivered.
+Phase 17 M3–M7 and Phases 18–19 remain design proposals, not commitments.
 **Companions:** [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) (how),
 [FUTURE_VISION.md](FUTURE_VISION.md) (why), [AI_ROADMAP.md](AI_ROADMAP.md) (Phase 12 detail),
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) (decision log).
