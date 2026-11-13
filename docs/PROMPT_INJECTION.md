@@ -1,7 +1,8 @@
 # Prompt-injection security corpus (M-S6)
 
-Status: implemented for the existing off-by-default LLM layer. This milestone is a
-regression corpus and trust-boundary test suite, not a claim that prompt injection is solved.
+Status: implemented for the existing off-by-default LLM layer, independently reviewed and accepted
+with findings. The demonstrated defects were fixed in `c01481b`; this milestone is a regression
+corpus and trust-boundary test suite, not a claim that prompt injection is solved.
 
 ## Dependency resolution
 
@@ -265,10 +266,9 @@ fail-closed behaviour and opt-in guarantees, and reported concrete findings: the
 `verification` text; a severity-reassignment regression; a dead allow-policy metric; denylist
 formatting/word-order bypasses; missing ANSI/control test coverage; whitespace-only duplicate
 content; and silent acceptance of an unknown CLI flag. The demonstrated code defects were fixed
-with regressions in this change, the documented false positive was corrected to a normal
-remediation sentence, and the remaining denylist bypasses above are accepted and documented. The
-milestone was accepted as shipped with findings; it is not a claim of complete prompt-injection
-prevention.
+with regressions in `c01481b`, the documented false positive was corrected to a normal remediation
+sentence, and the remaining denylist bypasses above are accepted and documented. The milestone was
+accepted as shipped with findings; it is not a claim of complete prompt-injection prevention.
 
 ## Adding a case
 
