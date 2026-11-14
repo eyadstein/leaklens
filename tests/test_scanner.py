@@ -17,7 +17,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y)
 GOOD = """
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42, stratify=y)
 sc = StandardScaler()
 X_train = sc.fit_transform(X_train)
 X_test = sc.transform(X_test)
@@ -102,7 +102,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y)
 GROUP_STAT_AFTER_SPLIT = """
 import pandas as pd
 from sklearn.model_selection import train_test_split
-X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42, stratify=y)
 X_train["city_mean"] = X_train.groupby("city")["sales"].transform("mean")
 """
 
@@ -124,7 +124,7 @@ AGG_SUMMARY_ONLY = """
 import pandas as pd
 from sklearn.model_selection import train_test_split
 summary = df.groupby("city")["sales"].agg("mean")
-X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=42, stratify=y)
 """
 
 
@@ -182,7 +182,7 @@ a = train_test_split(X, y, random_state=42)
 
 MANUAL_SCALE_TRAIN_ONLY = """
 from sklearn.model_selection import train_test_split
-a = train_test_split(X, y, random_state=42)
+a = train_test_split(X, y, random_state=42, stratify=y)
 X_test = (X_test - X_train.mean()) / X_train.std()
 """
 

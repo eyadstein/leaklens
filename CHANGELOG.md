@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Spell-check with codespell (#532)
+
+- New `.pre-commit-config.yaml` with the codespell hook (v2.4.3), skipping only the `realworld` notebook corpus that is kept verbatim as fixtures and ignoring the repository's legitimate vocabulary: the `fpr`/`FPR` metric, the `te` and `strat` abbreviations, and the `unparseable`/`disjointness`/`re-used` spellings.
+- A `spelling` job in CI runs pre-commit so the check is enforced without a local install.
+
 ### Investigation plans (Phase 18 M1)
 
 - New deterministic `investigation` block under `--intelligence`: ordered `inspect_evidence`, `suggested_test`, `missing_evidence` and `narration_slot` steps, each citing evidence ids that already exist in the payload and finding ids that already exist in the scan. The plan is built by `leaklens/intelligence/investigation.py` without importing `leaklens.ai`; `leaklens.ai.schemas` re-exports the plan types unchanged (ADR-025). Schema and limits: `docs/INVESTIGATION.md`.
@@ -20,6 +25,10 @@
 - New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
 - New `leaklens schema` prints the schema, and every JSON report now carries `$schema` naming it. Both are additive: no finding, severity, trust score, exit code or existing field changed, and a report written before this release still validates.
 - `jsonschema` is a test-only dependency (`[dev]`), not a runtime one. See `docs/REPORT_SCHEMA.md` for the contract, the version policy and the limits.
+
+### Scanner: stratify advisory
+
+- New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
 
 ### CI covers Python 3.14 (#543)
 

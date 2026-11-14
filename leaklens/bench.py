@@ -353,6 +353,31 @@ LOW_CASES += [
         "from sklearn.model_selection import ShuffleSplit\nss = ShuffleSplit(5, random_state=1)\n",
         False,
     ),
+    (
+        "train_test_split without stratify",
+        SPLIT + "a = train_test_split(X, y, random_state=42)\n",
+        True,
+    ),
+    (
+        "train_test_split with stratify",
+        SPLIT + "a = train_test_split(X, y, random_state=42, stratify=y)\n",
+        False,
+    ),
+    (
+        "train_test_split shuffle=False needs no stratify",
+        SPLIT + "a = train_test_split(X, y, shuffle=False)\n",
+        False,
+    ),
+    (
+        "train_test_split single array has no labels to stratify",
+        SPLIT + "a = train_test_split(df, random_state=42)\n",
+        False,
+    ),
+    (
+        "train_test_split with kwargs expansion",
+        SPLIT + "a = train_test_split(X, y, **split_kw)\n",
+        False,
+    ),
 ]
 
 
@@ -448,6 +473,11 @@ def evaluate() -> dict:
         "get_dummies before split": "get_dummies_before_split",
         "get_dummies after split": "get_dummies_before_split",
         "unrelated get_dummies": "get_dummies_before_split",
+        "train_test_split without stratify": "no_stratify",
+        "train_test_split with stratify": "no_stratify",
+        "train_test_split shuffle=False needs no stratify": "no_stratify",
+        "train_test_split single array has no labels to stratify": "no_stratify",
+        "train_test_split with kwargs expansion": "no_stratify",
     }
     for name, code, leaky in LOW_CASES:
         expected_kind = low_kinds.get(name, "no_random_state")
