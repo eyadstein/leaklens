@@ -26,6 +26,12 @@
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
 
+### Published report schema (report-1)
+
+- New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
+- New `leaklens schema` prints the schema, and every JSON report now carries `$schema` naming it. Both are additive: no finding, severity, trust score, exit code or existing field changed, and a report written before this release still validates.
+- `jsonschema` is a test-only dependency (`[dev]`), not a runtime one. See `docs/REPORT_SCHEMA.md` for the contract, the version policy and the limits.
+
 ### Scanner: stratify advisory
 
 - New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
