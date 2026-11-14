@@ -101,4 +101,3 @@ def test_derived_kfold_split_is_tracked():
     )
     findings = [(f.kind, f.severity) for f in scan_source(src)]
     assert ("fit_on_full_data", "medium") in findings
-

@@ -98,12 +98,13 @@ def _is_column_selection_or_full_slice(node: ast.Subscript) -> bool:
             return True
     if isinstance(sl, ast.Constant) and isinstance(sl.value, str):
         return True
-    if isinstance(sl, (ast.List, ast.Set, ast.Tuple)):
-        if sl.elts and all(
+    return (
+        isinstance(sl, (ast.List, ast.Set, ast.Tuple))
+        and bool(sl.elts)
+        and all(
             isinstance(e, ast.Constant) and isinstance(e.value, str) for e in sl.elts
-        ):
-            return True
-    return False
+        )
+    )
 
 
 def _derives_from_full(expr, full_set: set) -> bool:
@@ -296,12 +297,12 @@ def _scan_core(
             nm = work.pop()
             for v in defs.get(nm, []):
                 for x in _all_names(v):
-                    if x not in full:
-                        if x in defs or isinstance(
-                            v, (ast.Call, ast.Attribute, ast.Subscript)
-                        ):
-                            full.add(x)
-                            work.append(x)
+                    if x not in full and (
+                        x in defs
+                        or isinstance(v, (ast.Call, ast.Attribute, ast.Subscript))
+                    ):
+                        full.add(x)
+                        work.append(x)
 
         changed = True
         while changed:

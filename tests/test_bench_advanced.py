@@ -12,9 +12,9 @@ def test_advanced_benchmark_has_no_errors():
 
 def test_historical_counts_are_preserved():
     metrics = evaluate()
-    assert metrics["n"] == 109
-    assert metrics["tp"] == 58 and metrics["fp"] == 0
-    assert len(EXTRA_CASES) == 36
+    assert metrics["n"] == 111
+    assert metrics["tp"] == 59 and metrics["fp"] == 0
+    assert len(EXTRA_CASES) == 38
 
 
 def test_advanced_case_counts():
