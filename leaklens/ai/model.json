@@ -1,5 +1,5 @@
 {
-  "artifact_digest": "sha256:f9b611484ffef2aa560cc8c11dada52d374485ec6cfe1d7dfc0f5991397071f4",
+  "artifact_digest": "sha256:c0532e9bbd53588fa6ff4bfcb825765e9cf70dac92fb245d6de35ffdd6280f79",
   "card": {
     "calibration": [
       [
@@ -30,19 +30,19 @@
     "external": [
       [
         "external_accuracy",
-        1.0
+        0.993
       ],
       [
         "external_f1",
-        1.0
+        0.9934
       ],
       [
         "external_false_positive_rate",
-        0.0
+        0.0147
       ],
       [
         "external_precision",
-        1.0
+        0.9868
       ],
       [
         "external_recall",
@@ -98,16 +98,16 @@
     ],
     "examples": 40,
     "external": {
-      "accuracy": 1.0,
-      "f1": 1.0,
+      "accuracy": 0.993,
+      "f1": 0.9934,
       "false_negatives": 0.0,
-      "false_positive_rate": 0.0,
-      "false_positives": 0.0,
-      "precision": 1.0,
+      "false_positive_rate": 0.0147,
+      "false_positives": 1.0,
+      "precision": 0.9868,
       "recall": 1.0,
-      "specificity": 1.0,
+      "specificity": 0.9853,
       "true_negatives": 67.0,
-      "true_positives": 74.0
+      "true_positives": 75.0
     },
     "folds": 5,
     "groups": 176,
