@@ -208,6 +208,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--ai` | Add experimental, evidence-bound AI hypotheses (offline, opt-in) |
 | `--ai-llm` | Rephrase the AI plan with the configured LLM; deterministic fallback |
 | `--drift` | Opt-in train/test distribution-drift diagnostics (needs `--test`; diagnostic-only) |
+| `--monitoring-report` | Read a caller-supplied drift/skew JSON report (repeatable; diagnostic-only) |
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
@@ -380,6 +381,35 @@ leaklens train.csv --target label --test test.csv --drift --json
 ```
 
 Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls: [`docs/DRIFT_BENCHMARK.md`](docs/DRIFT_BENCHMARK.md).
+
+## Investigation plans and monitoring intake (opt-in)
+
+`--intelligence` also emits a deterministic `investigation` block: an ordered
+list of `inspect_evidence`, `suggested_test`, `missing_evidence` and
+`narration_slot` steps. Every step cites evidence ids that already exist in the
+payload and finding ids that already exist in the scan, so an ungrounded step
+cannot be serialized. A `suggested_test` step names a registered detector kind
+and the question it answers; unknown kinds are omitted, never invented. The plan
+builds without `leaklens.ai`; with the AI layer absent, `narration` is
+`"unavailable"` and the rest of the plan is unchanged.
+
+When a check is skipped, the payload gains one `missing_evidence` collection
+listing each engine skip, split limitation and omitted test with its own reason
+and count. It never changes the score or the exit gate, and the key is absent
+when nothing was skipped.
+
+`--monitoring-report PATH` (repeatable) reads a caller-supplied JSON drift or
+skew report and turns each breached metric into a `low`, `diagnostic` finding.
+The intake is read-only and size-capped; missing, malformed, oversized or
+out-of-root reports become counted skips instead of tracebacks, and the
+findings never change the trust score or the exit gate.
+
+```sh
+leaklens --scan src --intelligence --json
+leaklens train.csv --target label --monitoring-report reports/drift.json
+```
+
+Schema, id contract and limits: [`docs/INVESTIGATION.md`](docs/INVESTIGATION.md).
 
 ## Pipeline and MLOps intelligence (opt-in)
 

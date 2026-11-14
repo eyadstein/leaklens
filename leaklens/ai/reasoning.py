@@ -475,7 +475,12 @@ def build_plan(
     *,
     target: str | None = None,
 ) -> ReasoningPlan:
-    """Group related observations and attach remediation plus verification."""
+    """Group related observations and attach remediation plus verification.
+
+    The investigation plan itself is built by
+    :func:`leaklens.intelligence.investigation.build_investigation`; this
+    function remains the AI-narration grouping until M4 re-points it.
+    """
 
     buckets: dict[str, dict[str, list]] = {}
     for index, finding in enumerate(findings):

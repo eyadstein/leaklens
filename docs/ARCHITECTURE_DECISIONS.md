@@ -395,7 +395,7 @@ may read the evidence graph; the model layer should only phrase it.
 **Consequences.** Phase 18 M1 may move code, so `ai.schemas` keeps re-exports and a test asserts
 `from leaklens.ai.schemas import ReasoningPlan` still works. With the `ai` extra absent, the plan is
 complete and the panel shows narration as unavailable.
-**Status.** proposed (Phase 18, M1).
+**Status.** accepted (Phase 18, M1).
 
 ---
 
