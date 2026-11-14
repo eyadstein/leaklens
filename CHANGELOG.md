@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Investigation plans (Phase 18 M1)
+
+- New deterministic `investigation` block under `--intelligence`: ordered `inspect_evidence`, `suggested_test`, `missing_evidence` and `narration_slot` steps, each citing evidence ids that already exist in the payload and finding ids that already exist in the scan. The plan is built by `leaklens/intelligence/investigation.py` without importing `leaklens.ai`; `leaklens.ai.schemas` re-exports the plan types unchanged (ADR-025). Schema and limits: `docs/INVESTIGATION.md`.
+
+### Monitoring report intake (Phase 18 M5)
+
+- New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
+
 ### Declared-split disjointness (Phase 17 M3)
 
 - New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.

@@ -942,6 +942,14 @@ def main(argv=None) -> int:
         help="opt-in train/test distribution-drift diagnostics",
     )
     p.add_argument(
+        "--monitoring-report",
+        action="append",
+        metavar="PATH",
+        default=None,
+        help="read a caller-supplied drift/skew JSON report (repeatable); "
+        "diagnostic only",
+    )
+    p.add_argument(
         "--arena",
         action="store_true",
         help="compare 3 model families, tracked in MLflow",
@@ -1237,6 +1245,13 @@ def main(argv=None) -> int:
                 )
         rep["pipeline"] = reports[0] if len(reports) == 1 else {"reports": reports}
 
+    if a.monitoring_report:
+        from .monitoring import audit_monitoring
+
+        monitoring_report = audit_monitoring(a.monitoring_report, root=Path.cwd())
+        fs += monitoring_report.findings
+        rep["monitoring"] = monitoring_report.to_dict()
+
     sections = assemble.build(
         fs,
         baseline=baseline,
@@ -1329,7 +1344,11 @@ def main(argv=None) -> int:
         or graph_baseline_path
         or graph_snapshot_path
     ):
-        from .intelligence import analyze_dataset_impact, analyze_findings
+        from .intelligence import (
+            analyze_dataset_impact,
+            analyze_findings,
+            build_investigation,
+        )
 
         impact = None
         if a.train and test_path:
@@ -1351,6 +1370,7 @@ def main(argv=None) -> int:
         evidence_graph = report.to_graph()
         intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
+        rep["investigation"] = build_investigation(fs, graph=evidence_graph).to_dict()
     if graph_baseline_path or graph_snapshot_path:
         from .intelligence import (
             GraphSnapshot,

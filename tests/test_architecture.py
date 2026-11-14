@@ -42,6 +42,7 @@ ENGINES = {
     "images",
     "llm",
     "missingness",
+    "monitoring",
     "partition",
     "pipeline",
     "readers",
@@ -86,6 +87,11 @@ ALLOWED: dict[tuple[str, str], tuple[int, str]] = {
     ("ai.learned", "ai.artifact"): (
         18,
         "get_model loads through artifact.load_artifact; M4 deferred",
+    ),
+    ("ai.schemas", "intelligence.schemas"): (
+        19,
+        "ADR-025: intelligence owns the plan types and ai.schemas re-exports "
+        "them; the edge is one-way (intelligence never imports ai)",
     ),
 }
 

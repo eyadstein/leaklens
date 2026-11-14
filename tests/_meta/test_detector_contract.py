@@ -147,6 +147,8 @@ def test_diagnostic_kinds_are_not_scored():
         "dl_split_overlap",
         "dl_training_protocol_mismatch",
         "artifact_unsafe_format",
+        "monitoring_drift_report",
+        "monitoring_skew_report",
     }
 
 

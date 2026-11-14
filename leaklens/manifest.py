@@ -44,6 +44,8 @@ _DIAGNOSTIC_KINDS = frozenset(
         "dl_split_overlap",
         "dl_training_protocol_mismatch",
         "artifact_unsafe_format",
+        "monitoring_drift_report",
+        "monitoring_skew_report",
     }
 )
 
@@ -564,6 +566,31 @@ DETECTORS: tuple[Detector, ...] = (
         "pickle checkpoint refused",
         scored=False,
         modalities=("artifact",),
+    ),
+    # Phase 18 M5 monitoring intake. Both kinds are diagnostics and never score.
+    _entry(
+        "monitoring_drift_report",
+        "dataset",
+        "low",
+        "monitoring_drift_report",
+        no_bench_reason=(
+            "Caller-supplied monitoring JSON; covered by tests/test_monitoring.py, "
+            "not the numeric data benchmark."
+        ),
+        scored=False,
+        modalities=("tabular",),
+    ),
+    _entry(
+        "monitoring_skew_report",
+        "dataset",
+        "low",
+        "monitoring_skew_report",
+        no_bench_reason=(
+            "Caller-supplied monitoring JSON; covered by tests/test_monitoring.py, "
+            "not the numeric data benchmark."
+        ),
+        scored=False,
+        modalities=("tabular",),
     ),
 )
 
