@@ -41,6 +41,7 @@ jobs:
       - run: python -m leaklens.bench_dl
       - run: python -m leaklens.bench_vision
       - run: python -m leaklens.bench_ai
+      - run: python -m leaklens.bench_investigation
       - run: python -m leaklens.bench_realworld --no-profile
   package:
     runs-on: ubuntu-latest

@@ -79,6 +79,24 @@ def _attach_missing_evidence(rep, extra=(), sections=None):
         rep["missing_evidence"] = report.to_dict()
 
 
+def _narrate(plan, args):
+    """M4: optional narration; the deterministic plan is the only fallback."""
+    try:
+        from . import llm
+        from .ai.reasoning import narrate_investigation
+
+        provider = llm.create_provider(
+            args.llm_provider, args.llm_base_url, args.llm_model
+        )
+        return narrate_investigation(plan, provider)
+    except Exception as exc:  # noqa: BLE001 - optional AI must not break a scan
+        print(
+            f"Narration unavailable; the deterministic plan is unchanged: {exc}",
+            file=sys.stderr,
+        )
+        return plan.with_narration("ai_unavailable")
+
+
 def _read_dataset(path):
     return read_dataset(path)
 
@@ -1384,6 +1402,8 @@ def main(argv=None) -> int:
         intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
         plan = build_investigation(fs, graph=evidence_graph)
+        if use_ai_llm:
+            plan = _narrate(plan, a)
         rep["investigation"] = plan.to_dict()
         plan_records = [
             missing_evidence.MissingRecord(

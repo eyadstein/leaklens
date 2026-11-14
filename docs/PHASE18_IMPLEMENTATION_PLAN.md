@@ -1,6 +1,6 @@
 # Phase 18 implementation plan
 
-Status: **M1, M2, M3 and M5 implemented; M4 and M7 not started; M6 already satisfied by
+Status: **M1, M2, M3, M4 and M5 implemented; M7 not started; M6 already satisfied by
 M-S3.** Prepared at `4314051ea33c770f635e4c53faa7ac2195bac2da`.
 Scope is [AI_ML_EXPANSION_ROADMAP.md](AI_ML_EXPANSION_ROADMAP.md) section 7 and the architecture
 constraints in [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) section 9 plus
