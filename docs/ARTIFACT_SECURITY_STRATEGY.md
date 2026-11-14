@@ -322,6 +322,22 @@ budget shared by both splits of an audit; a refused image carries a stable reaso
 separately from `unreadable`. Pillow's own decompression-bomb limit is not
 weakened. See [IMAGE_DECODE_BUDGETS.md](IMAGE_DECODE_BUDGETS.md).
 
+Status (prompt injection, 2026-11-13): **M-S6 is complete for the existing LLM layer and accepted
+with findings.** A versioned 47-case synthetic corpus (32 attacks, 15 benign hard negatives)
+exercises the real `--llm` finding prompt and `--ai-llm` plan-narration prompt with deterministic
+fake providers. Untrusted fields are flattened before rendering, unsafe model claims are dropped,
+and every model reply is display-only. Pinned development/holdout digests, category-level metrics
+and the measured `A-009` false negative are published. An independent adversarial review at
+`b7142aa` reproduced the trust boundaries and metrics; its demonstrated defects were fixed in
+`c01481b`. The guard remains a finite denylist, so novel paraphrases and homoglyphs can bypass it,
+withheld explanations are silent in the CLI, and the corpus is not evidence of universal injection
+resistance. See [PROMPT_INJECTION.md](PROMPT_INJECTION.md).
+
+Status (dependency admission, 2026-11-13): **M-S7 is not implemented.** The pull-request template
+has no dependency-admission checklist (license, maintenance, install size, optional-extra placement
+and a labelled test or benchmark). No phase has added a mandatory dependency, so the gap has not
+blocked a milestone.
+
 Status (release integrity, 2026-11-13): **M-S4 is complete and strengthened.**
 The wheel check now requires every module and package resource derived from the
 tagged tree, the sdist is validated too, and a `package` CI job builds and

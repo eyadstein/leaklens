@@ -26,6 +26,11 @@ jobs:
           tests/test_paths.py tests/test_baseline.py
           tests/test_scanner.py tests/test_workspace.py
           -k "symlink or fifo or nul or regular_file or filesystem_root"
+      # M-S6: validate the versioned corpus, pinned digests and containment
+      # thresholds offline. No model, network call or API key is involved.
+      - name: Prompt-injection corpus validation
+        if: matrix.python == '3.12'
+        run: python -m leaklens.ai.prompt_injection --check
       - run: leaklens --scan leaklens
       - run: python -m leaklens.bench
       - run: python -m leaklens.bench_data
@@ -34,6 +39,7 @@ jobs:
       - run: python -m leaklens.bench_pipeline
       - run: python -m leaklens.bench_text
       - run: python -m leaklens.bench_dl
+      - run: python -m leaklens.bench_vision
       - run: python -m leaklens.bench_ai
       - run: python -m leaklens.bench_realworld --no-profile
   package:
