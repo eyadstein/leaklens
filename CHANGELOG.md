@@ -19,6 +19,10 @@
 
 - New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
 
+### CI covers Python 3.14 (#543)
+
+- The test matrix in `.github/workflows/ci.yml` now runs the suite, the LeakLens self-scan and all benchmarks on Python 3.14 alongside 3.10-3.12, matching the versions the README already lists as locally verified. 3.13 remains outside the matrix and is still not claimed as verified.
+
 ### Declared-split disjointness (Phase 17 M3)
 
 - New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.
