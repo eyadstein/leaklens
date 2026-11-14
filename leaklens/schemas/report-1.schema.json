@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/eyadstein/leaklens/main/leaklens/schemas/report-1.schema.json",
+  "title": "LeakLens audit report (report-1)",
+  "description": "The JSON document written by a LeakLens audit when --json is passed. This version is frozen: a change that removes or retypes a field needs a new report-2 schema, while a command that adds its own section (dl, pipeline, clustering) is additive and stays valid here.",
+  "type": "object",
+  "required": ["trust_score", "findings"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "The schema this document claims to follow. Absent on documents written before report-1 was published."
+    },
+    "schema": {
+      "type": "string",
+      "description": "Format identifier, matching the schema name for surfaces that carry a version too (baselines use schema plus version)."
+    },
+    "trust_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "0-100 health of the audited dataset or code, higher is better. Computed from the findings that survived policy (baseline, suppressions)."
+    },
+    "counts": {
+      "description": "Findings by severity, over every finding, suppressed ones included. Present on the text, dl and image reports; the data audit leaves the tally to the consumer.",
+      "$ref": "#/$defs/counts"
+    },
+    "findings": {
+      "type": "array",
+      "description": "Every finding the detectors produced, including suppressed ones, in detector order.",
+      "items": { "$ref": "#/$defs/finding" }
+    },
+    "policy": {
+      "type": "object",
+      "description": "What the baseline and suppressions did. Empty when neither is configured.",
+      "properties": {
+        "baseline": {
+          "type": "object",
+          "properties": {
+            "path": { "type": ["string", "null"] },
+            "fail_on_new": { "type": "boolean" },
+            "new": { "type": "integer", "minimum": 0 },
+            "unchanged": { "type": "integer", "minimum": 0 },
+            "changed": { "type": "integer", "minimum": 0 },
+            "resolved": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        },
+        "suppressions": { "type": "object" },
+        "diagnostics": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Suppression rules that were refused, and why."
+        }
+      },
+      "additionalProperties": true
+    },
+    "resolved": {
+      "type": "array",
+      "description": "Baseline entries this audit no longer produces. Omitted when no baseline was compared.",
+      "items": { "$ref": "#/$defs/resolved" }
+    },
+    "field": {
+      "type": ["string", "null"],
+      "description": "Document field that was audited for text datasets, otherwise null."
+    },
+    "documents": {
+      "type": "object",
+      "description": "Rows or documents read per split.",
+      "properties": {
+        "train": { "type": "integer", "minimum": 0 },
+        "test": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "skipped": {
+      "type": "object",
+      "description": "Rows or documents a reader could not use, per split.",
+      "properties": {
+        "train": { "type": "integer", "minimum": 0 },
+        "test": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "counts": {
+      "type": "object",
+      "description": "Findings by severity, over every finding, suppressed ones included.",
+      "required": ["high", "medium", "low", "total"],
+      "properties": {
+        "high": { "type": "integer", "minimum": 0 },
+        "medium": { "type": "integer", "minimum": 0 },
+        "low": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Versioned SHA-256 identity of the logical finding, stable across runs and line moves."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    },
+    "evidence": {
+      "type": "object",
+      "description": "One reason a detector fired. Optional fields are omitted when absent, never null.",
+      "required": ["source", "kind", "description"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Where the evidence came from, such as data, code or artifact."
+        },
+        "kind": {
+          "type": "string",
+          "description": "The evidence class, such as statistic, column, row or span."
+        },
+        "description": { "type": "string" },
+        "location": { "type": "string" },
+        "observed": { "type": "string" },
+        "expected": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "finding": {
+      "type": "object",
+      "required": ["severity", "kind", "column", "detail", "evidence", "fingerprint"],
+      "properties": {
+        "severity": { "$ref": "#/$defs/severity" },
+        "kind": {
+          "type": "string",
+          "description": "Detector that produced the finding, such as target_leakage or split_overlap."
+        },
+        "column": { "type": "string" },
+        "detail": { "type": "string" },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "diagnostic": {
+          "type": "boolean",
+          "const": true,
+          "description": "Present and true only on findings that describe the audit itself rather than the data."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["new", "unchanged", "changed", "suppressed"],
+          "description": "Present when a baseline or suppression rule applied to this finding."
+        },
+        "suppression": {
+          "type": "object",
+          "description": "The rule that suppressed the finding.",
+          "properties": {
+            "reason": { "type": "string" },
+            "expires": { "type": ["string", "null"] }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "resolved": {
+      "type": "object",
+      "required": ["fingerprint", "kind", "severity", "column"],
+      "properties": {
+        "fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "kind": { "type": "string" },
+        "severity": { "$ref": "#/$defs/severity" },
+        "column": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

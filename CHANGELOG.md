@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Published report schema (report-1)
+
+- New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
+- New `leaklens schema` prints the schema, and every JSON report now carries `$schema` naming it. Both are additive: no finding, severity, trust score, exit code or existing field changed, and a report written before this release still validates.
+- `jsonschema` is a test-only dependency (`[dev]`), not a runtime one. See `docs/REPORT_SCHEMA.md` for the contract, the version policy and the limits.
+
 ### Declared-split disjointness (Phase 17 M3)
 
 - New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.

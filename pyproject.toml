@@ -66,6 +66,7 @@ include = ["leaklens*"]
 
 [tool.setuptools.package-data]
 "leaklens.ai" = ["*.json"]
+"leaklens.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
