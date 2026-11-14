@@ -320,6 +320,80 @@ def images(argv) -> int:
     return 1 if audit.findings else 0
 
 
+def splits(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens splits",
+        description=(
+            "Audit declared COCO, YOLO or VOC train/val/test splits for "
+            "byte-identical images and reused image paths"
+        ),
+    )
+    p.add_argument("dataset")
+    p.add_argument(
+        "--format",
+        choices=("auto", "coco", "yolo", "voc"),
+        default="auto",
+        help="declaration format (default: detect from the dataset layout)",
+    )
+    p.add_argument(
+        "--samples", type=int, default=5, help="number of example groups to print"
+    )
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+
+    if a.samples < 0:
+        p.error("--samples must be non-negative")
+
+    from .image_splits import audit_splits
+
+    try:
+        audit = audit_splits(a.dataset, a.format)
+    except ImportError as e:
+        p.error(str(e))
+
+    stats = audit.stats
+    if a.json:
+        print(json.dumps(audit.to_dict(), indent=2))
+    else:
+        print(f"LeakLens split audit ({stats['format']})")
+        for partition in ("train", "val", "test"):
+            row = stats["partitions"][partition]
+            print(
+                f"    {partition:5s} {row['declared']:>7} declared, "
+                f"{row['unique']:>7} unique image(s)"
+            )
+        print(
+            f"{stats['declarations']} declaration(s), "
+            f"{stats['verified_images']} verified image(s), "
+            f"{stats['digested_images']} digested"
+        )
+        if stats["unresolved"]:
+            reasons = ", ".join(f"{k}: {v}" for k, v in stats["unresolved"].items())
+            print(f"    unresolved: {reasons}")
+        for limitation in stats["limitations"]:
+            print(f"    limitation: {limitation}")
+        for f in audit.findings:
+            print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
+        for group in audit.cross_groups[: a.samples]:
+            parts = ", ".join(
+                f"{name}={len(paths)}" for name, paths in group["partitions"].items()
+            )
+            print(f"    {group['digest'][:12]}... across {parts}")
+        if stats["within_split_groups"]:
+            print(
+                f"    {stats['within_split_groups']} within-split duplicate group(s) "
+                "(not a cross-split finding)"
+            )
+        if not audit.ok:
+            print(f"No audit could run: {stats.get('reason', 'no verified images')}.")
+        elif not audit.findings:
+            print("No cross-split image overlap found.")
+
+    if not audit.ok:
+        return 2
+    return 1 if audit.findings else 0
+
+
 def text(argv) -> int:
     p = argparse.ArgumentParser(
         prog="leaklens text",
@@ -803,6 +877,8 @@ def main(argv=None) -> int:
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "splits":
+        return splits(argv[1:])
     if argv and argv[0] == "text":
         return text(argv[1:])
     if argv and argv[0] == "dl":

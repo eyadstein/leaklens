@@ -2,8 +2,9 @@
 
 **Status:** mixed. Phase 12 is delivered history. Phases 13–16 are shipped and recorded in their
 acceptance documents, including the deferrals listed there. Phase 17 is partly shipped: M1 is
-satisfied by security milestone M-S5 and M2 (exact and perceptual image clustering) is delivered.
-Phase 17 M3–M7 and Phases 18–19 remain design proposals, not commitments.
+satisfied by security milestone M-S5, M2 (exact and perceptual image clustering) is delivered, and
+M3 (declared-split disjointness for COCO, YOLO and VOC) is delivered.
+Phase 17 M4–M7 and Phases 18–19 remain design proposals, not commitments.
 **Companions:** [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) (how),
 [FUTURE_VISION.md](FUTURE_VISION.md) (why), [AI_ROADMAP.md](AI_ROADMAP.md) (Phase 12 detail),
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) (decision log).
@@ -60,8 +61,8 @@ module-cycle removal is deferred to Phase 18. Phase 14 is accepted with M5/M6/M8
 shipping three of four checks ([PHASE14_ACCEPTANCE.md](PHASE14_ACCEPTANCE.md)). Phases 15 and 16
 are complete ([PHASE15_ACCEPTANCE.md](PHASE15_ACCEPTANCE.md),
 [PHASE16_ACCEPTANCE.md](PHASE16_ACCEPTANCE.md)). Phase 17 M1 is already satisfied by security
-milestone M-S5 and M2 ships exact + perceptual image clustering; Phase 17 M3–M7, Phase 18 and
-Phase 19 are unstarted.
+milestone M-S5, M2 ships exact + perceptual image clustering, and M3 ships declared-split
+disjointness; Phase 17 M4–M7, Phase 18 and Phase 19 are unstarted.
 
 Why the boundaries sit there:
 
@@ -406,7 +407,9 @@ Status (2026-11-13): M1's decode budgets shipped as security milestone M-S5
 ([IMAGE_DECODE_BUDGETS.md](IMAGE_DECODE_BUDGETS.md)); `images.py` is still the only image intake.
 M2 shipped exact duplicate groups plus perceptual clusters on the same intake, calibrated on
 generated families and documented in [VISION_AUDIT.md](VISION_AUDIT.md) and
-[VISION_BENCHMARK.md](VISION_BENCHMARK.md). M3–M7 are unstarted.
+[VISION_BENCHMARK.md](VISION_BENCHMARK.md). M3 shipped `leaklens splits DATASET`, a read-only
+declared-split audit for COCO, YOLO and VOC with SHA-256 cross-partition evidence, documented in
+[VISION_AUDIT.md](VISION_AUDIT.md#declared-split-disjointness-m3). M4–M7 are unstarted.
 
 **Tests.** Decode-bomb archive, corrupt JPEG, EXIF rotation, duplicate families, annotation edge
 cases, video sampling determinism.
@@ -600,8 +603,8 @@ Every phase must satisfy all of these or it does not ship:
 ## 10. Implementation sequencing status
 
 The first milestone recommended here, Phase 13 M1 + M2, shipped. Phases 13–16 are complete with
-the acceptance records and deferrals listed above, and Phase 17 M2 shipped exact and perceptual
-image clustering. In dependency order the next unstarted milestone is **Phase 17 M3**
-(declared-split disjointness for COCO/YOLO/VOC `ImageSets`); Phase 17 M1 is satisfied by M-S5.
-Phase 18 remains blocked on the Phase 17 hard edge, and Phase 19 on Phase 18. This section records
-status only; it does not re-plan the remaining milestones.
+the acceptance records and deferrals listed above, Phase 17 M2 shipped exact and perceptual image
+clustering, and Phase 17 M3 shipped declared-split disjointness for COCO/YOLO/VOC. In dependency
+order the next unstarted milestone is **Phase 17 M4** (annotation validation). Phase 17 M1 is
+satisfied by M-S5. Phase 18 remains blocked on the Phase 17 hard edge, and Phase 19 on Phase 18.
+This section records status only; it does not re-plan the remaining milestones.

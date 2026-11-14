@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Declared-split disjointness (Phase 17 M3)
+
+- New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.
+- Identity is SHA-256 over the file bytes, reusing `images.file_digest`; the audit never decodes an image, so Pillow is not required and the M-S5 decode budgets are untouched. A cross-split duplicate and a path declared in two splits produce a `high` `image_split_overlap` finding; duplicates entirely inside one partition are reported as counts, not findings. Missing, ambiguous, remote, traversing, control-character and oversized declarations are counted with stable reasons, and a partial audit states its limitations. No network access, no data writes and no new mandatory dependency (YOLO configs reuse the existing optional `yaml` extra). See `docs/VISION_AUDIT.md`.
+- README updated as a complete project guide; no version bump and no release.
+
 ### Exact and perceptual image clustering (Phase 17 M2)
 
 - `leaklens images` now groups images as well as pairing them: byte-identical files form exact groups (SHA-256 of the file bytes, only after the M-S5 budgets accepted the file), and perceptual near-duplicates form connected-component clusters on the existing 64-bit dHash. `--json` gains a `clustering` payload (`exact_duplicates`, `exact_groups`, `clusters` with train/test counts and `exact_pairs`, `uninformative`) and the text output summarizes both. `image_overlap()` keeps its signature, cost and finding unchanged, and the exit code is untouched.
