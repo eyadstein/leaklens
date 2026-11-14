@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Spell-check with codespell (#532)
+
+- New `.pre-commit-config.yaml` with the codespell hook (v2.4.3), skipping only the `realworld` notebook corpus that is kept verbatim as fixtures and ignoring the repository's legitimate vocabulary: the `fpr`/`FPR` metric, the `te` and `strat` abbreviations, and the `unparseable`/`disjointness`/`re-used` spellings.
+- A `spelling` job in CI runs pre-commit so the check is enforced without a local install.
+
 ### Investigation plans (Phase 18 M1)
 
 - New deterministic `investigation` block under `--intelligence`: ordered `inspect_evidence`, `suggested_test`, `missing_evidence` and `narration_slot` steps, each citing evidence ids that already exist in the payload and finding ids that already exist in the scan. The plan is built by `leaklens/intelligence/investigation.py` without importing `leaklens.ai`; `leaklens.ai.schemas` re-exports the plan types unchanged (ADR-025). Schema and limits: `docs/INVESTIGATION.md`.

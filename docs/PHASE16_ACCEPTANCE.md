@@ -82,4 +82,4 @@ families and the (empty) miss list are in [DL_BENCHMARK.md](DL_BENCHMARK.md).
 
 Phase 16 does not require a deferred milestone from Phase 13–15. Phase 17
 (computer vision) consumes the artifact intake for image decoders; Phase 18
-(investigation/governance) is the next roadmap dependant.
+(investigation/governance) is the next roadmap dependent.
