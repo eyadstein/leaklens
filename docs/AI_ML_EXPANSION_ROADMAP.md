@@ -444,6 +444,10 @@ capture session is routine and unmeasured.
 state what is missing, and produce a governance-ready evidence pack — with an optional LLM that
 narrates but never concludes.
 
+**Implementation plan.** [PHASE18_IMPLEMENTATION_PLAN.md](PHASE18_IMPLEMENTATION_PLAN.md) records
+the readiness audit, milestone order, dependencies and acceptance evidence. It is a plan, not an
+implementation.
+
 **User problem.** A report with 40 findings does not tell a reviewer what happened or what to check
 next. Separately, monitoring signals (drift, skew) exist in other tools but are never connected to
 the question of whether the evaluation was valid.

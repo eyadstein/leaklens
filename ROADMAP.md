@@ -6,7 +6,9 @@ The longer-term architecture sequence uses a **separate numbering scheme** that 
 [docs/AI_ROADMAP.md](docs/AI_ROADMAP.md) (Phase 12 onward), not the phases below. It is planned in
 [docs/AI_ML_EXPANSION_ROADMAP.md](docs/AI_ML_EXPANSION_ROADMAP.md), with the design in
 [docs/FUTURE_ARCHITECTURE.md](docs/FUTURE_ARCHITECTURE.md). Phases 13–16 of that sequence are
-shipped; Phases 17–19 remain proposals, not commitments.
+shipped, Phase 17 is partly shipped (M1–M3), and Phase 17 M4–M7 plus Phases 18–19 remain
+proposals, not commitments. The Phase 18 plan is
+[docs/PHASE18_IMPLEMENTATION_PLAN.md](docs/PHASE18_IMPLEMENTATION_PLAN.md).
 
 ## Phase 0: Foundation (done)
 Data detectors, code scanner, model arena, API, UI, Docker, CI, PyPI, pre-commit, HTML report, benchmark, study.
