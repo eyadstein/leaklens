@@ -27,6 +27,7 @@ from .leakage import (
 )
 from .missingness import audit_missingness
 from .readers import read_dataset
+from .report_schema import report_schema
 from .scanner import SKIP, scan_path
 
 _SEVERITY_COLORS = {
@@ -853,6 +854,25 @@ def verify(argv) -> int:
     return 0 if not issues else 1
 
 
+def schema(argv) -> int:
+    """Print the JSON Schema that describes the audit report."""
+    p = argparse.ArgumentParser(
+        prog="leaklens schema",
+        description=(
+            "Print the JSON Schema that describes the report written by --json. "
+            "The same document is served at the $schema URL in every report."
+        ),
+    )
+    p.parse_args(argv)
+    try:
+        doc = report_schema()
+    except RuntimeError as exc:
+        print(f"leaklens schema: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(doc, indent=2))
+    return 0
+
+
 def _gate_failure(
     outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
 ) -> bool:
@@ -889,14 +909,16 @@ def main(argv=None) -> int:
         return workspace(argv[1:])
     if argv and argv[0] == "verify":
         return verify(argv[1:])
+    if argv and argv[0] == "schema":
+        return schema(argv[1:])
     p = argparse.ArgumentParser(
         prog="leaklens",
         description="Audit datasets and ML code for leakage",
         epilog=(
             "Run 'leaklens doctor' to check your install, 'leaklens init' to write "
             "a starter .leaklens.toml config, 'leaklens workspace' for a "
-            "local interactive scan view, and 'leaklens verify' to check an "
-            "audit manifest offline."
+            "local interactive scan view, 'leaklens verify' to check an "
+            "audit manifest offline, and 'leaklens schema' for the report schema."
         ),
     )
     p.add_argument("--version", action="version", version=__version__)
