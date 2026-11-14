@@ -95,7 +95,7 @@ class SuggestedTest(_Step):
     question: str = ""
 
     def __post_init__(self) -> None:
-        super().__post_init__()
+        _Step.__post_init__(self)
         if self.detector not in manifest.BY_KIND:
             raise ValueError(f"unregistered detector kind: {self.detector!r}")
         if not isinstance(self.question, str) or not self.question.strip():
@@ -104,7 +104,7 @@ class SuggestedTest(_Step):
             raise ValueError(f"question must be at most {MAX_QUESTION} characters")
 
     def to_dict(self) -> dict[str, Any]:
-        data = super().to_dict()
+        data = _Step.to_dict(self)
         data["detector"] = self.detector
         data["question"] = self.question
         return data
