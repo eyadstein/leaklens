@@ -1066,7 +1066,7 @@ def test_ai_evidence_links_only_to_real_graph_nodes(client):
         "from sklearn.model_selection import train_test_split\n"
         "from sklearn.preprocessing import StandardScaler\n"
         "X = StandardScaler().fit_transform(X)\n"
-        "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)\n"
     )
 
     response = client.post(

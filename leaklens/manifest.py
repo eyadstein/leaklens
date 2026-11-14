@@ -454,6 +454,13 @@ DETECTORS: tuple[Detector, ...] = (
         "no_random_state",
         "train_test_split without random_state",
     ),
+    _entry(
+        "no_stratify",
+        "code",
+        "low",
+        "no_stratify",
+        "train_test_split without stratify",
+    ),
     # Phase 14 pipeline and MLOps intelligence. Every pipeline kind is a
     # diagnostic: it ships scored=False and never changes the trust score.
     _entry(
