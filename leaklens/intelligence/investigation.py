@@ -9,8 +9,8 @@ ungrounded step cannot be serialized.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
-from dataclasses import dataclass
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
 from leaklens import manifest
@@ -23,6 +23,13 @@ ENGINE = "leaklens.intelligence.investigation"
 MAX_STEPS = 200
 MAX_RATIONALE = 300
 MAX_QUESTION = 300
+MAX_NARRATION = 800
+NARRATION_STATES = (
+    "unavailable",
+    "llm",
+    "deterministic_fallback",
+    "ai_unavailable",
+)
 
 _NARRATION_UNAVAILABLE = "unavailable"
 _UNREGISTERED_DETECTOR = "unregistered_detector"
@@ -141,10 +148,30 @@ class MissingEvidence(_Step):
     step_type: ClassVar[str] = "missing_evidence"
 
 
+@dataclass(frozen=True, slots=True)
 class NarrationSlot(_Step):
-    """Reserved place for optional narration; it cannot add evidence."""
+    """Optional rephrasing of one cluster; it cannot add evidence.
+
+    ``text`` stays empty until the AI layer fills it (M4). An empty slot is
+    omitted from the serialized plan, so a plan whose narration is removed is
+    byte-identical to one built with narration disabled.
+    """
 
     step_type: ClassVar[str] = "narration_slot"
+    text: str = ""
+
+    def __post_init__(self) -> None:
+        _Step.__post_init__(self)
+        if not isinstance(self.text, str):
+            raise TypeError("text must be a string")
+        if len(self.text) > MAX_NARRATION:
+            raise ValueError(f"text must be at most {MAX_NARRATION} characters")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = _Step.to_dict(self)
+        if self.text:
+            data["text"] = self.text
+        return data
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,6 +192,37 @@ class InvestigationPlan:
             "steps": [step.to_dict() for step in self.steps],
             "omitted_tests": [item.to_dict() for item in self.omitted_tests],
         }
+
+    def narration_slots(self) -> tuple[NarrationSlot, ...]:
+        return tuple(step for step in self.steps if isinstance(step, NarrationSlot))
+
+    def with_narration(
+        self,
+        state: str,
+        texts: Mapping[int, str] | None = None,
+    ) -> InvestigationPlan:
+        """Return a copy carrying narration text; no other field may change."""
+
+        if state not in NARRATION_STATES:
+            raise ValueError(f"unsupported narration state: {state}")
+        texts = texts or {}
+        for ordinal, text in texts.items():
+            if not isinstance(ordinal, int) or not isinstance(text, str):
+                raise TypeError("narration texts must map a step ordinal to a string")
+            if len(text) > MAX_NARRATION:
+                raise ValueError(f"text must be at most {MAX_NARRATION} characters")
+        steps = tuple(
+            replace(step, text=texts.get(step.ordinal, ""))
+            if isinstance(step, NarrationSlot)
+            else step
+            for step in self.steps
+        )
+        return replace(self, steps=steps, narration=state)
+
+    def without_narration(self) -> InvestigationPlan:
+        """Drop every narration field, restoring the AI-free plan."""
+
+        return self.with_narration(_NARRATION_UNAVAILABLE)
 
 
 def _finding_id(index: int) -> str:

@@ -35,7 +35,7 @@ same findings always produce the same plan.
 | `inspect_evidence` | `InspectEvidence` | Look at the evidence a cluster already carries. |
 | `suggested_test` | `SuggestedTest` | A registered detector to re-run, with the question it answers. |
 | `missing_evidence` | `MissingEvidence` | The finding fired without structured detector evidence. |
-| `narration_slot` | `NarrationSlot` | Reserved for M4 narration; it cannot add evidence. |
+| `narration_slot` | `NarrationSlot` | Optional M4 rephrasing; it cannot add evidence. |
 
 Each evidence cluster gets `inspect_evidence`, `suggested_test` and
 `narration_slot` steps, plus `missing_evidence` when no detector-role evidence
@@ -66,9 +66,30 @@ evidence and remediation context, is complete without the AI layer;
 `narration` is reported as `"unavailable"`. `leaklens.ai.schemas` re-exports
 `ReasoningPlan`, `RootCauseGroup`, `Hypothesis`, `Remediation` and
 `EvidenceSpan` unchanged, so `from leaklens.ai.schemas import ReasoningPlan`
-still works (ADR-025). `ai.reasoning.build_plan` remains the narration grouping
-that M4 will re-point at the investigation plan; M1 adds only one investigation
-builder.
+still works (ADR-025).
+
+### Optional narration (M4)
+
+`--intelligence --ai-llm` asks the configured provider to rephrase each cluster
+into its `narration_slot`. Narration is additive:
+
+- The only entry point is `enrich_plan`, reached through
+  `ai.reasoning.narrate_investigation`. The AI layer sees the plan through a
+  structural `NarrationTarget` protocol, so `ai` still never imports
+  `intelligence.investigation`.
+- Each narration group id is the slot's own first evidence id, so the response
+  allowlist is exactly "evidence ids already in the plan". A note naming
+  anything else, malformed JSON, an empty note list or an unsupported safety
+  claim discards the whole response.
+- `narration` becomes `"llm"` only when at least one slot was filled. Any
+  validation failure yields `"deterministic_fallback"`; an unreachable provider
+  yields `"ai_unavailable"`. Steps, evidence, findings, `missing_evidence`,
+  the trust score and the exit code never change.
+- A slot's `text` is omitted while empty, so a plan with narration removed is
+  byte-identical to a plan built with narration disabled
+  (`InvestigationPlan.without_narration()`).
+- Every `prompt_injection` corpus case is replayed as a provider response and
+  cannot change the plan (`tests/test_narration.py`).
 
 ### Suggested tests (M2)
 

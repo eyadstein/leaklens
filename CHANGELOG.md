@@ -16,6 +16,12 @@
 - `suggested_test` plan steps now name a registered detector kind (`detector`) and the question it answers (`question`), selected from the cluster's own finding kinds. No check is invented; an unknown kind is omitted at runtime into `omitted_tests` with reason `unregistered_detector`, and constructing the step with an unregistered kind raises `ValueError`.
 - New `missing_evidence` payload collection, present only when something was skipped. It enumerates every engine skip, split limitation and omitted test with `area`, `reason`, `effect`, `source`, `count` and optional `finding_ids`, plus per-reason `counts`. It never changes the trust score or the exit gate. Schema: `docs/INVESTIGATION.md`.
 
+### Optional narration (Phase 18 M4)
+
+- `--intelligence --ai-llm` fills each cluster's `narration_slot` through `ai.reasoning.narrate_investigation`, which adapts the investigation plan to `enrich_plan`. A note may only name an evidence id the plan already carries; malformed JSON, an unknown id or an unsupported safety claim discards the response.
+- `narration` becomes `llm` only when a slot was filled; any validation failure reports `deterministic_fallback` and an unreachable provider reports `ai_unavailable`. Steps, evidence, findings, `missing_evidence`, the trust score and the exit code never change, and `InvestigationPlan.without_narration()` restores the AI-free plan byte for byte.
+- New print-only `python -m leaklens.bench_investigation` compares a narrated plan with its narration-free twin across fixed cases; it never writes documentation.
+
 ### Monitoring report intake (Phase 18 M5)
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.

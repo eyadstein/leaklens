@@ -37,6 +37,22 @@ class CompletionProvider(Protocol):
     def complete(self, prompt: str) -> str: ...
 
 
+class NarrationTarget(Protocol):
+    """The investigation plan, seen from the AI layer.
+
+    Structural on purpose: ``ai`` must not import ``intelligence.investigation``
+    (ADR-025), so narration adapts to the plan's public methods instead.
+    """
+
+    finding_count: int
+
+    def narration_slots(self) -> Sequence[object]: ...
+
+    def with_narration(
+        self, state: str, texts: dict[int, str] | None = None
+    ) -> NarrationTarget: ...
+
+
 @dataclass(frozen=True, slots=True)
 class _Category:
     title: str
@@ -477,9 +493,9 @@ def build_plan(
 ) -> ReasoningPlan:
     """Group related observations and attach remediation plus verification.
 
-    The investigation plan itself is built by
-    :func:`leaklens.intelligence.investigation.build_investigation`; this
-    function remains the AI-narration grouping until M4 re-points it.
+    This is the AI report's own root-cause grouping. Investigation narration
+    no longer uses it: M4 narrates the investigation plan through
+    :func:`narrate_investigation`.
     """
 
     buckets: dict[str, dict[str, list]] = {}
@@ -755,9 +771,95 @@ def note_for(plan: ReasoningPlan, group: RootCauseGroup) -> LLMNote | None:
     return None
 
 
+_NARRATION_ACTION = "Inspect the cited evidence before changing the pipeline."
+_NARRATION_CHECK = "Re-run the scan after the change and compare the same evidence ids."
+
+
+def _narration_input(
+    plan: NarrationTarget,
+    max_groups: int,
+) -> tuple[ReasoningPlan | None, dict[str, int]]:
+    """Adapt plan narration slots to the only narration entry point's input.
+
+    A group id is the slot's own first evidence id, so the allowlist that
+    ``_parse_enrichment`` enforces is exactly "evidence ids already in the
+    plan". Slots that repeat an id get a deterministic ordinal suffix.
+    """
+
+    ordinals: dict[str, int] = {}
+    groups: list[RootCauseGroup] = []
+    for slot in plan.narration_slots()[:max_groups]:
+        group_id = slot.evidence_ids[0]
+        if group_id in ordinals:
+            group_id = f"{group_id}-{slot.ordinal}"
+        ordinals[group_id] = slot.ordinal
+        groups.append(
+            RootCauseGroup(
+                group_id=group_id,
+                category=slot.step_type,
+                title=slot.rationale,
+                explanation=slot.rationale,
+                priority="info",
+                confidence=0.0,
+                evidence_ids=slot.evidence_ids,
+                hypothesis_ids=(),
+                remediation=Remediation(
+                    title=slot.rationale,
+                    rationale=slot.rationale,
+                    actions=(_NARRATION_ACTION,),
+                    verification=(_NARRATION_CHECK,),
+                    priority="info",
+                    evidence_ids=slot.evidence_ids,
+                ),
+                source="deterministic",
+            )
+        )
+    if not groups:
+        return None, ordinals
+    reasoning = ReasoningPlan(
+        root_causes=tuple(groups),
+        priority_order=tuple(group.group_id for group in groups),
+        summary=f"{plan.finding_count} deterministic findings are grouped into {len(groups)} steps.",
+        verification=(_NARRATION_CHECK,),
+    )
+    return reasoning, ordinals
+
+
+def narrate_investigation(
+    plan: NarrationTarget,
+    provider: CompletionProvider,
+    *,
+    max_groups: int = 6,
+) -> NarrationTarget:
+    """Fill an investigation plan's narration slots through ``enrich_plan``.
+
+    The deterministic plan is never edited: only narration text and the
+    narration state change, and any failure returns the plan with
+    ``deterministic_fallback``. Callers that cannot reach a provider use
+    ``ai_unavailable`` themselves.
+    """
+
+    reasoning, ordinals = _narration_input(plan, max_groups)
+    if reasoning is None:
+        return plan.with_narration("deterministic_fallback")
+    enriched = enrich_plan(reasoning, provider, max_groups=max_groups)
+    if enriched.enrichment != "llm":
+        return plan.with_narration("deterministic_fallback")
+    texts = {
+        ordinals[note.group_id]: note.explanation
+        for note in enriched.llm_notes
+        if note.group_id in ordinals
+    }
+    if not texts:
+        return plan.with_narration("deterministic_fallback")
+    return plan.with_narration("llm", texts)
+
+
 __all__ = [
     "CompletionProvider",
+    "NarrationTarget",
     "build_plan",
     "enrich_plan",
+    "narrate_investigation",
     "note_for",
 ]
