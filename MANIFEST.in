@@ -1,1 +1,2 @@
 recursive-include leaklens/prompts *.txt
+recursive-include leaklens/schemas *.json
