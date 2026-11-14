@@ -148,4 +148,5 @@ def test_cli_surfaces_the_plan_additively(tmp_path, monkeypatch, capsys):
         "narration": "unavailable",
         "finding_count": 0,
         "steps": [],
+        "omitted_tests": [],
     }

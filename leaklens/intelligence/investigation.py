@@ -13,6 +13,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
+from leaklens import manifest
 from leaklens.leakage import Finding
 
 from .context import AnalysisContext, build_context
@@ -21,8 +22,17 @@ from .provenance import EvidenceGraph, build_evidence_graph
 ENGINE = "leaklens.intelligence.investigation"
 MAX_STEPS = 200
 MAX_RATIONALE = 300
+MAX_QUESTION = 300
 
 _NARRATION_UNAVAILABLE = "unavailable"
+_UNREGISTERED_DETECTOR = "unregistered_detector"
+_ANCHOR_PREPOSITION = {
+    "feature": "on feature",
+    "split": "on split",
+    "dataset": "on dataset",
+    "file": "in file",
+    "image": "in image",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +80,59 @@ class InspectEvidence(_Step):
     step_type: ClassVar[str] = "inspect_evidence"
 
 
+@dataclass(frozen=True, slots=True)
 class SuggestedTest(_Step):
-    """A deterministic follow-up check; M2 maps it to a registered detector."""
+    """A deterministic follow-up check mapped to one registered detector.
+
+    The check is never free text: ``detector`` must exist in
+    ``manifest.DETECTORS``. The builder omits an unknown kind at runtime rather
+    than inventing a check, so constructing this class with an unregistered
+    kind is a development-time error.
+    """
 
     step_type: ClassVar[str] = "suggested_test"
+    detector: str = ""
+    question: str = ""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.detector not in manifest.BY_KIND:
+            raise ValueError(f"unregistered detector kind: {self.detector!r}")
+        if not isinstance(self.question, str) or not self.question.strip():
+            raise ValueError("question is required")
+        if len(self.question) > MAX_QUESTION:
+            raise ValueError(f"question must be at most {MAX_QUESTION} characters")
+
+    def to_dict(self) -> dict[str, Any]:
+        data = super().to_dict()
+        data["detector"] = self.detector
+        data["question"] = self.question
+        return data
+
+
+@dataclass(frozen=True, slots=True)
+class OmittedTest:
+    """A cluster whose test was not proposed because no kind was registered."""
+
+    kinds: tuple[str, ...]
+    reason: str
+    finding_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        for name, ids in (("kinds", self.kinds), ("finding_ids", self.finding_ids)):
+            if not isinstance(ids, tuple) or not ids:
+                raise ValueError(f"{name} must be a non-empty tuple")
+            if any(not isinstance(value, str) or not value.strip() for value in ids):
+                raise ValueError(f"{name} must contain non-empty strings")
+        if not isinstance(self.reason, str) or not self.reason.strip():
+            raise ValueError("reason is required")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kinds": list(self.kinds),
+            "reason": self.reason,
+            "finding_ids": list(self.finding_ids),
+        }
 
 
 class MissingEvidence(_Step):
@@ -96,6 +155,7 @@ class InvestigationPlan:
     finding_count: int
     engine: str = ENGINE
     narration: str = _NARRATION_UNAVAILABLE
+    omitted_tests: tuple[OmittedTest, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -103,6 +163,7 @@ class InvestigationPlan:
             "narration": self.narration,
             "finding_count": self.finding_count,
             "steps": [step.to_dict() for step in self.steps],
+            "omitted_tests": [item.to_dict() for item in self.omitted_tests],
         }
 
 
@@ -147,6 +208,26 @@ def _detector_indices(evidence: Iterable) -> set[int]:
     return indices
 
 
+def _test_kinds(cluster) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Split the cluster's finding kinds into registered and unknown ones."""
+    registered = tuple(
+        kind for kind in cluster.finding_kinds if kind in manifest.BY_KIND
+    )
+    unknown = tuple(
+        kind for kind in cluster.finding_kinds if kind not in manifest.BY_KIND
+    )
+    return registered, unknown
+
+
+def _question(cluster, detector: str) -> str:
+    where = _ANCHOR_PREPOSITION.get(cluster.anchor_kind, "at")
+    text = (
+        f"Does re-running the {detector} detector still reproduce the "
+        f"{cluster.severity} finding {where} {cluster.anchor!r}?"
+    )
+    return text[:MAX_QUESTION]
+
+
 def _ground(steps: list[_Step], findings: tuple[Finding, ...], known: set[str]) -> None:
     """Reject a step that cites an id outside the payload."""
 
@@ -175,6 +256,7 @@ def build_investigation(
 
     with_evidence = _detector_indices(context.evidence)
     steps: list[_Step] = []
+    omitted: list[OmittedTest] = []
 
     for cluster in graph.clusters:
         evidence_ids = tuple(cluster.evidence_ids)
@@ -189,14 +271,37 @@ def build_investigation(
         for step_type, rationale_kind in builders:
             if len(steps) >= MAX_STEPS:
                 break
+            kwargs: dict[str, Any] = {}
+            if step_type is SuggestedTest:
+                registered, unknown = _test_kinds(cluster)
+                if unknown:
+                    omitted.append(
+                        OmittedTest(
+                            kinds=unknown,
+                            reason=_UNREGISTERED_DETECTOR,
+                            finding_ids=finding_ids,
+                        )
+                    )
+                if not registered:
+                    continue
+                detector = registered[0]
+                kwargs = {
+                    "detector": detector,
+                    "question": _question(cluster, detector),
+                }
             steps.append(
                 step_type(
                     ordinal=len(steps) + 1,
                     evidence_ids=evidence_ids,
                     finding_ids=finding_ids,
                     rationale=_rationale(cluster, rationale_kind),
+                    **kwargs,
                 )
             )
 
     _ground(steps, findings, set(graph.evidence_by_id))
-    return InvestigationPlan(steps=tuple(steps), finding_count=len(findings))
+    return InvestigationPlan(
+        steps=tuple(steps),
+        finding_count=len(findings),
+        omitted_tests=tuple(omitted),
+    )

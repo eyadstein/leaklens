@@ -6,6 +6,11 @@
 
 - New deterministic `investigation` block under `--intelligence`: ordered `inspect_evidence`, `suggested_test`, `missing_evidence` and `narration_slot` steps, each citing evidence ids that already exist in the payload and finding ids that already exist in the scan. The plan is built by `leaklens/intelligence/investigation.py` without importing `leaklens.ai`; `leaklens.ai.schemas` re-exports the plan types unchanged (ADR-025). Schema and limits: `docs/INVESTIGATION.md`.
 
+### Detector-mapped suggested tests and missing-evidence report (Phase 18 M2/M3)
+
+- `suggested_test` plan steps now name a registered detector kind (`detector`) and the question it answers (`question`), selected from the cluster's own finding kinds. No check is invented; an unknown kind is omitted at runtime into `omitted_tests` with reason `unregistered_detector`, and constructing the step with an unregistered kind raises `ValueError`.
+- New `missing_evidence` payload collection, present only when something was skipped. It enumerates every engine skip, split limitation and omitted test with `area`, `reason`, `effect`, `source`, `count` and optional `finding_ids`, plus per-reason `counts`. It never changes the trust score or the exit gate. Schema: `docs/INVESTIGATION.md`.
+
 ### Monitoring report intake (Phase 18 M5)
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.

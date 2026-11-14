@@ -16,6 +16,7 @@ from .investigation import (
     InvestigationPlan,
     MissingEvidence,
     NarrationSlot,
+    OmittedTest,
     SuggestedTest,
     build_investigation,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "InvestigationPlan",
     "MissingEvidence",
     "NarrationSlot",
+    "OmittedTest",
     "Recommendation",
     "RootCause",
     "SuggestedTest",

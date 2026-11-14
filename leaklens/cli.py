@@ -9,7 +9,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 
-from . import __version__, assemble, llm
+from . import __version__, assemble, llm, missing_evidence
 from .audit import audit
 from .baseline import Baseline, BaselineError
 from .config import ConfigError, load_config
@@ -69,6 +69,14 @@ def _severity_label(severity: str) -> str:
         return label
     color = _SEVERITY_COLORS.get(severity.lower())
     return f"{color}{label}{_RESET}" if color else label
+
+
+def _attach_missing_evidence(rep, extra=(), sections=None):
+    """Add the M3 collection only when something was actually skipped."""
+    source = rep if sections is None else sections
+    report = missing_evidence.build([*extra, *missing_evidence.from_payload(source)])
+    if report.entries:
+        rep["missing_evidence"] = report.to_dict()
 
 
 def _read_dataset(path):
@@ -352,8 +360,10 @@ def splits(argv) -> int:
         p.error(str(e))
 
     stats = audit.stats
+    rep = audit.to_dict()
+    _attach_missing_evidence(rep, sections={"splits": rep})
     if a.json:
-        print(json.dumps(audit.to_dict(), indent=2))
+        print(json.dumps(rep, indent=2))
     else:
         print(f"LeakLens split audit ({stats['format']})")
         for partition in ("train", "val", "test"):
@@ -594,6 +604,7 @@ def text(argv) -> int:
         "skipped": {"train": train_skipped, "test": test_skipped},
         **extra,
     }
+    _attach_missing_evidence(rep, sections={"text": rep})
 
     if a.json:
         print(json.dumps(rep, indent=2))
@@ -671,6 +682,7 @@ def dl(argv) -> int:
         "resolved": sections.resolved,
         "dl": report.to_dict(),
     }
+    _attach_missing_evidence(rep, sections={"dl": rep["dl"]})
 
     if a.json:
         print(json.dumps(rep, indent=2))
@@ -1338,6 +1350,7 @@ def main(argv=None) -> int:
     evidence_graph = None
     graph_snapshot = None
     graph_diff = None
+    plan_records: list[missing_evidence.MissingRecord] = []
     if (
         use_graph_intelligence
         or a.graph_out
@@ -1370,7 +1383,19 @@ def main(argv=None) -> int:
         evidence_graph = report.to_graph()
         intelligence_report = report.to_dict()
         rep["intelligence"] = intelligence_report
-        rep["investigation"] = build_investigation(fs, graph=evidence_graph).to_dict()
+        plan = build_investigation(fs, graph=evidence_graph)
+        rep["investigation"] = plan.to_dict()
+        plan_records = [
+            missing_evidence.MissingRecord(
+                area="investigation",
+                reason=item.reason,
+                effect=missing_evidence.effect_for("investigation"),
+                source="investigation.omitted_tests",
+                finding_ids=item.finding_ids,
+            )
+            for item in plan.omitted_tests
+        ]
+    _attach_missing_evidence(rep, plan_records)
     if graph_baseline_path or graph_snapshot_path:
         from .intelligence import (
             GraphSnapshot,

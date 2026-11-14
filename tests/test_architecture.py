@@ -27,6 +27,7 @@ CORE = {
     "leakage",
     "lineage",
     "manifest",
+    "missing_evidence",
     "near_duplicate",
     "paths",
     "policy",

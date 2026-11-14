@@ -388,8 +388,15 @@ Details and interpretation: [`docs/DRIFT.md`](docs/DRIFT.md); measured controls:
 list of `inspect_evidence`, `suggested_test`, `missing_evidence` and
 `narration_slot` steps. Every step cites evidence ids that already exist in the
 payload and finding ids that already exist in the scan, so an ungrounded step
-cannot be serialized. The plan builds without `leaklens.ai`; with the AI layer
-absent, `narration` is `"unavailable"` and the rest of the plan is unchanged.
+cannot be serialized. A `suggested_test` step names a registered detector kind
+and the question it answers; unknown kinds are omitted, never invented. The plan
+builds without `leaklens.ai`; with the AI layer absent, `narration` is
+`"unavailable"` and the rest of the plan is unchanged.
+
+When a check is skipped, the payload gains one `missing_evidence` collection
+listing each engine skip, split limitation and omitted test with its own reason
+and count. It never changes the score or the exit gate, and the key is absent
+when nothing was skipped.
 
 `--monitoring-report PATH` (repeatable) reads a caller-supplied JSON drift or
 skew report and turns each breached metric into a `low`, `diagnostic` finding.

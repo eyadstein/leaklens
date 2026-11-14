@@ -1,7 +1,8 @@
 # Investigation plans and monitoring intake
 
-Phase 18 adds a deterministic investigation plan (M1) and a read-only intake
-for caller-supplied monitoring reports (M5). Both are additive: they never
+Phase 18 adds a deterministic investigation plan (M1), detector-mapped suggested
+tests (M2), a central missing-evidence report (M3) and a read-only intake for
+caller-supplied monitoring reports (M5). All four are additive: they never
 create, raise or score a finding.
 
 ## Investigation plan (M1)
@@ -32,13 +33,14 @@ same findings always produce the same plan.
 | `step_type` | Class | Purpose |
 |---|---|---|
 | `inspect_evidence` | `InspectEvidence` | Look at the evidence a cluster already carries. |
-| `suggested_test` | `SuggestedTest` | A follow-up check; M2 maps it to a registered detector kind. |
+| `suggested_test` | `SuggestedTest` | A registered detector to re-run, with the question it answers. |
 | `missing_evidence` | `MissingEvidence` | The finding fired without structured detector evidence. |
 | `narration_slot` | `NarrationSlot` | Reserved for M4 narration; it cannot add evidence. |
 
 Each evidence cluster gets `inspect_evidence`, `suggested_test` and
 `narration_slot` steps, plus `missing_evidence` when no detector-role evidence
-exists for its findings.
+exists for its findings. If none of the cluster's finding kinds is registered,
+the `suggested_test` step is omitted and listed in `omitted_tests` instead.
 
 ### Id contract
 
@@ -67,6 +69,72 @@ evidence and remediation context, is complete without the AI layer;
 still works (ADR-025). `ai.reasoning.build_plan` remains the narration grouping
 that M4 will re-point at the investigation plan; M1 adds only one investigation
 builder.
+
+### Suggested tests (M2)
+
+A `suggested_test` step is a reference to a registered detector, never free
+text. It adds two fields:
+
+```json
+{
+  "step_type": "suggested_test",
+  "ordinal": 2,
+  "detector": "target_leakage",
+  "question": "Does re-running the target_leakage detector still reproduce the high finding on dataset:amount?",
+  "evidence_ids": ["scanner-000000"],
+  "finding_ids": ["det-0"],
+  "rationale": "Re-run the target_leakage check after remediation and confirm the cited evidence no longer reproduces."
+}
+```
+
+- `detector` is chosen from the cluster's own finding kinds and must exist in
+  `manifest.DETECTORS`; no check is invented. Clusters are already ordered by
+  priority and confidence by the evidence graph, so the step order is stable.
+- `question` names the detector, the finding severity and the anchor kind
+  (`feature`, `file`, `split`, `dataset` or `image`).
+- `evidence_ids` are the records the test would discriminate.
+- An unknown kind cannot produce a step at runtime. It is omitted and listed in
+  `omitted_tests` with reason `unregistered_detector` and the affected finding
+  ids. Constructing `SuggestedTest` with an unregistered kind raises
+  `ValueError`, so a development mistake fails loudly.
+
+## Missing-evidence report (M3)
+
+When something could not be checked, the payload gains one `missing_evidence`
+collection. The key is absent when nothing was skipped, so a clean payload is
+unchanged. It is sourced from the engine `skipped` maps already in the payload
+(`missingness`, `drift`, `pipeline`, `monitoring`, `dl`), per-split document
+counts (`text`), split `unresolved` counters and `limitations`, a caught
+`EngineUnavailable` and the plan's `omitted_tests`.
+
+```json
+{
+  "entries": [
+    {
+      "area": "monitoring",
+      "reason": "malformed",
+      "effect": "The monitoring report was not evaluated; its drift or skew metrics are absent from the plan.",
+      "source": "monitoring.skipped",
+      "count": 1
+    }
+  ],
+  "counts": {"malformed": 1},
+  "total": 1
+}
+```
+
+- Every reason keeps its own entry and count; nothing is collapsed into "some
+  checks were skipped".
+- `area` names the engine or subject, `reason` is the engine's stable code,
+  `effect` says what the gap means for the review and `source` says where the
+  skip was recorded. `finding_ids` appears when the gap belongs to findings
+  (for example an omitted test).
+- `counts` aggregates by reason for a quick view; `total` sums the counts.
+- `MAX_ENTRIES` is 200. An overflow keeps the first 199 entries and adds one
+  `entry_cap` record naming how many were dropped.
+- The collection never creates, raises or scores a finding and never changes
+  the exit gate. `leaklens/missing_evidence.py` builds it; it imports no
+  optional extra and never imports `leaklens.ai`.
 
 ## Monitoring report intake (M5)
 
