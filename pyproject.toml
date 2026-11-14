@@ -43,6 +43,7 @@ taintwatch = ["taintwatch>=0.1.0,<0.2"]
 dev = [
     "pytest>=7",
     "pytest-cov>=4",
+    "jsonschema>=4",
     "mlflow>=2.9",
     "fastapi>=0.110",
     "uvicorn>=0.27",
@@ -66,6 +67,7 @@ include = ["leaklens*"]
 
 [tool.setuptools.package-data]
 "leaklens.ai" = ["*.json"]
+"leaklens.schemas" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
