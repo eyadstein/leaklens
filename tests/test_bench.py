@@ -22,12 +22,12 @@ def test_legacy_baseline_is_preserved():
 def test_expanded_benchmark_counts():
     metrics = evaluate()
 
-    assert metrics["n"] == 109
-    assert metrics["leaky"] == 58
-    assert metrics["clean"] == 51
-    assert metrics["tp"] == 58
+    assert metrics["n"] == 111
+    assert metrics["leaky"] == 59
+    assert metrics["clean"] == 52
+    assert metrics["tp"] == 59
     assert metrics["fp"] == 0
-    assert metrics["tn"] == 51
+    assert metrics["tn"] == 52
     assert metrics["fn"] == 0
 
 
@@ -35,8 +35,8 @@ def test_additional_categories_are_complete():
     metrics = evaluate()
     categories = metrics["categories"]
 
-    assert sum(item["n"] for item in categories.values()) == 36
-    assert categories["scaling"]["n"] == 16
+    assert sum(item["n"] for item in categories.values()) == 38
+    assert categories["scaling"]["n"] == 18
     assert categories["imputation"]["n"] == 15
     assert categories["future_target"]["n"] == 4
     assert categories["encoding"]["n"] == 1

@@ -212,17 +212,17 @@ Contributions are signed local log-odds for this unit, not global feature import
 
 ## External transfer to existing scanner cases (development)
 
-Cases: 141 (labels from the existing scanner benchmark). These cases are not used for fitting, calibration or threshold selection. **They were used for Phase 6 error analysis**, so the current perfect score is a development result, not independent evidence. The frozen real-world holdout, not this set, is the generalization check.
+Cases: 143 (labels from the existing scanner benchmark). These cases are not used for fitting, calibration or threshold selection. **They were used for Phase 6 error analysis**, so the current perfect score is a development result, not independent evidence. The frozen real-world holdout, not this set, is the generalization check.
 
 | Metric | Value |
 |---|---:|
-| Accuracy | 1.000 |
-| Precision | 1.000 |
+| Accuracy | 0.993 |
+| Precision | 0.987 |
 | Recall | 1.000 |
-| F1 | 1.000 |
-| Specificity | 1.000 |
-| False-positive rate | 0.000 |
-| TP / FP / FN / TN | 74 / 0 / 0 / 67 |
+| F1 | 0.993 |
+| Specificity | 0.985 |
+| False-positive rate | 0.015 |
+| TP / FP / FN / TN | 75 / 1 / 0 / 67 |
 
 ### Phase 5 external errors and the Phase 6 response
 
@@ -251,14 +251,14 @@ This sweep is diagnostic only. The shipped threshold was chosen on validation, n
 
 | Threshold | Precision | Recall | F1 | FPR |
 |---:|---:|---:|---:|---:|
-| 0.30 | 0.987 | 1.000 | 0.993 | 0.015 |
-| 0.40 | 0.987 | 1.000 | 0.993 | 0.015 |
-| 0.50 | 1.000 | 1.000 | 1.000 | 0.000 |
-| 0.60 | 1.000 | 1.000 | 1.000 | 0.000 |
-| 0.63 | 1.000 | 1.000 | 1.000 | 0.000 |
-| 0.70 | 1.000 | 1.000 | 1.000 | 0.000 |
-| 0.80 | 1.000 | 1.000 | 1.000 | 0.000 |
-| 0.90 | 1.000 | 0.987 | 0.993 | 0.000 |
+| 0.30 | 0.974 | 1.000 | 0.987 | 0.029 |
+| 0.40 | 0.974 | 1.000 | 0.987 | 0.029 |
+| 0.50 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.60 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.63 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.70 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.80 | 0.987 | 1.000 | 0.993 | 0.015 |
+| 0.90 | 0.987 | 0.987 | 0.987 | 0.015 |
 
 ## Semantic-rule regression set
 
@@ -288,7 +288,7 @@ Global importance is not a causal explanation for any single prediction.
 
 ## External false-positive analysis
 
-- No clean external cases were flagged at the selected threshold.
+- Clean case flagged: `derived copy and func fitted after split on train` (p=0.998)
 
 No leaky external cases were missed at the selected threshold.
 

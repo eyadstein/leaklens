@@ -257,5 +257,31 @@ EXTRA_CASES.extend(
             True,
             "encoding",
         ),
+        # Issue #19: Dataflow tracking of derived variables.
+        BenchmarkCase(
+            "derived copy and func fitted before split",
+            "from sklearn.preprocessing import StandardScaler\n"
+            "from sklearn.model_selection import train_test_split\n"
+            "X2 = X.copy()\n"
+            "X3 = f(X2)\n"
+            "sc = StandardScaler()\n"
+            "X3 = sc.fit_transform(X3)\n"
+            "a = train_test_split(X3, y, random_state=42)\n",
+            True,
+            "scaling",
+        ),
+        BenchmarkCase(
+            "derived copy and func fitted after split on train",
+            "from sklearn.preprocessing import StandardScaler\n"
+            "from sklearn.model_selection import train_test_split\n"
+            "X_train, X_test, y_train, y_test = "
+            "train_test_split(X, y, random_state=42)\n"
+            "X2 = X_train.copy()\n"
+            "X3 = f(X2)\n"
+            "sc = StandardScaler()\n"
+            "X_train = sc.fit_transform(X3)\n",
+            False,
+            "scaling",
+        ),
     ]
 )

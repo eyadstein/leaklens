@@ -57,3 +57,47 @@ def test_backward_closure_df():
         "a = train_test_split(X, y)\nsc.fit(df)\n"
     )
     assert ("fit_on_full_data", "medium") in k
+
+
+def test_derived_multihop_copy_func_is_tracked():
+    k = kinds(
+        "X2 = X.copy()\nX3 = f(X2)\nsc = StandardScaler()\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\nsc.fit(X3)\n"
+    )
+    assert ("fit_on_full_data", "medium") in k
+
+
+def test_derived_chain_before_split_is_flagged():
+    k = kinds(
+        "X2 = X.copy()\nX3 = f(X2)\nsc = StandardScaler()\nsc.fit(X3)\n"
+        "a = train_test_split(X, y)\n"
+    )
+    assert ("preprocess_before_split", "high") in k
+
+
+def test_derived_subscript_column_selection_is_tracked():
+    k = kinds(
+        "X_train, X_test, y_train, y_test = train_test_split(X, y)\n"
+        "X2 = X[['col1', 'col2']]\nsc = StandardScaler()\nsc.fit(X2)\n"
+    )
+    assert ("fit_on_full_data", "medium") in k
+
+
+def test_derived_split_parent_fit_is_flagged():
+    k = kinds(
+        "X2 = X.copy()\nX3 = f(X2)\n"
+        "X_train, X_test, y_train, y_test = train_test_split(X3, y)\n"
+        "sc = StandardScaler()\nsc.fit(X)\n"
+    )
+    assert ("fit_on_full_data", "medium") in k
+
+
+def test_derived_kfold_split_is_tracked():
+    src = (
+        "from sklearn.preprocessing import StandardScaler\n"
+        "from sklearn.model_selection import KFold\n"
+        "kf = KFold(5)\nX2 = X.copy()\nX3 = f(X2)\n"
+        "for tr, te in kf.split(X):\n    sc = StandardScaler()\n    sc.fit(X3)\n"
+    )
+    findings = [(f.kind, f.severity) for f in scan_source(src)]
+    assert ("fit_on_full_data", "medium") in findings
