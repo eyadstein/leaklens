@@ -139,6 +139,11 @@ def _has_seed(c) -> bool:
     return any(kw.arg == "random_state" or kw.arg is None for kw in c.keywords)
 
 
+def _has_stratify(c) -> bool:
+    """stratify passed, or a **kwargs expansion that might carry it (assume it does)."""
+    return any(kw.arg == "stratify" or kw.arg is None for kw in c.keywords)
+
+
 def _kw_false(c, name: str) -> bool:
     """Whether a keyword argument is the literal False."""
     return any(
@@ -457,6 +462,29 @@ def _scan_core(
                     loc(c.lineno),
                     f"{nm}() without random_state: it always shuffles, so folds differ on every run, so results are not reproducible",
                     stable_key=keys[id(c)],
+                )
+            )
+        # low severity: an unstratified split of a classification target can
+        # skew the class ratio between train and test. Only the (X, y, ...)
+        # shape is flagged: a single-array split has no separate labels to
+        # stratify on here, and shuffle=False is a deliberate ordered split
+        # (stratify is incompatible with it).
+        if (
+            nm == "train_test_split"
+            and len(c.args) >= 2
+            and not _has_stratify(c)
+            and not _kw_false(c, "shuffle")
+        ):
+            out.append(
+                Finding(
+                    "low",
+                    "no_stratify",
+                    loc(c.lineno),
+                    "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+                    # Namespaced: no_random_state can fire on the same call and
+                    # already carries the bare node key; stable keys must stay
+                    # distinct per finding.
+                    stable_key=f"no_stratify:{keys[id(c)]}",
                 )
             )
         if isinstance(f, ast.Name) and f.id in funcs:

@@ -15,6 +15,10 @@
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
 
+### Scanner: stratify advisory
+
+- New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
+
 ### Declared-split disjointness (Phase 17 M3)
 
 - New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.

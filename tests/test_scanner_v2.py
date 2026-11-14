@@ -19,7 +19,7 @@ OTHER_SCALE = """
 from mylib import scale
 from sklearn.model_selection import train_test_split
 Xs = scale(X)
-a = train_test_split(Xs, y, random_state=42)
+a = train_test_split(Xs, y, random_state=42, stratify=y)
 """
 
 
