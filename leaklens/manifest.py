@@ -36,6 +36,14 @@ _DIAGNOSTIC_KINDS = frozenset(
         "pipeline_param_drift",
         "pipeline_missing_digest",
         "pipeline_unpinned_dependency",
+        "text_exact_duplicate",
+        "text_near_duplicate",
+        "text_eval_contamination",
+        "rag_index_leakage",
+        "text_embedding_similarity",
+        "dl_split_overlap",
+        "dl_training_protocol_mismatch",
+        "artifact_unsafe_format",
     }
 )
 
@@ -203,6 +211,16 @@ DETECTORS: tuple[Detector, ...] = (
         no_bench_reason=(
             "Requires Pillow and image fixtures; covered by tests/test_images.py, not "
             "the numeric data benchmark."
+        ),
+    ),
+    _entry(
+        "image_split_overlap",
+        "image",
+        "high",
+        "image_split_overlap",
+        no_bench_reason=(
+            "Opt-in audit of declared COCO/YOLO/VOC splits; covered by "
+            "tests/test_image_splits.py, not the numeric data benchmark."
         ),
     ),
     _entry(
@@ -480,6 +498,80 @@ DETECTORS: tuple[Detector, ...] = (
         "pipeline_unpinned_dependency",
         "unpinned requirements entry",
     ),
+    # Phase 15 text and LLM intelligence. Every text kind is a diagnostic: it
+    # ships scored=False and never changes the trust score or the exit gate.
+    _entry(
+        "text_exact_duplicate",
+        "split",
+        "high",
+        "text_exact_duplicate",
+        "exact duplicate across splits",
+        scored=False,
+        modalities=("text",),
+    ),
+    _entry(
+        "text_near_duplicate",
+        "split",
+        "medium",
+        "text_near_duplicate",
+        "near-duplicate paraphrase",
+        scored=False,
+        modalities=("text",),
+    ),
+    _entry(
+        "text_eval_contamination",
+        "split",
+        "high",
+        "text_eval_contamination",
+        "eval fingerprint contamination",
+        scored=False,
+        modalities=("text",),
+    ),
+    _entry(
+        "rag_index_leakage",
+        "code",
+        "high",
+        "rag_index_leakage",
+        "shared RAG index",
+        scored=False,
+    ),
+    _entry(
+        "text_embedding_similarity",
+        "split",
+        "medium",
+        "text_embedding_similarity",
+        no_bench_reason=(
+            "Needs user-supplied vectors from an unpinned model; results are not "
+            "reproducible across model versions, so no deterministic bench case."
+        ),
+        scored=False,
+        modalities=("text",),
+    ),
+    _entry(
+        "dl_split_overlap",
+        "code",
+        "high",
+        "dl_split_overlap",
+        "same dataset on both sides",
+        scored=False,
+    ),
+    _entry(
+        "dl_training_protocol_mismatch",
+        "code",
+        "medium",
+        "dl_training_protocol_mismatch",
+        "early stopping can never fire",
+        scored=False,
+    ),
+    _entry(
+        "artifact_unsafe_format",
+        "code",
+        "high",
+        "artifact_unsafe_format",
+        "pickle checkpoint refused",
+        scored=False,
+        modalities=("artifact",),
+    ),
 )
 
 BY_KIND: dict[str, Detector] = {entry.kind: entry for entry in DETECTORS}
@@ -532,6 +624,34 @@ ENGINES: dict[str, Engine] = {
                 "pipeline_missing_digest",
                 "pipeline_unpinned_dependency",
                 "no_random_state",
+            }
+        ),
+    ),
+    "leaklens.text": Engine(
+        "leaklens.text",
+        "split",
+        None,
+        frozenset(
+            {
+                "text_exact_duplicate",
+                "text_near_duplicate",
+                "text_eval_contamination",
+                "rag_index_leakage",
+                "text_embedding_similarity",
+            }
+        ),
+    ),
+    "leaklens.dl": Engine(
+        "leaklens.dl",
+        "code",
+        None,
+        frozenset(
+            {
+                "dl_split_overlap",
+                "dl_training_protocol_mismatch",
+                "artifact_unsafe_format",
+                "no_random_state",
+                "pipeline_unpinned_dependency",
             }
         ),
     ),

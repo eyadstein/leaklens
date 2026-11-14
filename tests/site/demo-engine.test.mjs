@@ -48,7 +48,7 @@ test("findings sort by severity and then line", () => {
   const sorted = sortFindings(advanced.findings);
   assert.deepEqual(
     sorted.map((finding) => finding.severity),
-    ["high", "high", "high", "medium", "medium", "medium"]
+    ["high", "high", "high", "medium", "medium", "medium", "low"]
   );
   const high = sorted.filter((finding) => finding.severity === "high");
   assert.ok(high[0].line <= high[1].line);
@@ -68,8 +68,8 @@ test("severityCounts totals every finding", () => {
   assert.deepEqual(severityCounts(advanced.findings), {
     high: 3,
     medium: 3,
-    low: 0,
-    total: 6,
+    low: 1,
+    total: 7,
   });
   assert.deepEqual(severityCounts([]), { high: 0, medium: 0, low: 0, total: 0 });
 });

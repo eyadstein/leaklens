@@ -2,6 +2,8 @@
 
 import json
 import os
+import socket
+import threading
 
 import pytest
 
@@ -166,3 +168,41 @@ def test_compare_classifies_new_unchanged_changed_and_resolved():
 def test_entry_validation_rejects_bad_fingerprint():
     with pytest.raises(BaselineError):
         BaselineEntry("short", "kind", "low", "")
+
+
+def test_load_refuses_a_directory(tmp_path):
+    with pytest.raises(BaselineError, match="not a regular file"):
+        Baseline.load(tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX named pipes")
+def test_load_refuses_a_fifo_without_blocking(tmp_path):
+    fifo = tmp_path / "baseline.json"
+    os.mkfifo(fifo)
+    outcome = {}
+
+    def load():
+        try:
+            Baseline.load(fifo)
+        except BaselineError as exc:
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=load, daemon=True)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive(), "Baseline.load blocked on a FIFO"
+    assert "error" in outcome
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or not hasattr(socket, "AF_UNIX"), reason="POSIX sockets"
+)
+def test_load_refuses_a_socket(tmp_path):
+    path = tmp_path / "baseline.json"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        server.bind(str(path))
+        with pytest.raises(BaselineError, match="not a regular file"):
+            Baseline.load(path)
+    finally:
+        server.close()

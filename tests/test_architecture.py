@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "leaklens"
 
 CORE = {
     "assemble",
+    "audit_manifest",
     "availability",
     "baseline",
     "config",
@@ -26,12 +27,14 @@ CORE = {
     "leakage",
     "lineage",
     "manifest",
+    "near_duplicate",
     "paths",
     "policy",
     "source",
     "suppression",
 }
 ENGINES = {
+    "analysis",
     "audit",
     "cvcheck",
     "drift",
@@ -47,6 +50,7 @@ ENGINES = {
     "upload_guard",
 }
 AI = "ai"
+INTEGRATIONS = "integrations"
 INTELLIGENCE = "intelligence"
 SURFACES = {
     "api",
@@ -96,8 +100,9 @@ ALLOWED_CYCLES: dict[frozenset[str], tuple[int, str]] = {
 }
 
 FORBIDDEN = {
-    "core": {"engines", "ai", "intelligence", "surfaces"},
+    "core": {"engines", "ai", "intelligence", "surfaces", "integrations"},
     "engines": {"ai", "intelligence", "surfaces"},
+    "integrations": {"engines", "ai", "intelligence", "surfaces"},
     "intelligence": {"ai"},
     "ai": {"intelligence"},
 }
@@ -113,6 +118,8 @@ def _layer(module: str) -> str:
         return "surfaces"
     if head == AI:
         return "ai"
+    if head == INTEGRATIONS:
+        return "integrations"
     if head == INTELLIGENCE:
         return "intelligence"
     # Benchmarks, arena, __main__ and future one-off tools: nothing may import
@@ -228,6 +235,14 @@ def test_a_new_edge_fails_with_a_readable_message():
     assert ("leakage", "scanner") not in ALLOWED
 
 
-@pytest.mark.parametrize("module, layer", [("source", "core"), ("scanner", "engines")])
+@pytest.mark.parametrize(
+    ("module", "layer"),
+    [
+        ("source", "core"),
+        ("scanner", "engines"),
+        ("analysis.text.dedup", "engines"),
+        ("integrations.hf", "integrations"),
+    ],
+)
 def test_layers_cover_the_phase13_modules(module, layer):
     assert _layer(module) == layer

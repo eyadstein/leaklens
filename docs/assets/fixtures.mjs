@@ -268,7 +268,7 @@ export const fixtures = {
           "kind": "no_random_state",
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
-          "fix": "Set an explicit seed wherever randomness enters the run (random_state=<int> in scikit-learn, seed=<int> in XGBoost/LightGBM/PyTorch, or the equivalent framework argument) and record it in the pipeline metadata so the run can be reproduced.",
+          "fix": "Record the run's randomness and determinism settings: a seed wherever randomness enters (seed=<int> in PyTorch/Lightning, seed_everything, set_random_seed, or random_state=<int> in scikit-learn/XGBoost/LightGBM), deterministic-algorithm flags (torch.use_deterministic_algorithms, enable_op_determinism) when mixed precision or distributed training is used, and the precision/topology itself (precision, strategy, devices) in the pipeline metadata so the same run can be compared.",
           "line": 9
         },
         {
