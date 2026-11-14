@@ -53,7 +53,7 @@ node scripts/check_site_layout.mjs   # local headless Chrome/Edge check
 ## Python version
 
 - **Required:** Python >=3.10 (`requires-python` in `pyproject.toml`)
-- **CI-tested:** 3.10, 3.11, 3.12 (`.github/workflows/ci.yml` matrix) — **locally verified** on 3.10, 3.11, 3.12, and 3.14 (full test suite; see [docs/REALWORLD.md](docs/REALWORLD.md) for the real-world eval and [CONTRIBUTING.md](CONTRIBUTING.md) for local checks)
+- **CI-tested:** 3.10, 3.11, 3.12, 3.14 (`.github/workflows/ci.yml` matrix) — **locally verified** on 3.10, 3.11, 3.12, and 3.14 (full test suite; see [docs/REALWORLD.md](docs/REALWORLD.md) for the real-world eval and [CONTRIBUTING.md](CONTRIBUTING.md) for local checks)
 - 3.13 was **not** in the CI matrix at the time of this release and is **not** claimed as verified
 
 > The `leaklens` command is provided by the PyPI package `leaklens-ml`.
