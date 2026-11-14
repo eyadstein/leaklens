@@ -15,7 +15,11 @@ def test_tts_without_random_state_is_low():
 
 
 def test_tts_with_random_state_is_clean():
-    assert not scan_source(SPLIT + "a = train_test_split(X, y, random_state=42)\n")
+    # no reproducibility finding; the separate no_stratify advisory for this
+    # source is covered in tests/test_no_stratify.py
+    assert "no_random_state" not in kinds(
+        SPLIT + "a = train_test_split(X, y, random_state=42)\n"
+    )
 
 
 def test_tts_star_kwargs_not_flagged():

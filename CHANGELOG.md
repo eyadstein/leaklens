@@ -15,6 +15,10 @@
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
 
+### Scanner: stratify advisory
+
+- New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
+
 ### CI covers Python 3.14 (#543)
 
 - The test matrix in `.github/workflows/ci.yml` now runs the suite, the LeakLens self-scan and all benchmarks on Python 3.14 alongside 3.10-3.12, matching the versions the README already lists as locally verified. 3.13 remains outside the matrix and is still not claimed as verified.
