@@ -15,7 +15,7 @@
 
 | Where | Leak |
 |---|---|
-| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), target-, split- and group-associated missingness (`missingness_*`, `--test`/`--group`), near-duplicate images across split folders (`leaklens images`) |
+| Data | Target leakage (a single feature that almost perfectly predicts the label), high-cardinality categorical target leakage, ID-like columns, train/test row overlap, feature-vector overlap with conflicting labels, case/whitespace near-duplicates, temporal leakage, entity/group overlap (`--group COL`), target-, split- and group-associated missingness (`missingness_*`, `--test`/`--group`), near-duplicate images across split folders (`leaklens images`), declared train/val/test split overlap in COCO, YOLO and VOC image datasets (`leaklens splits`) |
 | Code (`.py`, `.ipynb`) | Scaler/encoder/imputer fitted before the split, SMOTE before the split, target/frequency encoding built from all rows, feature selection (SelectKBest, RFE, SelectFromModel) before the split, transformers fitted on test/validation data or on the full dataset after the split, chained calls like `StandardScaler().fit_transform(X)`, preprocessing or resampling done before `cross_val_score` / `GridSearchCV` (`preprocess_outside_cv`), hyperparameter tuning on the test set (`tuning_on_test_data`), tuning before the split or on the full frame (`tuning_before_split`, `tuning_on_full_data`), cross-validation on test rows (`cv_on_test_data`), repeated test-set scoring, group CV without `groups=`, shuffled splits of time-sorted data, and notebooks run out of order |
 
 Confidence is explicit in each finding's wording: a confirmed rule (for example a search fitted on `X_test`) is reported as a high-severity leak, while a suspicious but legitimate-possible pattern (for example frequency encoding before the split) is low/medium and says what was observed. Every finding has a fix hint under `--explain`.
@@ -95,7 +95,7 @@ leaklens doctor
 leaklens --version
 ```
 
-CSV and JSON input, dataset audit, code scanning, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `doctor` work with the base install.
+CSV and JSON input, dataset audit, code scanning, `splits`, and `--explain` / `--intelligence` / `--ai` / `--sarif` / `--html` / `--badge` / `--manifest` / `verify` / `doctor` work with the base install.
 
 ### `leaklens doctor`
 
@@ -123,6 +123,7 @@ Every optional extra declared in `pyproject.toml`:
 | `app` | FastAPI service + Streamlit UI | `pip install "leaklens-ml[app]"` |
 | `api` | Hardened public live-scan API (FastAPI + uvicorn, no Streamlit) | `pip install "leaklens-ml[api]"` |
 | `sql` | Optional SQL lineage analysis (`--sql`) with SQLGlot | `pip install "leaklens-ml[sql]"` |
+| `yaml` | YAML pipeline and training configs (DVC, Lightning/Keras shapes) | `pip install "leaklens-ml[yaml]"` |
 | `taintwatch` | Optional TaintWatch guard for `--llm` | `pip install "leaklens-ml[taintwatch]"` |
 | `dev` | Test, lint (ruff), bandit, pip-audit, pip-licenses and the other developer tools | `pip install "leaklens-ml[dev]"` |
 
@@ -148,8 +149,10 @@ leaklens train.json --target label   # JSON input, no extra needed
 leaklens train.xlsx --target label   # Excel input (pip install "leaklens-ml[excel]")
 leaklens train.feather --target label   # Feather input (pip install "leaklens-ml[feather]")
 leaklens images data/train data/test   # near-duplicate images across splits (pip install "leaklens-ml[images]")
+leaklens splits data/coco              # declared COCO/YOLO/VOC split disjointness (base install)
 leaklens train.csv --target label --test test.csv --drift   # opt-in, diagnostic-only drift
 leaklens --scan query.sql --target label --sql-dialect postgres   # needs [sql]
+leaklens dl .   # deep-learning code, configs and model artifacts (offline)
 python examples/make_demo.py
 leaklens demo.csv --target is_fraud --arena
 mlflow ui --backend-store-uri sqlite:///mlflow.db
@@ -208,6 +211,7 @@ leaklens train.csv --target label --ai             # experimental, offline AI hy
 | `--sarif` | Write SARIF 2.1.0 for GitHub code scanning |
 | `--html` | Write a shareable single-file HTML report |
 | `--badge` | Write a shields.io endpoint JSON with the trust score |
+| `--manifest` | Write an unsigned, offline-verifiable audit manifest (`leaklens verify`) |
 | `--fail-under` | Exit with code 1 if trust score is below N |
 | `--version` | Print version and exit |
 
@@ -242,11 +246,48 @@ Exit code is 1 when a high-severity finding is present, so it gates CI.
 
 ### `leaklens images TRAIN_DIR TEST_DIR`
 
-Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra.
+Find near-duplicate images across train/test folders (64-bit dHash, `--max-distance` default 6). Needs the `images` extra. Decoding is bounded per file and per audit; refused files are reported by reason, separately from `unreadable` (see [IMAGE_DECODE_BUDGETS.md](docs/IMAGE_DECODE_BUDGETS.md)). A refused image is not compared, so an all-refused run can still score 100/100.
+
+Every run also groups images: byte-identical files form exact groups (SHA-256 of the file bytes, so a re-encode is never "exact"), and perceptual near-duplicates form connected-component clusters. The two identities are reported separately and never merged: exact groups use SHA-256 only, perceptual clusters use the 64-bit dHash at the `--max-distance` threshold. Clusters are not cliques — a member is not necessarily within the threshold of every other member — and a cluster is evidence for review, not proof of leakage. The supported transformation envelope, the known blind spots (colour-only differences, crops beyond 5%, letterboxing) and the calibration are in [VISION_AUDIT.md](docs/VISION_AUDIT.md) and [VISION_BENCHMARK.md](docs/VISION_BENCHMARK.md). The calibration is synthetic and does not claim validation on real-world photos or colour-aware hashing.
 
 ```sh
 leaklens images data/train data/test
 leaklens images data/train data/test --max-distance 10 --samples 5 --json
+```
+
+### `leaklens splits DATASET`
+
+Check that a dataset's **declared** image partitions are disjoint. This command reads the split declarations a COCO, YOLO or VOC dataset already ships, resolves each declared image safely inside the dataset root, and compares the files by SHA-256. It is read-only, decodes no image and needs no optional extra.
+
+| Format | Declaration read |
+|---|---|
+| COCO | `annotations/*.json` with an `images` list; the partition comes from the first `train`/`val`/`validation`/`test` token in the annotation file name |
+| YOLO | `train`/`val`/`test` keys in `data.yaml` or `dataset.yaml` (a directory, a file, a list, or a `.txt` list) |
+| VOC | `ImageSets/Main/{train,val,test}.txt`; `trainval.txt` is a union, not a partition |
+
+```sh
+leaklens splits data/coco                 # auto-detect the layout
+leaklens splits data/yolo --format yolo
+leaklens splits data/voc --format voc --json
+```
+
+The audit distinguishes five outcomes: a **cross-split exact duplicate** (one digest in two partitions, `high` `image_split_overlap` finding), a **within-split duplicate** (reported as a group, no finding), a **conflicting declaration** (one path declared in two partitions, `high` finding), an **unresolved membership** (missing, outside the root, ambiguous or unsupported, counted by reason) and a **parse limitation** (reported, never guessed). Path traversal, foreign drives, UNC anchors and symlinks that escape the root are refused before a file is opened; manifests and lists are size-capped, YAML is parsed with `safe_load`, and remote declarations are reported but never fetched. Exit codes are `0` (clean), `1` (at least one finding) and `2` (no audit could run).
+
+Exact identity here is SHA-256 over file bytes, not perceptual similarity: a PNG and a JPEG of the same picture are not an exact duplicate, and the command makes no claim that different digests are different photographs. A cross-split duplicate or a reused path is an **integrity concern** worth investigating — for example a leaky split, a copied file or a mislabelled manifest — not automatic proof that a model leaked. The full contract, bounds and known limitations are in [VISION_AUDIT.md](docs/VISION_AUDIT.md#declared-split-disjointness-m3).
+
+### `leaklens verify MANIFEST`
+
+`--manifest audit.json` writes a deterministic, **unsigned** digest manifest of
+an audit: declared input digests, result-affecting options, the detector
+catalogue, findings, policy outcome, trust score and gate decision.
+`leaklens verify audit.json` recomputes it offline with the standard library and
+reports a changed score, changed evidence, changed detector version, or a
+missing/modified input. It proves content integrity, not who wrote the manifest.
+See [`docs/AUDIT_MANIFEST.md`](docs/AUDIT_MANIFEST.md).
+
+```sh
+leaklens data.csv --target is_fraud --manifest audit.json
+leaklens verify audit.json
 ```
 
 ### `leaklens init`
@@ -361,6 +402,51 @@ leaklens --scan pipelines/dvc.yaml --pipeline --json
 ```
 
 Rules, formats and limits: [`docs/PIPELINE.md`](docs/PIPELINE.md); measured controls: [`docs/PIPELINE_BENCHMARK.md`](docs/PIPELINE_BENCHMARK.md).
+
+## Text and LLM intelligence (opt-in)
+
+`leaklens text TRAIN TEST` compares declared text corpora for evaluation contamination. It is deterministic, offline and CPU-only for exact/near duplicates, hash-only contamination and static RAG wiring; embedding similarity is optional and consumes caller-supplied vectors only.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `text_exact_duplicate` | high | a test document's normalised text also appears in train |
+| `text_near_duplicate` | medium | a test document's shingle sketch matches a train document above the threshold |
+| `text_eval_contamination` | high | a train digest matches a user-supplied eval fingerprint |
+| `rag_index_leakage` | high | an index loads a literal root that contains the declared eval path |
+| `text_embedding_similarity` | medium | caller-supplied eval vectors are cosine-similar to train vectors |
+
+Evidence carries counts, 16-hex digests, relative paths and call names, never document text. Every text finding is `diagnostic: true` and `scored: false`; the subcommand exits `0` unless you pass `--fail-on-findings`. LeakLens never loads an embedding model, downloads an eval corpus or executes scanned code.
+
+```sh
+leaklens text train.jsonl eval.jsonl --json
+leaklens text train.parquet eval.parquet --field instruction
+leaklens text train.jsonl eval.jsonl --eval-fingerprints eval.fp
+leaklens text train.jsonl eval.jsonl --rag . --eval-path data/eval
+```
+
+Formats, parameters, normalisation and limits: [`docs/TEXT.md`](docs/TEXT.md); measured controls: [`docs/TEXT_BENCHMARK.md`](docs/TEXT_BENCHMARK.md).
+
+## Deep-learning and artifact auditing (opt-in)
+
+`leaklens dl DIR` statically audits deep-learning training code, framework configs, requirement declarations and model artifacts. It parses Python with `ast`, never imports torch/TensorFlow/Keras/ONNX, never unpickles a checkpoint, never extracts an archive and never executes the scanned project.
+
+| Kind | Severity | Signal |
+|---|---|---|
+| `dl_split_overlap` | high | train and eval bind the same dataset, overlap literal `Subset` indices, or evaluation data is built with a random augmentation |
+| `dl_training_protocol_mismatch` | medium | early-stopping patience ≥ `max_epochs`, optimizer `lr <= 0`, or a non-positive scheduler horizon |
+| `artifact_unsafe_format` | high | a pickle-based checkpoint or archive was refused before deserialization |
+| `no_random_state` | low | training is configured without a recorded seed, or mixed precision / distributed training has no determinism flag |
+| `pipeline_unpinned_dependency` | low | a `requirements*.txt` entry has no exact version pin |
+
+The last two kinds are the Phase 14 reproducibility family, reused unchanged. Every finding is `diagnostic: true` and `scored: false`; the subcommand exits `0` unless you pass `--fail-on-findings`. Safetensors headers, ONNX graph metadata and JSON are parsed within byte/depth caps; pickle and `.pt`/`.pth`/`.bin`/`.ckpt`/`.joblib` files produce a finding without being loaded. YAML configs need the existing `[yaml]` extra.
+
+```sh
+leaklens dl .
+leaklens dl . --json
+leaklens dl . --fail-on-findings
+```
+
+Formats, checks and limits: [`docs/DL_AUDIT.md`](docs/DL_AUDIT.md); measured controls: [`docs/DL_BENCHMARK.md`](docs/DL_BENCHMARK.md).
 
 ## Configuration (`.leaklens.toml`)
 
@@ -633,10 +719,12 @@ Commit `badge.json`, then point a shields.io endpoint badge at its raw URL (as a
 
 ```mermaid
 flowchart LR
-  A[CSV / notebooks] --> B[Data audit + leakage detectors]
+  A[Datasets, notebooks, SQL, images] --> B[Data audit + leakage detectors]
   A --> C[Static code scanner]
+  A --> V[Vision: image groups + declared splits]
   B --> D[Trust score]
   C --> D
+  V --> D
   B --> E[Model arena + MLflow]
   E --> F[best.joblib]
   F --> G[FastAPI /predict]
@@ -673,6 +761,8 @@ Full plan with phases and exit criteria: [ROADMAP.md](ROADMAP.md). Open tasks ar
 - [x] Core detectors, static scanner, model arena, API, UI
 - [x] Docker, GitHub Action, badge, CI
 - [x] Group/entity leakage detector
+- [x] Exact duplicate groups and perceptual image clusters (Phase 17 M2, synthetic calibration)
+- [x] Declared-split disjointness for COCO, YOLO and VOC image datasets (Phase 17 M3, exact SHA-256 only)
 - [x] PyPI packaging + release workflow (PyPI name `leaklens-ml`, command stays `leaklens`; create a GitHub release to publish)
 
 ## Leakage study

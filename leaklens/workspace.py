@@ -228,10 +228,11 @@ class DatasetSession:
 
 
 def _relative(path: Path, root: Path) -> str:
+    """A display label relative to ``root``; never an absolute path."""
     try:
-        return path.resolve().relative_to(root).as_posix()
-    except ValueError:  # pragma: no cover - resolve() keeps paths inside root
-        return path.as_posix()
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.name
 
 
 def _finding_payload(finding: Finding, index: int, root: Path) -> dict[str, Any]:

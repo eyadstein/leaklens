@@ -367,6 +367,17 @@ list meaningful. Suppression would trade a real future signal for a clean dashbo
 refusal cases, no traceback text in responses. The release allowlist and action pinning (M-S4) land
 in Phase 13 alongside the gate.
 **Status.** accepted (Phase 13).
+**Update (2026-11-13).** The containment alerts are closed by changing the
+primitive, not by suppressing them. `paths.resolve_within` now normalises both
+the root and the candidate with `os.path.realpath` and accepts the result only
+inside a `(root + separator)` prefix, with the checked variable also being the
+returned one. That is the shape CodeQL models as a path sanitizer, so every
+caller that funnels request paths through `WorkspaceScanManager.resolve` stops
+being an alert, and the same check refuses symlink and junction escapes.
+Non-regular files are now refused before they are opened: directory scans keep
+only regular files, and `Baseline.load` requires a regular file. Residual risk:
+a check-then-open race between `resolve_within` and a later `open`/`stat` is not
+eliminated; it needs local write access to the workspace to exploit.
 
 ## ADR-025 — Deterministic plans are intelligence-owned; `ai` narrates
 
@@ -385,6 +396,37 @@ may read the evidence graph; the model layer should only phrase it.
 `from leaklens.ai.schemas import ReasoningPlan` still works. With the `ai` extra absent, the plan is
 complete and the panel shows narration as unavailable.
 **Status.** proposed (Phase 18, M1).
+
+---
+
+## ADR-026 - Distribution completeness is proven from the tagged tree
+
+**Context.** `scripts/validate_release.py` rejected unexpected wheel members but never required an
+expected one, so a wheel that omitted 46 modules passed the release check unchanged. The local
+`dist/` artifacts are exactly that failure mode. A deny-list alone cannot prove completeness, and a
+hand-maintained file list drifts from the source it describes.
+
+**Decision.** Expected distribution membership is derived from the checked-out tree plus the
+authoritative packaging configuration: `leaklens/**/*.py`, the
+`[tool.setuptools.package-data]` globs in `pyproject.toml`, and the `MANIFEST.in` include rules that
+point inside the package. Both the wheel and the sdist must contain every derived member; the wheel
+must still carry only `leaklens/**` and its dist-info, and the sdist must contain no build, cache or
+local-artifact path. A dedicated CI job builds both distributions on every pull request and runs the
+same validator the release workflow runs.
+
+**Alternatives.** A committed expected-files list (drifts immediately; the 46-module drift is the
+proof); validating only in the release workflow (too late — a broken packaging config merges first);
+an archive-content hash allowlist (no link to the tag being published).
+
+**Rationale.** The tag is the source of truth for what must ship. Deriving membership means adding a
+module or a package resource needs no validator change, and the failure message names the exact
+missing path.
+
+**Consequences.** `leaklens/prompts/explain.txt` is a required wheel member because `llm.py` loads it
+by default; a build that drops it now fails before publishing. Archives are inspected as data and
+never imported. Python 3.10 keeps working through the existing `tomli` fallback.
+
+**Status.** accepted (release integrity wave P).
 
 ---
 
