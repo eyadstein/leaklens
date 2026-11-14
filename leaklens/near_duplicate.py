@@ -9,7 +9,7 @@ does no I/O, loads no model and makes no embeddings.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 DEFAULT_ROWS = 4
@@ -83,6 +83,40 @@ class Cluster:
     members: tuple[str, ...]
 
 
+def clusters_from_pairs(
+    members: Iterable[str], pairs: Iterable[tuple[str, str]]
+) -> list[Cluster]:
+    """Union already-similar id pairs into stable clusters, skipping singletons.
+
+    ``pairs`` is consumed once, so callers may stream an arbitrarily large
+    candidate set; unknown ids fail closed with ``KeyError``.
+    """
+    parent = {name: name for name in members}
+
+    def find(name: str) -> str:
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+
+    for left, right in pairs:
+        if left not in parent or right not in parent:
+            raise KeyError(f"unknown cluster member: {left!r} or {right!r}")
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[max(root_left, root_right)] = min(root_left, root_right)
+
+    groups: dict[str, list[str]] = {}
+    for name in sorted(parent):
+        groups.setdefault(find(name), []).append(name)
+    found = [
+        Cluster(cluster_key(names), tuple(names))
+        for names in groups.values()
+        if len(names) > 1
+    ]
+    return sorted(found, key=lambda item: item.key)
+
+
 def cluster(
     signatures: Mapping[str, Sequence[int]],
     *,
@@ -98,28 +132,11 @@ def cluster(
     if not 0.0 <= threshold <= 1.0:
         raise ValueError("threshold must be between 0 and 1")
     pairs = candidate_pairs(bucket(signatures, rows=rows), max_bucket=max_bucket)
-
-    parent = {name: name for name in signatures}
-
-    def find(name: str) -> str:
-        while parent[name] != name:
-            parent[name] = parent[parent[name]]
-            name = parent[name]
-        return name
-
-    for left, right in pairs:
-        if similarity(signatures[left], signatures[right]) < threshold:
-            continue
-        root_left, root_right = find(left), find(right)
-        if root_left != root_right:
-            parent[max(root_left, root_right)] = min(root_left, root_right)
-
-    groups: dict[str, list[str]] = {}
-    for name in sorted(signatures):
-        groups.setdefault(find(name), []).append(name)
-    found = [
-        Cluster(cluster_key(members), tuple(members))
-        for members in groups.values()
-        if len(members) > 1
-    ]
-    return sorted(found, key=lambda item: item.key)
+    return clusters_from_pairs(
+        signatures,
+        (
+            (left, right)
+            for left, right in pairs
+            if similarity(signatures[left], signatures[right]) >= threshold
+        ),
+    )

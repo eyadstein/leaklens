@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parents[1] / "leaklens"
 
 CORE = {
     "assemble",
+    "audit_manifest",
     "availability",
     "baseline",
     "config",

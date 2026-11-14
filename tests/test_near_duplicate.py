@@ -87,6 +87,19 @@ def test_singletons_do_not_cluster():
     assert nd.cluster({}, rows=4) == []
 
 
+def test_clusters_from_pairs_unions_a_stream_without_ordering():
+    members = ["train:0", "test:0", "test:1", "test:2"]
+    pairs = (pair for pair in [("test:0", "train:0"), ("test:1", "test:0")])
+    found = nd.clusters_from_pairs(members, pairs)
+    assert [cluster.members for cluster in found] == [("test:0", "test:1", "train:0")]
+    assert found[0].key == nd.cluster_key(found[0].members)
+
+
+def test_clusters_from_pairs_rejects_an_unknown_member():
+    with pytest.raises(KeyError):
+        nd.clusters_from_pairs(["a"], [("a", "missing")])
+
+
 def test_cluster_key_is_order_independent_and_bounded():
     assert nd.cluster_key(("b", "a")) == nd.cluster_key(("a", "b"))
     assert nd.cluster_key(("a", "b")) != nd.cluster_key(("a", "c"))

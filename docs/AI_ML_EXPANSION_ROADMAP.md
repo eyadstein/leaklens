@@ -1,7 +1,10 @@
 # AI/ML expansion roadmap
 
-**Status:** proposal. Only Phase 12 is delivered history. Everything from Phase 13 onward is
-unscheduled design.
+**Status:** mixed. Phase 12 is delivered history. Phases 13–16 are shipped and recorded in their
+acceptance documents, including the deferrals listed there. Phase 17 is partly shipped: M1 is
+satisfied by security milestone M-S5, M2 (exact and perceptual image clustering) is delivered, and
+M3 (declared-split disjointness for COCO, YOLO and VOC) is delivered.
+Phase 17 M4–M7 and Phases 18–19 remain design proposals, not commitments.
 **Companions:** [FUTURE_ARCHITECTURE.md](FUTURE_ARCHITECTURE.md) (how),
 [FUTURE_VISION.md](FUTURE_VISION.md) (why), [AI_ROADMAP.md](AI_ROADMAP.md) (Phase 12 detail),
 [ARCHITECTURE_DECISIONS.md](ARCHITECTURE_DECISIONS.md) (decision log).
@@ -51,6 +54,15 @@ flowchart LR
 ```
 
 Hard edges are prerequisites. Dotted edges are reuse, not dependency.
+
+**Phase status (2026-11-13).** Phase 13 is accepted at `9b301bd` with the recorded `/predict` test
+exception and the M2 golden deviation ([PHASE13_ACCEPTANCE.md](PHASE13_ACCEPTANCE.md)); its M4
+module-cycle removal is deferred to Phase 18. Phase 14 is accepted with M5/M6/M8 deferred and M4
+shipping three of four checks ([PHASE14_ACCEPTANCE.md](PHASE14_ACCEPTANCE.md)). Phases 15 and 16
+are complete ([PHASE15_ACCEPTANCE.md](PHASE15_ACCEPTANCE.md),
+[PHASE16_ACCEPTANCE.md](PHASE16_ACCEPTANCE.md)). Phase 17 M1 is already satisfied by security
+milestone M-S5, M2 ships exact + perceptual image clustering, and M3 ships declared-split
+disjointness; Phase 17 M4–M7, Phase 18 and Phase 19 are unstarted.
 
 Why the boundaries sit there:
 
@@ -391,6 +403,14 @@ already exists; embeddings optional.
 | M6 | Augmentation-leakage heuristic + optional embeddings | Embedding results labelled non-reproducible and never default |
 | M7 | Vision benchmark: **generated** near-duplicate families (crop, rotate, recompress, resize, watermark) rather than a redistributed image corpus | Precision/recall published per family, misses listed; the generator ships, the images do not |
 
+Status (2026-11-13): M1's decode budgets shipped as security milestone M-S5
+([IMAGE_DECODE_BUDGETS.md](IMAGE_DECODE_BUDGETS.md)); `images.py` is still the only image intake.
+M2 shipped exact duplicate groups plus perceptual clusters on the same intake, calibrated on
+generated families and documented in [VISION_AUDIT.md](VISION_AUDIT.md) and
+[VISION_BENCHMARK.md](VISION_BENCHMARK.md). M3 shipped `leaklens splits DATASET`, a read-only
+declared-split audit for COCO, YOLO and VOC with SHA-256 cross-partition evidence, documented in
+[VISION_AUDIT.md](VISION_AUDIT.md#declared-split-disjointness-m3). M4–M7 are unstarted.
+
 **Tests.** Decode-bomb archive, corrupt JPEG, EXIF rotation, duplicate families, annotation edge
 cases, video sampling determinism.
 
@@ -423,6 +443,10 @@ capture session is routine and unmeasured.
 **Objective.** Move from findings to investigations: plan an audit, gather evidence across engines,
 state what is missing, and produce a governance-ready evidence pack — with an optional LLM that
 narrates but never concludes.
+
+**Implementation plan.** [PHASE18_IMPLEMENTATION_PLAN.md](PHASE18_IMPLEMENTATION_PLAN.md) records
+the readiness audit, milestone order, dependencies and acceptance evidence. It is a plan, not an
+implementation.
 
 **User problem.** A report with 40 findings does not tell a reviewer what happened or what to check
 next. Separately, monitoring signals (drift, skew) exist in other tools but are never connected to
@@ -465,6 +489,16 @@ confidence semantics; Phase 13 M2 for the assembler that emits the manifest.
 
 **Tests.** Evidence-anchoring tests for every statement, injection corpus, manifest tamper matrix,
 fallback tests, cross-run comparison, accessibility checks on new workspace panels.
+
+**Security note.** The M-S6 prompt-injection corpus ([PROMPT_INJECTION.md](PROMPT_INJECTION.md))
+shipped in `3f64f69` and `b7142aa`, was independently reviewed at `b7142aa`, and its demonstrated
+defects were fixed in `c01481b`; it is accepted with findings. Corpus version `1.0.0`, 47 cases
+(32 attacks, 15 benign hard negatives), with pinned development/holdout digests and an offline CI
+check. It covers the existing `llm` and `ai/reasoning` prompts. `A-009` remains a measured false
+negative, the output guard is a finite denylist that novel paraphrases and homoglyphs can bypass,
+and withheld explanations are currently silent in the CLI. M4 must reuse that corpus when narration
+moves onto `investigation.py`; it is not a second deliverable, and M-S6 did not require M1 or
+redesign the Phase 18 plan type.
 
 **Benchmarks.** Investigation quality on a fixed set of audited repositories (does the plan name
 the real cause?), measured and published with misses; LLM-on vs LLM-off equality of findings/score.
@@ -570,30 +604,11 @@ Every phase must satisfy all of these or it does not ship:
 
 ---
 
-## 10. First implementation milestone after this mission
+## 10. Implementation sequencing status
 
-**Ship Phase 13 M1 + M2 together, starting with M1.**
-
-M1 first because it is a pure data change (`manifest.Detector` gains four fields, the docs are
-regenerated, CI checks them) with no behavioural risk, and it immediately lets every later phase
-declare `scored`, `requires` and `modalities` without inventing a convention.
-
-M2 immediately after, in the same release, because the assembly extraction is the only structural
-change that all seven phases depend on, and its findings/evidence/policy output is verifiable
-byte-for-byte against today's (the workspace envelope excluded, as in the M2 acceptance).
-
-Why not start with Phase 14 or 15: both would immediately need the catalogue fields and a second
-place to register a payload contribution, which is exactly the duplication Phase 13 removes. Doing
-them first would guarantee a second scoring/status convention — the failure this roadmap exists to
-prevent.
-
-**Definition of done for that first milestone:**
-
-1. `manifest.Detector` carries `scored` (default `False`), `requires`, `modalities`; `MODALITIES`
-   exists once (ADR-020), `ENGINES` holds the frozen engine ids and emitted kinds (ADR-005), and
-   `availability.EngineUnavailable` is the one base error (ADR-023).
-2. `docs/DETECTORS.md` regenerated; `python -m leaklens.manifest --check` runs in CI.
-3. Existing kinds keep severity, advice, surface and fingerprint.
-4. Findings/evidence/policy parity goldens pass through the new `assemble.py`; envelope fields that
-   vary per run are excluded by name.
-5. Full suite, self-scan and all benchmark digests unchanged.
+The first milestone recommended here, Phase 13 M1 + M2, shipped. Phases 13–16 are complete with
+the acceptance records and deferrals listed above, Phase 17 M2 shipped exact and perceptual image
+clustering, and Phase 17 M3 shipped declared-split disjointness for COCO/YOLO/VOC. In dependency
+order the next unstarted milestone is **Phase 17 M4** (annotation validation). Phase 17 M1 is
+satisfied by M-S5. Phase 18 remains blocked on the Phase 17 hard edge, and Phase 19 on Phase 18.
+This section records status only; it does not re-plan the remaining milestones.

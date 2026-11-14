@@ -214,6 +214,16 @@ DETECTORS: tuple[Detector, ...] = (
         ),
     ),
     _entry(
+        "image_split_overlap",
+        "image",
+        "high",
+        "image_split_overlap",
+        no_bench_reason=(
+            "Opt-in audit of declared COCO/YOLO/VOC splits; covered by "
+            "tests/test_image_splits.py, not the numeric data benchmark."
+        ),
+    ),
+    _entry(
         "parse_error",
         "code",
         "low",

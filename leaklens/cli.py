@@ -257,18 +257,26 @@ def images(argv) -> int:
     if a.samples < 0:
         p.error("--samples must be non-negative")
 
-    from .images import image_overlap
+    from .images import analyze_images
 
     try:
-        fs, pairs, stats = image_overlap(a.train_dir, a.test_dir, a.max_distance)
+        audit = analyze_images(a.train_dir, a.test_dir, a.max_distance)
     except ImportError as e:
         p.error(str(e))
 
+    stats = audit.stats
     rep = {
-        "trust_score": score(fs),
+        "trust_score": score(audit.findings),
         **stats,
-        "findings": [f.to_dict() for f in fs],
-        "pairs": pairs,
+        "findings": [f.to_dict() for f in audit.findings],
+        "pairs": audit.pairs,
+        "clustering": {
+            "max_distance": a.max_distance,
+            "exact_duplicates": audit.exact_duplicates,
+            "uninformative": audit.uninformative,
+            "exact_groups": list(audit.exact_groups),
+            "clusters": [cluster.to_dict() for cluster in audit.clusters],
+        },
     }
 
     if a.json:
@@ -280,14 +288,110 @@ def images(argv) -> int:
             f"{stats['test_images']} test images"
             + (f", {stats['unreadable']} unreadable" if stats["unreadable"] else "")
         )
-        for f in fs:
+        if stats["refused"]:
+            reasons = ", ".join(f"{k}: {v}" for k, v in stats["refused"].items())
+            print(f"    refused {sum(stats['refused'].values())} image(s): {reasons}")
+        for f in audit.findings:
             print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
-        for m in pairs[: a.samples]:
+        for m in audit.pairs[: a.samples]:
             print(f"    {m['test']} ~ {m['train']} (distance {m['distance']})")
-        if not fs:
+        if audit.exact_duplicates:
+            print(
+                f"    {audit.exact_duplicates} test image(s) are byte-identical "
+                "to a train image"
+            )
+        if audit.clusters:
+            members = sum(len(cluster.members) for cluster in audit.clusters)
+            print(
+                f"    {len(audit.clusters)} perceptual cluster(s) across both folders, "
+                f"{members} image(s); max dHash distance {a.max_distance}"
+            )
+            for cluster in audit.clusters[: a.samples]:
+                print(
+                    f"    cluster {cluster.key} "
+                    f"train={cluster.train} test={cluster.test} "
+                    f"exact_pairs={cluster.exact_pairs}"
+                )
+                for member in cluster.members:
+                    print(f"        {member}")
+        if not audit.findings:
             print("No leakage found.")
 
-    return 1 if fs else 0
+    return 1 if audit.findings else 0
+
+
+def splits(argv) -> int:
+    p = argparse.ArgumentParser(
+        prog="leaklens splits",
+        description=(
+            "Audit declared COCO, YOLO or VOC train/val/test splits for "
+            "byte-identical images and reused image paths"
+        ),
+    )
+    p.add_argument("dataset")
+    p.add_argument(
+        "--format",
+        choices=("auto", "coco", "yolo", "voc"),
+        default="auto",
+        help="declaration format (default: detect from the dataset layout)",
+    )
+    p.add_argument(
+        "--samples", type=int, default=5, help="number of example groups to print"
+    )
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+
+    if a.samples < 0:
+        p.error("--samples must be non-negative")
+
+    from .image_splits import audit_splits
+
+    try:
+        audit = audit_splits(a.dataset, a.format)
+    except ImportError as e:
+        p.error(str(e))
+
+    stats = audit.stats
+    if a.json:
+        print(json.dumps(audit.to_dict(), indent=2))
+    else:
+        print(f"LeakLens split audit ({stats['format']})")
+        for partition in ("train", "val", "test"):
+            row = stats["partitions"][partition]
+            print(
+                f"    {partition:5s} {row['declared']:>7} declared, "
+                f"{row['unique']:>7} unique image(s)"
+            )
+        print(
+            f"{stats['declarations']} declaration(s), "
+            f"{stats['verified_images']} verified image(s), "
+            f"{stats['digested_images']} digested"
+        )
+        if stats["unresolved"]:
+            reasons = ", ".join(f"{k}: {v}" for k, v in stats["unresolved"].items())
+            print(f"    unresolved: {reasons}")
+        for limitation in stats["limitations"]:
+            print(f"    limitation: {limitation}")
+        for f in audit.findings:
+            print(f"[{f.severity.upper()}] {f.kind} :: {f.column} :: {f.detail}")
+        for group in audit.cross_groups[: a.samples]:
+            parts = ", ".join(
+                f"{name}={len(paths)}" for name, paths in group["partitions"].items()
+            )
+            print(f"    {group['digest'][:12]}... across {parts}")
+        if stats["within_split_groups"]:
+            print(
+                f"    {stats['within_split_groups']} within-split duplicate group(s) "
+                "(not a cross-split finding)"
+            )
+        if not audit.ok:
+            print(f"No audit could run: {stats.get('reason', 'no verified images')}.")
+        elif not audit.findings:
+            print("No cross-split image overlap found.")
+
+    if not audit.ok:
+        return 2
+    return 1 if audit.findings else 0
 
 
 def text(argv) -> int:
@@ -712,6 +816,43 @@ def doctor(argv) -> int:
     return 0
 
 
+def verify(argv) -> int:
+    """Verify an audit manifest offline with the standard library."""
+    from . import audit_manifest
+
+    p = argparse.ArgumentParser(
+        prog="leaklens verify",
+        description=(
+            "Verify an audit manifest offline. Detects a manifest or declared "
+            "input changed after it was written; does not prove who wrote it."
+        ),
+    )
+    p.add_argument("manifest", help="audit manifest JSON to verify")
+    p.add_argument(
+        "--root",
+        help=("containment root for declared inputs (default: the current directory)"),
+    )
+    p.add_argument("--json", action="store_true")
+    a = p.parse_args(argv)
+    try:
+        issues = audit_manifest.verify(a.manifest, root=a.root)
+    except audit_manifest.ManifestError as exc:
+        if a.json:
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"leaklens verify: {exc}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps({"ok": not issues, "issues": issues}, indent=2))
+    elif issues:
+        print(f"manifest FAILED: {len(issues)} issue(s)")
+        for issue in issues:
+            print(f"    {issue}")
+    else:
+        print(f"manifest OK: {a.manifest}")
+    return 0 if not issues else 1
+
+
 def _gate_failure(
     outcome, trust_score: int, *, fail_under: float | None, fail_on_new: bool
 ) -> bool:
@@ -736,6 +877,8 @@ def main(argv=None) -> int:
         return init(argv[1:])
     if argv and argv[0] == "images":
         return images(argv[1:])
+    if argv and argv[0] == "splits":
+        return splits(argv[1:])
     if argv and argv[0] == "text":
         return text(argv[1:])
     if argv and argv[0] == "dl":
@@ -744,13 +887,16 @@ def main(argv=None) -> int:
         return doctor(argv[1:])
     if argv and argv[0] == "workspace":
         return workspace(argv[1:])
+    if argv and argv[0] == "verify":
+        return verify(argv[1:])
     p = argparse.ArgumentParser(
         prog="leaklens",
         description="Audit datasets and ML code for leakage",
         epilog=(
             "Run 'leaklens doctor' to check your install, 'leaklens init' to write "
-            "a starter .leaklens.toml config, and 'leaklens workspace' for a "
-            "local interactive scan view."
+            "a starter .leaklens.toml config, 'leaklens workspace' for a "
+            "local interactive scan view, and 'leaklens verify' to check an "
+            "audit manifest offline."
         ),
     )
     p.add_argument("--version", action="version", version=__version__)
@@ -908,6 +1054,11 @@ def main(argv=None) -> int:
         "--badge", help="write a shields.io endpoint JSON with the trust score"
     )
     p.add_argument(
+        "--manifest",
+        metavar="PATH",
+        help="write an unsigned, offline-verifiable audit manifest (leaklens verify)",
+    )
+    p.add_argument(
         "--fail-under", type=float, help="exit with code 1 if trust score is below N"
     )
     a = p.parse_args(argv)
@@ -938,6 +1089,7 @@ def main(argv=None) -> int:
     sarif_path = choose(a.sarif, cfg.sarif)
     html_path = choose(a.html, cfg.html)
     badge_path = choose(a.badge, cfg.badge)
+    manifest_path = a.manifest
     use_ai = choose(a.ai, cfg.ai, False)
     use_ai_llm = choose(a.ai_llm, cfg.ai_llm, False)
     if use_ai_llm:
@@ -1309,6 +1461,53 @@ def main(argv=None) -> int:
         except (OSError, ValueError) as exc:
             print(f"leaklens: cannot write evidence graph: {exc}", file=sys.stderr)
             return 2
+    gate = _gate_failure(
+        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
+    )
+    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
+        gate = True
+    if manifest_path:
+        from . import audit_manifest
+
+        inputs = [path for path in (a.train, test_path, *scan_targets) if path]
+        if baseline is not None and baseline_path:
+            inputs.append(baseline_path)
+        options = {
+            "target": target,
+            "test": bool(test_path),
+            "group": group_col,
+            "time": time_col,
+            "threshold": threshold,
+            "sql": sql_settings.enabled,
+            "sql_dialect": sql_settings.dialect if sql_settings.enabled else None,
+            "drift": drift_settings.enabled,
+            "pipeline": bool(a.pipeline),
+            "ai": bool(use_ai),
+            "ai_llm": bool(use_ai_llm),
+            "fail_under": fail_under,
+            "fail_on_new": fail_on_new,
+        }
+        try:
+            document = audit_manifest.build(
+                sections,
+                inputs=inputs,
+                options=options,
+                gate={
+                    "failed": gate,
+                    "fail_under": fail_under,
+                    "fail_on_new": fail_on_new,
+                },
+                root=Path.cwd(),
+            )
+            with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(audit_manifest.dumps(document))
+        except (OSError, ValueError) as exc:
+            print(f"leaklens: cannot write audit manifest: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"Wrote audit manifest {manifest_path} ({document['manifest_digest']})",
+            file=sys.stderr,
+        )
     if a.json:
         print(json.dumps(rep, indent=2))
     else:
@@ -1519,9 +1718,4 @@ def main(argv=None) -> int:
                 f"\nArena ranked by {res.attrs['primary']} (auto-dropped: {', '.join(map(str, res.attrs['dropped'])) or 'none'})"
             )
             print(res.round(4).to_string(index=False))
-    gate = _gate_failure(
-        outcome, rep["trust_score"], fail_under=fail_under, fail_on_new=fail_on_new
-    )
-    if fail_on_graph_new and graph_diff is not None and graph_diff.counts["new"]:
-        gate = True
     return 1 if gate else 0

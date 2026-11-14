@@ -20,6 +20,7 @@ from leaklens.workspace import (
     WorkspacePathError,
     WorkspaceScanManager,
     _graph_payload,
+    _relative,
     create_workspace_app,
 )
 
@@ -232,6 +233,40 @@ def test_paths_outside_the_root_are_rejected(tmp_path):
     assert (
         client.get("/api/source", params={"path": "../outside.py"}).status_code == 422
     )
+
+
+def test_relative_labels_never_leak_an_absolute_path(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    assert _relative(tmp_path / "elsewhere.py", root) == "elsewhere.py"
+
+
+def test_a_symlinked_source_outside_the_root_is_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.py"
+    outside.write_text(LEAKY, encoding="utf-8")
+    try:
+        (root / "link.py").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    client = _client(root)
+    assert client.get("/api/source", params={"path": "link.py"}).status_code == 422
+
+
+def test_a_symlinked_dataset_outside_the_root_is_rejected(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.csv"
+    outside.write_text("x,y\n1,0\n", encoding="utf-8")
+    try:
+        (root / "link.csv").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    client = _client(root)
+    response = client.post("/api/datasets/inspect", json={"path": "link.csv"})
+    assert response.status_code == 422
+    assert "outside the workspace root" in response.json()["detail"]
 
 
 def test_empty_folder_is_rejected(tmp_path):

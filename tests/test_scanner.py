@@ -1,7 +1,10 @@
 import json
+import os
+
+import pytest
 
 from leaklens.cli import main
-from leaklens.scanner import scan_file, scan_source
+from leaklens.scanner import scan_file, scan_source, scan_targets
 
 PRE = """
 from sklearn.preprocessing import StandardScaler
@@ -474,3 +477,31 @@ def test_discretizer_in_make_pipeline_before_split_is_high():
 def test_discretizer_in_make_pipeline_after_split_is_clean():
     findings = scan_source(DISCRETIZER_IN_MAKE_PIPELINE_AFTER_SPLIT)
     assert not any(f.kind == "preprocess_before_split" for f in findings)
+
+
+def test_scan_targets_skips_a_directory_named_like_python(tmp_path):
+    (tmp_path / "fake.py").mkdir()
+    (tmp_path / "real.py").write_text("x = 1\n", encoding="utf-8")
+    assert scan_targets(tmp_path) == [tmp_path / "real.py"]
+
+
+def test_scan_targets_skips_non_regular_files(tmp_path):
+    if os.name == "nt":
+        pytest.skip("POSIX named pipes")
+    os.mkfifo(tmp_path / "pipe.py")
+    (tmp_path / "real.py").write_text("x = 1\n", encoding="utf-8")
+    assert scan_targets(tmp_path) == [tmp_path / "real.py"]
+    assert scan_targets(tmp_path / "pipe.py") == []
+
+
+def test_scan_targets_does_not_follow_symlinks_outside_the_target(tmp_path):
+    outside = tmp_path / "outside.py"
+    outside.write_text("x = 1\n", encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "real.py").write_text("x = 1\n", encoding="utf-8")
+    try:
+        (root / "link.py").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are not available")
+    assert scan_targets(root) == [root / "real.py"]

@@ -119,9 +119,10 @@ its own panel with `textContent` only, never mixed into the deterministic findin
   characters, confidence above 0.95, severity hints above `medium`, duplicate evidence ids,
   unknown group/hypothesis/evidence references and any claim that deterministic findings
   changed.
-- **Prompt injection containment.** LLM prompts contain sanitized group metadata only —
+- **Prompt injection containment.** LLM prompts contain sanitized group metadata only -
   never raw code, notebook text or dataset rows or column values. LLM replies must reference
-  existing group ids and cannot introduce new evidence.
+  existing group ids and cannot introduce new evidence. The versioned M-S6 corpus and its
+  measured limits are documented in [PROMPT_INJECTION.md](PROMPT_INJECTION.md).
 - **No silent escalation.** AI hypotheses cap at `medium`; deterministic `Finding` objects
   and `leakage.score()` remain the only source of severity and the trust score.
 - **No score-only alarm.** A learned hint is emitted only when a context-aware semantic risk

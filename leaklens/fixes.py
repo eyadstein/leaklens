@@ -38,6 +38,7 @@ FIXES = {
     "missingness_split_shift": "Check the collection, filtering and join pipeline for a train/test difference (time window, source system, query). Do not use a missing-value indicator unless it is computed identically in production.",
     "missingness_group_signal": "Check whether groups differ in how values are recorded. If group membership is unavailable at prediction time, avoid features whose missingness depends on it; otherwise split by group and document the collection difference.",
     "image_overlap": "Deduplicate images across the split, or split by capture/scene group so near-identical images never sit on both sides.",
+    "image_split_overlap": "Deduplicate the declared splits: remove byte-identical images and reused image paths so each image content belongs to exactly one train/val/test partition. Treat the finding as an integrity concern to investigate, not as proof of leakage.",
     "sql_target_as_feature": "Do not build features from the target. Project only columns available before the outcome, or move the aggregation after the label cutoff.",
     "sql_split_predicate_missing": "Filter the query by the split column (or a time boundary) before exporting features so train and test rows cannot mix.",
     "sql_unresolved_column": "Add a declared dialect and, for SELECT * or ambiguous joins, a schema map so lineage can be resolved. Treat this query as unscanned until then.",

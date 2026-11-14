@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -96,6 +97,46 @@ _LOCATION_AFTER_AT = re.compile(r"(\bat\s+)((?:[A-Za-z]:[\\/]|/)[^\n,;()]+)")
 _ABSOLUTE_PATH = re.compile(r"(?<![\w:])(?:[A-Za-z]:[\\/]|/)[^\s,;()]+")
 _ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|[@-_])")
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_UNTRUSTED_WHITESPACE = re.compile(r"\s+")
+# shortcut: this is a denylist, not a classifier; extend it when a new
+# paraphrase family appears in the prompt-injection corpus.
+UNSAFE_CLAIM = re.compile(
+    r"\b(?:no|zero|minimal|negligible)\s+(?:risk|leakage|leaks?|issues?|problems?)\b"
+    r"|\btrust\s+score\s+(?:is|should|must|remains|was)\b"
+    r"|\b(?:remove|removed|ignore|ignored|dismiss|dismissed|discard|discarded|"
+    r"delete|deleted|drop|dropped|clear|cleared)\s+(?:the\s+|this\s+|all\s+)?findings?\b"
+    r"|\bsafe\s+to\s+(?:deploy|ship|release|publish|merge|use)\b"
+    r"|\bapproved?\b[^.\n]{0,40}\b(?:production|release|deployment)\b"
+    r"|\b(?:proceed|go\s+ahead|move\s+forward)\b[^.\n]{0,40}"
+    r"\b(?:release|publish|deploy|deployment|production|ship)\b"
+    r"|\bfindings?\b[^.\n]{0,30}\b(?:hidden|suppressed|removed|deleted|cleared|dismissed)\b"
+    r"|\b(?:severity|risk)\s+(?:should|must|is|was)\s+(?:be\s+)?"
+    r"(?:low|none|zero|cleared)\b"
+    r"|\bseverity\s+(?:should|must|needs?\s+to|has\s+to)\s+be\b"
+    r"|\b(?:raise|lower|increase|reduce|change|set)\s+(?:the\s+)?severity\b"
+    r"|\bfindings?\b[^.;\n]{0,20}\b(?:can|may|should|must)\s+be\s+"
+    r"(?:ignored|dismissed|discarded|removed|deleted|dropped|cleared)\b"
+    r"|\b(?:finding|leak)\s+(?:is|was)\s+(?:a\s+)?false\s+positive\b"
+    r"|\bmark\s+(?:this|it|the)\b[^.\n]{0,30}\b(?:as\s+)?(?:safe|clean)\b"
+    r"|\b(?:this|the)\s+(?:dataset|pipeline|model)\s+(?:is|looks)\s+"
+    r"(?:safe|clean)\b",
+    re.IGNORECASE,
+)
+# Formatting-only variants must not hide a claim from the denylist.  Fold
+# fullwidth letters, zero-width format characters and dash variants for
+# matching; width characters keep their display form, format characters are
+# also stripped from output.
+_CLAIM_DASHES = re.compile(r"[-\u2010\u2011\u2012\u2013\u2014\u2015]")
+
+
+def _claim_view(text: str) -> str:
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return _UNTRUSTED_WHITESPACE.sub(" ", _CLAIM_DASHES.sub(" ", text)).strip()
+
+
+def _unsafe_claim(text: str) -> bool:
+    return UNSAFE_CLAIM.search(_claim_view(text)) is not None
 
 
 def _safe_location(value: str) -> str:
@@ -124,6 +165,17 @@ def _redact_paths(value: str) -> str:
         lambda match: f"{match.group(1)}{_safe_location(match.group(2))}", value
     )
     return _ABSOLUTE_PATH.sub(lambda match: _safe_location(match.group(0)), value)
+
+
+def _untrusted_field(value: object) -> str:
+    """Render untrusted text as one inert line: no controls and no line breaks.
+
+    A finding detail is author-controlled text (a dataset value, column name or
+    code expression).  Flattening it keeps it inside its labelled field, so it
+    cannot add lines that imitate the trusted template instructions.
+    """
+    text = _ANSI_ESCAPE.sub("", str(value))
+    return _UNTRUSTED_WHITESPACE.sub(" ", _CONTROL_CHARS.sub("", text)).strip()
 
 
 DEFAULT_PROMPT_TEMPLATE_PATH = Path(__file__).parent / "prompts" / "explain.txt"
@@ -194,12 +246,13 @@ def load_prompt_template(path: str | Path | None = None) -> str:
 
 def _prompt(finding, template: str | None = None) -> str:
     raw_location = str(finding.column)
-    location = _safe_location(raw_location)
+    safe_location = _safe_location(raw_location)
+    location = _untrusted_field(safe_location)
     detail = str(finding.detail)
-    if raw_location != location:
-        detail = detail.replace(raw_location, location)
-    detail = _redact_paths(detail)
-    location_label = "File and line" if location != raw_location else "Column"
+    if raw_location != safe_location:
+        detail = detail.replace(raw_location, safe_location)
+    detail = _untrusted_field(_redact_paths(detail))
+    location_label = "File and line" if safe_location != raw_location else "Column"
 
     if template is None:
         template = load_prompt_template()
@@ -216,7 +269,9 @@ def _prompt(finding, template: str | None = None) -> str:
 
 def _sanitize_llm_output(value: str) -> str:
     """Render model output as plain text without terminal control or ANSI escapes."""
-    return _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", str(value))).strip()
+    text = _CONTROL_CHARS.sub("", _ANSI_ESCAPE.sub("", str(value)))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return text.strip()
 
 
 class OllamaProvider:
@@ -404,5 +459,8 @@ def explain_findings(
 
     explanations: list[str | None] = [None] * len(findings)
     for index, finding in selected:
-        explanations[index] = _sanitize_llm_output(provider.explain(finding))
+        text = _sanitize_llm_output(provider.explain(finding))
+        # Output is display-only, but an injected reply must not narrate a
+        # safety or severity verdict the deterministic engine did not make.
+        explanations[index] = None if _unsafe_claim(text) else text
     return explanations

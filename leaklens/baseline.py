@@ -232,6 +232,12 @@ class Baseline:
     @classmethod
     def load(cls, path: str | Path) -> Baseline:
         source = Path(path)
+        if not source.is_file():
+            if not source.exists():
+                raise BaselineError(
+                    f"baseline not found: {source}; create it with --write-baseline"
+                )
+            raise BaselineError(f"cannot read baseline {source}: not a regular file")
         try:
             text = source.read_text(encoding="utf-8")
         except FileNotFoundError:
