@@ -27,7 +27,7 @@ from .leakage import (
 )
 from .missingness import audit_missingness
 from .readers import read_dataset
-from .report_schema import report_schema
+from .report_schema import REPORT_SCHEMA_URL, report_schema
 from .scanner import SKIP, scan_path
 
 _SEVERITY_COLORS = {
@@ -267,6 +267,7 @@ def images(argv) -> int:
 
     stats = audit.stats
     rep = {
+        "$schema": REPORT_SCHEMA_URL,
         "trust_score": score(audit.findings),
         **stats,
         "findings": [f.to_dict() for f in audit.findings],
@@ -585,6 +586,7 @@ def text(argv) -> int:
 
     sections = assemble.build(findings)
     rep = {
+        "$schema": REPORT_SCHEMA_URL,
         "trust_score": sections.trust_score,
         "counts": sections.counts,
         "findings": sections.findings,
@@ -665,6 +667,7 @@ def dl(argv) -> int:
     findings = list(report.findings)
     sections = assemble.build(findings)
     rep = {
+        "$schema": REPORT_SCHEMA_URL,
         "trust_score": sections.trust_score,
         "counts": sections.counts,
         "findings": sections.findings,
@@ -1293,6 +1296,7 @@ def main(argv=None) -> int:
             )
 
     rep = {
+        "$schema": REPORT_SCHEMA_URL,
         "trust_score": sections.trust_score,
         **rep,
         "findings": sections.findings,
