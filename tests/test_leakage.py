@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from leaklens.cli import main
 from leaklens.leakage import scan, score, split_overlap, temporal_overlap
@@ -26,6 +27,50 @@ def test_id_like_detected():
     d = _df()
     d["uid"] = [f"u{i}" for i in range(len(d))]
     assert any(f.kind == "id_like" for f in scan(d, "y"))
+
+
+def test_unique_numeric_measurement_is_not_id_like():
+    d = _df()
+    d["score"] = np.arange(len(d), dtype=np.int64) * 3
+    assert not [f for f in scan(d, "y") if f.kind == "id_like"]
+
+
+def test_unique_float_measurement_is_not_id_like():
+    d = _df()
+    d["price"] = np.arange(len(d)) * 1.5
+    assert not [f for f in scan(d, "y") if f.kind == "id_like"]
+
+
+def test_timestamp_counter_is_not_id_like():
+    d = _df()
+    d["epoch_seconds"] = np.arange(len(d), dtype=np.int64) * 60 + 1_700_000_000
+    assert not [f for f in scan(d, "y") if f.kind == "id_like"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["customer_id", "uuid", "guid", "key", "index", "idx", "row_id", "row"],
+)
+def test_numeric_identifier_names_stay_id_like(name):
+    d = _df()
+    d[name] = np.arange(len(d), dtype=np.int64)
+    fs = [f for f in scan(d, "y") if f.kind == "id_like"]
+    assert fs and fs[0].column == name and fs[0].severity == "medium"
+
+
+def test_string_id_detail_states_evidence_only():
+    d = _df()
+    d["uid"] = [f"u{i}" for i in range(len(d))]
+    detail = next(f for f in scan(d, "y") if f.kind == "id_like").detail
+    assert "100.0% unique values" in detail and "one value per row" in detail
+    assert "likely an identifier" not in detail
+
+
+def test_numeric_id_detail_names_the_name_evidence():
+    d = _df()
+    d["customer_id"] = np.arange(len(d), dtype=np.int64)
+    detail = next(f for f in scan(d, "y") if f.kind == "id_like").detail
+    assert "identifier-like name" in detail
 
 
 def test_split_overlap():

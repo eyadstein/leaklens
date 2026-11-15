@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -10,6 +11,11 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from .evidence import Evidence, coerce_evidence
 from .fingerprint import fingerprint_for
+
+# A numeric column must carry one of these words to be read as an identifier.
+ID_NAME = re.compile(
+    r"(^|[^a-z])(id|uuid|guid|key|index|idx|row)([^a-z]|$)", re.IGNORECASE
+)
 
 
 @dataclass
@@ -127,20 +133,41 @@ def single_feature_leaks(df, target, threshold=0.95, max_rows=20000, seed=0):
 
 
 def id_like(df, target, ratio=0.98):
+    """Near-unique columns that behave like a per-row identifier.
+
+    String columns are reported on uniqueness alone: identifiers there rarely
+    have a predictable name. A numeric column is only reported when its name
+    says identifier (`*_id`, `uuid`, `key`, `index`, `row`, ...): a unique
+    measurement or a timestamp is a feature, not an identifier. Known
+    limitation: a numeric identifier with an uninformative name (e.g.
+    `customer`) is not reported here; single_feature_leaks still catches it
+    when it predicts the target.
+    """
     out = []
     if len(df) < 50:
         return out
     for c in df.columns:
-        if c == target or df[c].dtype.kind not in "OSUiu":
+        if c == target:
+            continue
+        kind = df[c].dtype.kind
+        if kind not in "OSUiuf":
+            continue
+        numeric = kind in "iuf"
+        if numeric and not ID_NAME.search(str(c)):
             continue
         r = df[c].nunique(dropna=True) / len(df)
         if r >= ratio:
+            evidence = (
+                "identifier-like name and one value per row"
+                if numeric
+                else "one value per row"
+            )
             out.append(
                 Finding(
                     "medium",
                     "id_like",
                     c,
-                    f"{r:.1%} unique values; likely an identifier",
+                    f"{r:.1%} unique values; {evidence}",
                 )
             )
     return out
