@@ -1,5 +1,7 @@
 """Chronological splitting and group-aware cross-validation."""
 
+import pytest
+
 from leaklens.scanner import scan_source
 
 
@@ -54,6 +56,81 @@ def test_sorting_an_unrelated_column_is_clean():
         "ordered[['x']], ordered['y'], random_state=0)\n"
     )
     assert "temporal_split_shuffle" not in kinds(src)
+
+
+# --- cyclic calendar attributes are not a time axis ---
+
+CALENDAR = [
+    "day_of_week",
+    "weekday",
+    "day_name",
+    "dayofweek",
+    "month_name",
+    "month",
+    "quarter",
+    "hour",
+    "minute",
+    "week_of_year",
+]
+
+
+@pytest.mark.parametrize("name", CALENDAR)
+def test_calendar_attribute_sort_is_not_temporal_order(name):
+    src = (
+        "import pandas as pd\n"
+        + SPLIT
+        + f"ordered = df.sort_values('{name}')\n"
+        + "X_train, X_test, y_train, y_test = train_test_split("
+        "ordered[['x']], ordered['y'], random_state=0)\n"
+    )
+    assert "temporal_split_shuffle" not in kinds(src)
+
+
+def test_calendar_attribute_exclusion_is_exact_not_substring():
+    # a derived column that still denotes a time axis keeps matching
+    src = (
+        "import pandas as pd\n"
+        + SPLIT
+        + "ordered = df.sort_values('sale_month')\n"
+        + "X_train, X_test, y_train, y_test = train_test_split("
+        "ordered[['x']], ordered['y'], random_state=0)\n"
+    )
+    fs = [f for f in scan_source(src) if f.kind == "temporal_split_shuffle"]
+    assert fs and fs[0].severity == "medium"
+
+
+def test_event_date_sort_is_still_temporal():
+    src = (
+        "import pandas as pd\n"
+        + SPLIT
+        + "ordered = df.sort_values('event_date')\n"
+        + "X_train, X_test, y_train, y_test = train_test_split("
+        "ordered[['x']], ordered['y'], random_state=0)\n"
+    )
+    fs = [f for f in scan_source(src) if f.kind == "temporal_split_shuffle"]
+    assert fs and fs[0].severity == "medium"
+
+
+def test_year_sort_is_still_temporal():
+    src = (
+        "import pandas as pd\n"
+        + SPLIT
+        + "ordered = df.sort_values('year')\n"
+        + "X_train, X_test, y_train, y_test = train_test_split("
+        "ordered[['x']], ordered['y'], random_state=0)\n"
+    )
+    assert "temporal_split_shuffle" in kinds(src)
+
+
+def test_time_named_receiver_is_still_temporal():
+    src = (
+        "import pandas as pd\n"
+        + SPLIT
+        + "ordered = time_df.sort_values('x')\n"
+        + "X_train, X_test, y_train, y_test = train_test_split("
+        "ordered[['x']], ordered['y'], random_state=0)\n"
+    )
+    assert "temporal_split_shuffle" in kinds(src)
 
 
 def test_group_split_without_groups_is_medium():

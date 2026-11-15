@@ -905,6 +905,18 @@ def _scan_core(
         time_like = re.compile(
             r"(date|time|timestamp|datetime|month|year|week|day)", re.IGNORECASE
         )
+        calendar = {
+            "day_of_week",
+            "weekday",
+            "day_name",
+            "dayofweek",
+            "month_name",
+            "month",
+            "quarter",
+            "hour",
+            "minute",
+            "week_of_year",
+        }
         sorted_names = set()
         for a in assigns:
             if a.lineno >= first:
@@ -920,6 +932,8 @@ def _scan_core(
                 kw.value for kw in value.keywords if kw.arg in ("by", "key")
             ]
             labels = set().union(*(_strings(x) for x in by)) if by else set()
+            # a cyclic calendar attribute is a categorical feature, not a time axis
+            labels = {s for s in labels if s.lower() not in calendar}
             receiver = _all_names(value.func.value)
             if any(time_like.search(s) for s in labels) or any(
                 time_like.search(n) for n in receiver
