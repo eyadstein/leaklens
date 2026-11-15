@@ -40,6 +40,80 @@ def test_temporal_overlap():
     assert not temporal_overlap(te, tr, "t")
 
 
+def test_temporal_overlap_mixed_awareness():
+    """A tz-aware export and a naive export must be comparable, not raise."""
+    tr = pd.DataFrame({"t": ["2024-01-01T00:00:00+00:00", "2024-01-05T00:00:00+00:00"]})
+    te = pd.DataFrame({"t": ["2024-01-02T00:00:00", "2024-01-06T00:00:00"]})
+    fs = temporal_overlap(tr, te, "t")
+    assert fs and fs[0].kind == "temporal_leakage"
+    assert fs[0].severity == "high"
+
+
+def test_temporal_overlap_compares_instants_not_clock_text():
+    """02:00+02:00 is 00:00Z, before the test window; naive text would say overlap."""
+    tr = pd.DataFrame({"t": ["2024-01-01T02:00:00+02:00"]})
+    te = pd.DataFrame({"t": ["2024-01-01T01:00:00+00:00"]})
+    assert temporal_overlap(tr, te, "t") == []
+
+
+def test_temporal_overlap_coerces_unparseable_values():
+    tr = pd.DataFrame({"t": ["2025-01-01", "not-a-date"]})
+    te = pd.DataFrame({"t": ["2025-01-02", "also-bad"]})
+    assert temporal_overlap(tr, te, "t") == []
+
+
+def test_temporal_overlap_all_nat_is_empty():
+    tr = pd.DataFrame({"t": ["not-a-date", "junk"]})
+    te = pd.DataFrame({"t": ["junk", "more junk"]})
+    assert temporal_overlap(tr, te, "t") == []
+
+
+def test_temporal_overlap_keeps_naive_rendering():
+    """Both columns naive: the message must stay naive (no synthetic UTC offset)."""
+    tr = pd.DataFrame({"t": pd.date_range("2024-02-01", periods=3)})
+    te = pd.DataFrame({"t": pd.date_range("2024-01-01", periods=3)})
+    detail = temporal_overlap(tr, te, "t")[0].detail
+    assert "2024-02-03" in detail and "2024-01-01" in detail
+    assert "+00:00" not in detail
+
+
+def test_cli_mixed_timezone_reports_finding_without_traceback(tmp_path):
+    train = tmp_path / "train.csv"
+    test = tmp_path / "test.csv"
+    pd.DataFrame(
+        {
+            "t": ["2024-01-01T00:00:00+00:00", "2024-01-05T00:00:00+00:00"],
+            "v": [1, 3],
+            "y": [0, 1],
+        }
+    ).to_csv(train, index=False)
+    pd.DataFrame(
+        {"t": ["2024-01-02T00:00:00", "2024-01-06T00:00:00"], "v": [4, 6], "y": [0, 1]}
+    ).to_csv(test, index=False)
+    # exit 1 because the high temporal finding is real, not because of a traceback
+    assert main([str(train), "--test", str(test), "--target", "y", "--time", "t"]) == 1
+
+
+def test_cli_offset_aware_pair_without_overlap_exits_clean(tmp_path):
+    train = tmp_path / "train.csv"
+    test = tmp_path / "test.csv"
+    pd.DataFrame(
+        {
+            "t": ["2024-01-01T02:00:00+02:00", "2024-01-02T02:00:00+02:00"],
+            "v": [1, 3],
+            "y": [0, 1],
+        }
+    ).to_csv(train, index=False)
+    pd.DataFrame(
+        {
+            "t": ["2024-01-03T00:00:00+00:00", "2024-01-04T00:00:00+00:00"],
+            "v": [4, 6],
+            "y": [0, 1],
+        }
+    ).to_csv(test, index=False)
+    assert main([str(train), "--test", str(test), "--target", "y", "--time", "t"]) == 0
+
+
 def test_score_and_cli(tmp_path):
     d = _df()
     d["leak"] = d["y"] * 2.0

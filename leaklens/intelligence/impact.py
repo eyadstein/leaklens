@@ -7,6 +7,8 @@ from typing import Any
 
 import pandas as pd
 
+from ..leakage import temporal_extents
+
 
 @dataclass(frozen=True, slots=True)
 class DatasetImpact:
@@ -88,17 +90,12 @@ def analyze_dataset_impact(
                 f"time column {time_col!r} must exist in both train and test"
             )
 
-        train_times = pd.to_datetime(train[time_col], errors="coerce")
-        test_times = pd.to_datetime(test[time_col], errors="coerce")
-        train_max = train_times.max()
-        test_min = test_times.min()
-
-        if pd.notna(train_max):
+        train_max, test_min, _ = temporal_extents(train, test, time_col)
+        if train_max is not None:
             train_max_time = train_max.isoformat()
-        if pd.notna(test_min):
+        if test_min is not None:
             test_min_time = test_min.isoformat()
-
-        if pd.notna(train_max) and pd.notna(test_min):
+        if train_max is not None and test_min is not None:
             temporal_overlap = bool(train_max > test_min)
 
     return DatasetImpact(

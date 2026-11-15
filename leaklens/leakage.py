@@ -171,16 +171,50 @@ def split_overlap(train, test):
     ]
 
 
+def _renders_naive(series):
+    """True when no parseable value in the column carries a UTC offset."""
+    try:
+        parsed = pd.to_datetime(series, errors="coerce")
+    except (TypeError, ValueError):
+        # Mixed offsets: keep the explicit UTC offset in rendered output.
+        return False
+    return getattr(parsed.dtype, "tz", None) is None
+
+
+def temporal_extents(train, test, time_col):
+    """Latest train and earliest test timestamp as UTC, or None when unusable.
+
+    Timestamps are UTC-normalised so an export that mixes timezone-aware and
+    naive values stays comparable. Naive values are interpreted as UTC. The
+    third element is True when neither column carries an offset, so callers
+    keep rendering the offset-free text they always have.
+    """
+    a = pd.to_datetime(train[time_col], errors="coerce", utc=True)
+    b = pd.to_datetime(test[time_col], errors="coerce", utc=True)
+    naive = _renders_naive(train[time_col]) and _renders_naive(test[time_col])
+    train_max = a.max()
+    test_min = b.min()
+    if naive:
+        if pd.notna(train_max):
+            train_max = train_max.tz_localize(None)
+        if pd.notna(test_min):
+            test_min = test_min.tz_localize(None)
+    return (
+        train_max if pd.notna(train_max) else None,
+        test_min if pd.notna(test_min) else None,
+        naive,
+    )
+
+
 def temporal_overlap(train, test, time_col):
-    a = pd.to_datetime(train[time_col], errors="coerce")
-    b = pd.to_datetime(test[time_col], errors="coerce")
-    if a.max() > b.min():
+    a, b, _ = temporal_extents(train, test, time_col)
+    if a is not None and b is not None and a > b:
         return [
             Finding(
                 "high",
                 "temporal_leakage",
                 time_col,
-                f"train extends to {a.max()} but test starts {b.min()}",
+                f"train extends to {a} but test starts {b}",
                 evidence=(
                     Evidence(
                         source="split",

@@ -385,6 +385,36 @@ def test_analyze_dataset_impact_temporal_no_overlap():
     assert impact.temporal_overlap is False
 
 
+def test_analyze_dataset_impact_mixed_timezone():
+    train = pd.DataFrame(
+        {"t": ["2025-01-01T00:00:00+00:00", "2025-01-05T00:00:00+00:00"]}
+    )
+    test = pd.DataFrame({"t": ["2025-01-03T00:00:00", "2025-01-10T00:00:00"]})
+    impact = analyze_dataset_impact(train, test, time_col="t")
+    assert impact.temporal_overlap is True
+    assert impact.train_max_time is not None
+    assert impact.test_min_time is not None
+
+
+def test_analyze_dataset_impact_offsets_are_instants():
+    train = pd.DataFrame({"t": ["2025-01-01T02:00:00+02:00"]})  # 00:00Z
+    test = pd.DataFrame({"t": ["2025-01-01T01:00:00+00:00"]})
+    impact = analyze_dataset_impact(train, test, time_col="t")
+    assert impact.temporal_overlap is False
+
+
+def test_analyze_dataset_impact_mixed_timezone_serializes():
+    import json
+
+    train = pd.DataFrame(
+        {"t": ["2025-01-01T00:00:00+00:00", "2025-01-05T00:00:00+00:00"]}
+    )
+    test = pd.DataFrame({"t": ["2025-01-03T00:00:00"]})
+    impact = analyze_dataset_impact(train, test, time_col="t")
+    payload = json.loads(json.dumps(impact.to_dict()))
+    assert payload["temporal_overlap"] is True
+
+
 def test_analyze_dataset_impact_time_missing_raises():
     train = pd.DataFrame({"a": [1]})
     test = pd.DataFrame({"a": [1]})
