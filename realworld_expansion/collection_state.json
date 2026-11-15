@@ -1,0 +1,168 @@
+{
+ "kaggle_blocks": [
+  0,
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8,
+  9,
+  10,
+  11,
+  12,
+  13,
+  14,
+  15,
+  16,
+  17,
+  18,
+  19,
+  20,
+  21,
+  22,
+  23,
+  24,
+  25,
+  26,
+  27,
+  28,
+  29,
+  30,
+  31,
+  32,
+  33,
+  34,
+  35
+ ],
+ "queries": {
+  "ColumnTransformer extension:ipynb": {
+   "page": 3
+  },
+  "CountVectorizer extension:ipynb": {
+   "page": 3
+  },
+  "GridSearchCV extension:ipynb": {
+   "page": 3
+  },
+  "KMeans extension:ipynb": {
+   "page": 3
+  },
+  "LabelEncoder extension:ipynb": {
+   "page": 3
+  },
+  "LinearRegression extension:ipynb": {
+   "page": 3
+  },
+  "LogisticRegression extension:ipynb": {
+   "page": 3
+  },
+  "MinMaxScaler extension:ipynb": {
+   "page": 3
+  },
+  "OneHotEncoder extension:ipynb": {
+   "page": 3
+  },
+  "PCA extension:ipynb": {
+   "page": 3
+  },
+  "RFE extension:ipynb": {
+   "page": 3
+  },
+  "RandomForestClassifier extension:ipynb": {
+   "page": 3
+  },
+  "RandomOverSampler extension:ipynb": {
+   "page": 3
+  },
+  "RobustScaler extension:ipynb": {
+   "page": 3
+  },
+  "SMOTE extension:ipynb": {
+   "page": 3
+  },
+  "SelectKBest extension:ipynb": {
+   "page": 3
+  },
+  "SimpleImputer extension:ipynb": {
+   "page": 3
+  },
+  "StandardScaler extension:ipynb": {
+   "page": 3
+  },
+  "StratifiedKFold extension:ipynb": {
+   "page": 3
+  },
+  "TfidfVectorizer extension:ipynb": {
+   "page": 3
+  },
+  "TimeSeriesSplit extension:ipynb": {
+   "page": 3
+  },
+  "balanced_accuracy_score extension:ipynb": {
+   "page": 3
+  },
+  "catboost extension:ipynb": {
+   "page": 3
+  },
+  "classification_report extension:ipynb": {
+   "page": 3
+  },
+  "cross_val_score extension:ipynb": {
+   "page": 3
+  },
+  "data leakage extension:ipynb": {
+   "page": 3
+  },
+  "feature_importances_ extension:ipynb": {
+   "page": 3
+  },
+  "fit_transform extension:ipynb": {
+   "page": 3
+  },
+  "groupby agg extension:ipynb": {
+   "page": 3
+  },
+  "groupby transform extension:ipynb": {
+   "page": 3
+  },
+  "lightgbm extension:ipynb": {
+   "page": 3
+  },
+  "mean_squared_error extension:ipynb": {
+   "page": 3
+  },
+  "pipeline fit extension:ipynb": {
+   "page": 3
+  },
+  "read_csv train.csv extension:ipynb": {
+   "page": 3
+  },
+  "roc_auc_score extension:ipynb": {
+   "page": 3
+  },
+  "rolling mean extension:ipynb": {
+   "page": 3
+  },
+  "shift -1 extension:ipynb": {
+   "page": 3
+  },
+  "submission.csv extension:ipynb": {
+   "page": 3
+  },
+  "target encoding extension:ipynb": {
+   "page": 3
+  },
+  "train_test_split extension:ipynb": {
+   "page": 4
+  },
+  "xgboost extension:ipynb": {
+   "page": 3
+  },
+  "ydata-profiling extension:ipynb": {
+   "page": 3
+  }
+ }
+}

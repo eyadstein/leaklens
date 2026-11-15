@@ -1,0 +1,157 @@
+{
+  "project": "LeakLens real-world expansion corpus",
+  "mission": "Mission 1 - source discovery, acquisition and corpus infrastructure",
+  "compiled_at": "2026-11-15",
+  "note": "Registry of every channel investigated, including the ones rejected. Candidate counts live in stats.json because they change as collection resumes; this file records attributes that do not.",
+  "sources": [
+    {
+      "id": "github_search",
+      "kind": "github",
+      "name": "GitHub Code Search API (authenticated)",
+      "url": "https://docs.github.com/en/rest/search/search#search-code",
+      "identifier": "GET /search/code?q=<query>+extension:ipynb",
+      "access_method": "gh api (stored OAuth keyring credential); one page of 100 hits per query; 42 workflow queries; 7 s pause between calls (authenticated limit is 10 requests/minute)",
+      "license": "per-file: none declared by the API; repository licence resolved via GET /repos/{owner}/{repo} and recorded per sample",
+      "redistribution": "Manifest row only (hash, path, URL, licence). File bytes stay in a local cache outside Git, so no redistribution question arises.",
+      "size": "864,256 hits measured for a single broad query; 100 hits/query/page sampled",
+      "file_types": [".ipynb"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "Code Search returns at most 1000 files per query and ranks by relevance, so a single broad query is a biased sample of a very large population.",
+        "Same notebook is mirrored across tutorial repos; exact and code-level dedup are mandatory.",
+        "Repository licence is a repository-level signal and can be wrong per file (vendored code, third-party snippets).",
+        "raw.githubusercontent.com HEAD is the default branch, which can move; the recorded commit_sha pins the manifest to the state observed at collection time."
+      ]
+    },
+    {
+      "id": "github_repos",
+      "kind": "github",
+      "name": "Curated public ML repositories (whole-tree enumeration)",
+      "url": "https://github.com",
+      "identifier": "39 repositories listed in scripts/collect_expansion.py CURATED_REPOS",
+      "access_method": "gh api GET /repos/{r} (licence, default branch), GET /repos/{r}/commits/{branch} (immutable commit), GET /repos/{r}/git/trees/{branch}?recursive=1 (paths and sizes), then raw.githubusercontent.com per file",
+      "license": "per repository, recorded per sample (MIT, Apache-2.0, BSD-3-Clause, Unlicense in this run; 78 of the 262 samples came from repositories that declare no licence or NOASSERTION)",
+      "redistribution": "Manifest row only; bytes stay in the out-of-Git cache. Samples under copyleft licences are marked not redistributable.",
+      "size": "39 curated repositories, tree listing per repository, at most 8 files kept per repository",
+      "file_types": [".ipynb", ".py"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "Teaching repositories are cleaned-up and leakage is rarer than in competition or personal notebooks, which biases the channel toward legitimate code.",
+        "An 8-file-per-repository cap trades volume for repository diversity.",
+        "Path-order selection takes the alphabetically first notebooks, not the most interesting ones.",
+        "Translated copies (translations/, i18n/) are skipped by path filter; residual mirrors are caught by dedup."
+      ]
+    },
+    {
+      "id": "kaggle_distilkaggle",
+      "kind": "dataset",
+      "name": "DistilKaggle notebook corpus (Zenodo)",
+      "url": "https://zenodo.org/records/10317389",
+      "identifier": "Zenodo record 10317389, DOI 10.5281/zenodo.10317389; code.csv",
+      "access_method": "HTTP byte-range requests against https://zenodo.org/api/records/10317389/files/code.csv/content (3,855,164,281 bytes); 36 evenly spaced 1.2 MB ranges; rows regrouped by kernel_id into reconstructed notebooks",
+      "license": "CC-BY-4.0 (record metadata); the upstream Kaggle notebook code may carry its own terms",
+      "redistribution": "Attribution-only per CC-BY-4.0, but the reconstructed notebooks are still kept in the local cache rather than committed, to avoid asserting rights over third-party kernels.",
+      "size": "3855 MB code.csv; 1423 MB markdown.csv; 1531 MB DistilKaggle.tar.gz; 515 MB kernel_metrics.csv; 52.8 MB kernels.tar.gz; ~517k notebooks in total",
+      "file_types": [".csv", ".ipynb (reconstructed)"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "code.csv is kernel-contiguous and ordered by kernel_id, so byte-range sampling is a spread over the id space, not a random sample of the corpus.",
+        "Outputs, markdown and notebook metadata are not in code.csv: the reconstruction is code cells only, so cell-level evidence is approximate.",
+        "Throughput was measured at 0.8-1.2 MB/s, so the whole file (about 50 min) is out of scope; only ~43 MB was transferred.",
+        "Kaggle kernels are heavily duplicated (forked and re-published), so the near-duplicate rate is expected to be high.",
+        "No per-kernel licence is available in code.csv; the CC-BY-4.0 record licence is the only licence signal."
+      ]
+    },
+    {
+      "id": "kaggle_official",
+      "kind": "dataset",
+      "name": "Kaggle public API / public notebooks",
+      "url": "https://www.kaggle.com/docs/api",
+      "identifier": "kaggle kernels list --language python",
+      "access_method": "not used",
+      "license": "per-kernel, often unspecified; Kaggle terms restrict scraping and redistribution",
+      "redistribution": "unknown",
+      "size": "unknown",
+      "file_types": [".ipynb"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "Requires an authenticated Kaggle account and acceptance of competition-specific rules.",
+        "Terms of service restrict bulk download and redistribution, so it is not used as a channel in this mission."
+      ],
+      "status": "rejected"
+    },
+    {
+      "id": "hf_kaggle_notebooks_edu",
+      "kind": "dataset",
+      "name": "HuggingFace jupyter-agent/kaggle-notebooks-edu-v0",
+      "url": "https://huggingface.co/datasets/jupyter-agent/kaggle-notebooks-edu-v0",
+      "identifier": "jupyter-agent/kaggle-notebooks-edu-v0",
+      "access_method": "not used",
+      "license": "no licence tag on the dataset card",
+      "redistribution": "unknown",
+      "size": "~2.9 GB",
+      "file_types": [".ipynb"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "No licence metadata, so neither analysis nor redistribution can be justified from the dataset card alone.",
+        "Content is a Kaggle-derived mirror, so it would duplicate the DistilKaggle channel rather than add independent repositories."
+      ],
+      "status": "rejected"
+    },
+    {
+      "id": "hf_meta_kaggle_metadata",
+      "kind": "dataset",
+      "name": "HuggingFace bigcomputer/meta-kaggle-notebook",
+      "url": "https://huggingface.co/datasets/bigcomputer/meta-kaggle-notebook",
+      "identifier": "bigcomputer/meta-kaggle-notebook",
+      "access_method": "not used",
+      "license": "no licence tag on the dataset card",
+      "redistribution": "unknown",
+      "size": "~400 MB metadata only",
+      "file_types": [".parquet"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "Metadata only (titles, votes, tags): no notebook source, so it cannot contribute code samples.",
+        "Would be useful for prioritising kernels if a licensed source for their code existed."
+      ],
+      "status": "rejected"
+    },
+    {
+      "id": "hf_jupyter_notebooks_edu",
+      "kind": "dataset",
+      "name": "HuggingFace lvwerra/jupyter-notebooks-edu-v0..v4, codeShare/JupyterNotebooks",
+      "url": "https://huggingface.co/datasets/lvwerra/jupyter-notebooks-edu-v0",
+      "identifier": "lvwerra/jupyter-notebooks-edu-v0 through v4; codeShare/JupyterNotebooks",
+      "access_method": "not used",
+      "license": "no licence tag on the dataset cards",
+      "redistribution": "unknown",
+      "size": "multi-GB, several shards",
+      "file_types": [".ipynb", ".jsonl"],
+      "collected_at": "2026-11-15",
+      "limitations": [
+        "No licence metadata.",
+        "Largely GitHub-derived, so the same repositories already reached directly through the GitHub channels; adding them would inflate counts without adding independent repositories.",
+        "A candidate for a future mission if per-file licences can be resolved."
+      ],
+      "status": "rejected"
+    },
+    {
+      "id": "frozen_phase6",
+      "kind": "frozen",
+      "name": "Phase 6 frozen real-world holdout",
+      "url": "https://github.com/eyadstein/leaklens/blob/main/realworld/README.md",
+      "identifier": "leaklens/ai/corpus_realworld.py (48 cases, 12 repositories)",
+      "access_method": "reference only; never touched by this mission",
+      "license": "per repository, recorded in the corpus module",
+      "redistribution": "unchanged from the original corpus decision",
+      "size": "48 cases, 12 repositories; digest 7fde39ce",
+      "file_types": [".ipynb"],
+      "collected_at": "frozen 2026 (pre-existing)",
+      "limitations": [
+        "Frozen: must not be modified, re-tuned against, or combined with new candidates.",
+        "New expansion samples are hashed against the frozen 60-notebook directory and flagged overlaps_frozen=true so contamination is visible."
+      ],
+      "status": "reference"
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "bytes": 89624224,
+  "candidates": 1147,
+  "confirmed_labels": 0,
+  "duplicates": 95,
+  "eligible_for_review": 931,
+  "file_types": {
+    "ipynb": 1122,
+    "py": 25
+  },
+  "github_repositories": 730,
+  "kaggle_kernels": 119,
+  "licenses": {
+    "copyleft": 38,
+    "permissive": 541,
+    "unknown": 568
+  },
+  "near_duplicates": 63,
+  "overlaps_frozen": 8,
+  "queue_size": 300,
+  "redistributable": 541,
+  "repositories": 849,
+  "reviews": {
+    "confirmed_leakage": 0,
+    "legitimate": 0,
+    "not_reviewed": 1147,
+    "potential": 0,
+    "uncertain": 0
+  },
+  "scored_labels": 0,
+  "sources": {
+    "github_repos": 262,
+    "github_search": 766,
+    "kaggle_distilkaggle": 119
+  },
+  "unique_repositories": 776,
+  "unique_samples": 1052,
+  "unknown_license": 568
+}
