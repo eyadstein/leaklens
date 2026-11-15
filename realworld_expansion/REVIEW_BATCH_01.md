@@ -232,7 +232,7 @@ The high finding at cell 22:29 flags x - np.max(x, axis=1, keepdims=True) as sca
 
 - axis=1 reductions act within a single row, so no dataset-level statistic is involved
 - cell 24:9 split precedes cell 24:12-15 fit/apply, which is the correct order
-- only 26 cells: there is no later block that re-splits or re-uses the test rows
+- only 26 cells: there is no later block that re-splits or reuses the test rows
 
 **Questions the reviewer must resolve.**
 
@@ -1748,7 +1748,7 @@ Cell 17 splits and cells 21 and 27 do the imputation and scaling in the correct 
 
 **Questions the reviewer must resolve.**
 
-1. Is re-using the test partition inside a later CV estimate confirmed test_set_reuse, or an acceptable robustness check when the headline score is separate?
+1. Is reusing the test partition inside a later CV estimate confirmed test_set_reuse, or an acceptable robustness check when the headline score is separate?
 2. Do the parse errors in cells 0 and 1 affect the evidence?
 
 **Code references.**
