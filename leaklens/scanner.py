@@ -41,6 +41,20 @@ ALWAYS_SHUFFLED = {
     "GroupShuffleSplit",
 }
 EVAL = re.compile(r"(^|[_\W])(test|val|valid|validation|eval)([_\W]|$)", re.IGNORECASE)
+# Evidence that the file trains or scores a classifier. Only then is the
+# stratification advice about class balance rather than a claim the file does
+# not support; `*Classifier` covers the sklearn naming convention.
+CLASSIFICATION_ESTIMATORS = {"LogisticRegression", "SVC"}
+CLASSIFICATION_METRICS = {
+    "accuracy_score",
+    "f1_score",
+    "precision_score",
+    "recall_score",
+    "roc_auc_score",
+    "confusion_matrix",
+    "classification_report",
+    "log_loss",
+}
 # Process-local parsed-source cache. Keyed by exact content, so edits and file
 # replacements miss; no mtime/size heuristic can return a stale tree. Bounded by
 # entry count and total source characters.
@@ -397,6 +411,14 @@ def _scan_core(
 
     out = []
 
+    # Classification evidence decides whether the no_stratify message may claim
+    # a class-balance risk. Without it the finding still fires, with neutral
+    # wording: the file may be regression, where stratify=<labels> would raise.
+    classification_hint = any(
+        k in CLASSIFICATION_ESTIMATORS or k.endswith("Classifier")
+        for k in ctor.values()
+    ) or any(_name(c) in CLASSIFICATION_METRICS for c in calls)
+
     # Future-looking target features leak information from later observations.
     if first is not None:
         for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
@@ -563,7 +585,17 @@ def _scan_core(
                     "low",
                     "no_stratify",
                     loc(c.lineno),
-                    "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+                    (
+                        "train_test_split() without stratify: on an imbalanced "
+                        "classification target, an unstratified split can skew the "
+                        "class ratio between train and test, so pass stratify=<labels> "
+                        "to preserve it"
+                        if classification_hint
+                        else "train_test_split() without stratify: if the target is "
+                        "categorical, an unstratified split can skew the class ratio "
+                        "between train and test; pass stratify=<labels>. For a "
+                        "regression target, ignore this."
+                    ),
                     # Namespaced: no_random_state can fire on the same call and
                     # already carries the bare node key; stable keys must stay
                     # distinct per finding.

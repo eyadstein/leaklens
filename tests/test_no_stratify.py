@@ -48,5 +48,63 @@ def test_tts_multiple_arrays_flagged():
     )
 
 
+# --- advice must not claim a classification target without evidence ---
+
+LINEAR = SPLIT + "from sklearn.linear_model import LinearRegression\n"
+
+
+def _detail(src):
+    return next(f for f in scan_source(src) if f.kind == "no_stratify").detail
+
+
+def test_regression_file_gets_neutral_wording():
+    detail = _detail(
+        LINEAR
+        + "model = LinearRegression()\n"
+        + "a = train_test_split(X, y, random_state=42)\n"
+        + "model.fit(a[0], a[2])\n"
+    )
+    assert "imbalanced classification target" not in detail
+    assert "if the target is categorical" in detail
+    assert "For a regression target, ignore this" in detail
+
+
+def test_classifier_gets_classification_wording():
+    detail = _detail(
+        SPLIT
+        + "from sklearn.linear_model import LogisticRegression\n"
+        + "model = LogisticRegression()\n"
+        + "a = train_test_split(X, y, random_state=42)\n"
+        + "model.fit(a[0], a[2])\n"
+    )
+    assert "imbalanced classification target" in detail
+
+
+def test_classifier_suffix_counts_as_evidence():
+    detail = _detail(
+        SPLIT
+        + "from sklearn.ensemble import RandomForestClassifier\n"
+        + "rf = RandomForestClassifier()\n"
+        + "a = train_test_split(X, y, random_state=42)\n"
+    )
+    assert "imbalanced classification target" in detail
+
+
+def test_classification_metric_counts_as_evidence():
+    detail = _detail(
+        SPLIT
+        + "from sklearn.metrics import accuracy_score\n"
+        + "a = train_test_split(X, y, random_state=42)\n"
+        + "score = accuracy_score(y, pred)\n"
+    )
+    assert "imbalanced classification target" in detail
+
+
+def test_no_model_gets_neutral_wording():
+    detail = _detail(SPLIT + "a = train_test_split(X, y, random_state=42)\n")
+    assert "imbalanced classification target" not in detail
+    assert detail.startswith("train_test_split() without stratify")
+
+
 def test_no_stratify_has_advice():
     assert "stratify" in advice("no_stratify")
