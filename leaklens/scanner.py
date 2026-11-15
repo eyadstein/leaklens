@@ -792,7 +792,10 @@ def _scan_core(
             targets = (
                 set().union(*(_tnames(t) for t in a.targets)) if a.targets else set()
             )
-            if any(isinstance(t, ast.Subscript) for t in a.targets) or targets & full:
+            if targets & full or any(
+                isinstance(t, ast.Subscript) and (_all_names(t) & full)
+                for t in a.targets
+            ):
                 for n in ast.walk(a.value):
                     if isinstance(n, ast.Call):
                         column_assign_calls.add(id(n))

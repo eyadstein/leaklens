@@ -59,6 +59,7 @@ UNRELATED_CASES = {
     "manual_scale_before_split": 'audit["z"] = (audit["x"] - audit["x"].mean()) / audit["x"].std()',
     "fillna_before_split": 'audit["spend"] = audit["spend"].fillna(audit["spend"].mean())',
     "group_stat_before_split": 'audit["store_mean"] = audit.groupby("store")["sales"].transform("mean")',
+    "frequency_encode_before_split": 'audit["city_freq"] = audit["city"].map(audit["city"].value_counts())',
 }
 
 
@@ -125,3 +126,20 @@ df["m"] = df.groupby("city")["sales"].transform("mean")
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
 """
     assert "group_stat_before_split" in {f.kind for f in scan_source(src)}
+
+
+def test_unrelated_subscript_encoding_is_not_flagged():
+    eda = 'audit["city_freq"] = audit["city"].map(audit["city"].value_counts())'
+    assert "frequency_encode_before_split" not in {
+        f.kind for f in scan_source(UNRELATED_EDA.format(eda=eda))
+    }
+
+
+def test_split_frame_subscript_encoding_is_still_flagged():
+    src = """
+from sklearn.model_selection import train_test_split
+X["city_freq"] = X["city"].map(X["city"].value_counts())
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
+"""
+    fs = [f for f in scan_source(src) if f.kind == "frequency_encode_before_split"]
+    assert fs and fs[0].severity == "low"
