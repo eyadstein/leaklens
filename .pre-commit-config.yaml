@@ -6,5 +6,7 @@ repos:
     hooks:
       - id: codespell
         # realworld/notebooks is a corpus of third-party notebooks kept
-        # verbatim as fixtures; everything else is spell-checked.
-        args: ["--skip=realworld/*", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used,nd"]
+        # verbatim as fixtures; the expansion manifest and review queue record
+        # third-party paths and repository names verbatim, so both are skipped
+        # too. Everything else is spell-checked.
+        args: ["--skip=realworld/*,*manifest.jsonl,*review_queue.jsonl", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used,nd"]
