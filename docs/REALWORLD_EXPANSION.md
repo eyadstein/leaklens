@@ -23,7 +23,7 @@ bytes and their published results.
 | `realworld_expansion/sources.json` | Every channel investigated, including rejected ones and why |
 | `realworld_expansion/manifest.jsonl` | One JSON object per candidate: provenance, hashes, findings, review state |
 | `realworld_expansion/review_queue.jsonl` | The prioritised review queue, exported from the manifest |
-| `realworld_expansion/reviews.jsonl` | Append-only audit log of recorded human decisions |
+| `realworld_expansion/reviews.jsonl` | Append-only audit log of recorded human decisions (created by the first recorded review; absent until then) |
 | `realworld_expansion/stats.json` | Machine-readable counts used by the report |
 | `realworld_expansion/collection_state.json` | Resume cursors (search pages, Kaggle blocks) |
 | `tests/test_corpus_expansion.py` | Synthetic-fixture tests for all of the above; no network |

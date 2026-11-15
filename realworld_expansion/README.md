@@ -12,7 +12,7 @@ method, provenance schema, licence policy, dedup rules and limitations.
 | `sources.json` | Every channel investigated, including rejected ones and why |
 | `manifest.jsonl` | Candidates: provenance, hashes, workflow flags, scanner findings, review state |
 | `review_queue.jsonl` | Prioritised, repository-diversified queue for human review |
-| `reviews.jsonl` | Append-only log of recorded decisions (empty until a review happens) |
+| `reviews.jsonl` | Append-only log of recorded decisions (created by the first recorded review; absent until then) |
 | `stats.json` | Counts: candidates, unique samples, repositories, licences, review progress |
 | `collection_state.json` | Resume cursors |
 
