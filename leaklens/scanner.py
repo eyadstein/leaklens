@@ -121,6 +121,17 @@ def _derives_from_full(expr, full_set: set) -> bool:
     return False
 
 
+def _unrelated_to_split(names: set, full: set, bound: set) -> bool:
+    """True when every receiver is a locally bound frame no split divides.
+
+    A statistic computed on such a frame cannot leak into held-out rows, so the
+    pre-split rules skip it. Receivers that are not bound in this file (module
+    globals, function parameters) are still reported: their provenance is not
+    visible here, and silencing them would lose genuine detections.
+    """
+    return bool(names) and not (names & full) and names <= bound
+
+
 def _parse_source(
     src: str,
 ) -> tuple[
@@ -279,6 +290,12 @@ def _scan_core(
     )
     tts_line = tts[0].lineno if tts else first
     full = set()
+    # imported module aliases (pd, np, ...) are not frames. Once one lands in
+    # `full`, every `pd.read_csv(...)` frame looks like it feeds the split.
+    module_aliases = set()
+    for n in index.get(ast.Import, ()):
+        for al in n.names:
+            module_aliases.add(al.asname or al.name.split(".")[0])
     if split_calls:
         for s in split_calls:
             if _name(s) == "train_test_split":
@@ -302,9 +319,13 @@ def _scan_core(
             nm = work.pop()
             for v in defs.get(nm, []):
                 for x in _all_names(v):
-                    if x not in full and (
-                        x in defs
-                        or isinstance(v, (ast.Call, ast.Attribute, ast.Subscript))
+                    if (
+                        x not in full
+                        and x not in module_aliases
+                        and (
+                            x in defs
+                            or isinstance(v, (ast.Call, ast.Attribute, ast.Subscript))
+                        )
                     ):
                         full.add(x)
                         work.append(x)
@@ -321,6 +342,12 @@ def _scan_core(
                             if nm not in full:
                                 full.add(nm)
                                 changed = True
+
+    # every name assigned anywhere in the file, whatever frame it holds
+    bound: set = set()
+    for a in assigns:
+        if a.targets:
+            bound |= set().union(*(_tnames(t) for t in a.targets))
 
     # names and string columns the split treats as the label (label argument(s) only, args[1:]):
     # train_test_split(X, y) -> y; df["target"] -> "target"; X's columns are features, never the label
@@ -703,6 +730,8 @@ def _scan_core(
                     recv |= r
                     skip |= {id(m) for m in ast.walk(n)}
             if not recv:
+                continue
+            if _unrelated_to_split(recv, full, bound):
                 continue
             outside = {
                 m.id
