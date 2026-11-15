@@ -22,6 +22,7 @@ from leaklens.corpus_expansion import (
     apply_decisions,
     code_text,
     dossier,
+    load_decisions,
     load_manifest,
     redistributable,
     scored_records,
@@ -141,8 +142,13 @@ def test_every_decision_is_empty(dossiers):
     assert [row["decision"] for row in dossiers] == [None] * len(dossiers)
 
 
-def test_no_decision_log_exists_before_a_human_decides():
-    assert not (EXPANSION / "reviews.jsonl").exists()
+def test_decision_log_only_ever_holds_human_decisions():
+    # An absent log means nobody has decided yet; a present one must be human.
+    log = EXPANSION / "reviews.jsonl"
+    if log.exists():
+        assert all(row.get("source") == "human" for row in load_decisions(log)), (
+            "a non-human decision source reached reviews.jsonl"
+        )
 
 
 def test_hypotheses_are_ai_marked_and_never_ground_truth(dossiers):
