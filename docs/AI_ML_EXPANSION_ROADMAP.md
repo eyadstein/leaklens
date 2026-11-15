@@ -62,7 +62,9 @@ shipping three of four checks ([PHASE14_ACCEPTANCE.md](PHASE14_ACCEPTANCE.md)). 
 are complete ([PHASE15_ACCEPTANCE.md](PHASE15_ACCEPTANCE.md),
 [PHASE16_ACCEPTANCE.md](PHASE16_ACCEPTANCE.md)). Phase 17 M1 is already satisfied by security
 milestone M-S5, M2 ships exact + perceptual image clustering, and M3 ships declared-split
-disjointness; Phase 17 M4–M7, Phase 18 and Phase 19 are unstarted.
+disjointness; Phase 17 M4–M7 and Phase 19 are unstarted. Phase 18 is complete (M6
+satisfied by M-S3); its acceptance record is
+[PHASE18_ACCEPTANCE.md](PHASE18_ACCEPTANCE.md).
 
 Why the boundaries sit there:
 

@@ -413,6 +413,24 @@ leaklens train.csv --target label --monitoring-report reports/drift.json
 
 Schema, id contract and limits: [`docs/INVESTIGATION.md`](docs/INVESTIGATION.md).
 
+## Governance pack (opt-in)
+
+`--governance` adds one provenance-labelled `governance` pack to the payload.
+Every field is labelled `asserted` (supplied by the caller, not verified),
+`measured` (computed by this audit) or `unknown` (not supplied, so `null` with a
+source that says why); the unknowns are listed explicitly. `--governance-out
+PATH` renders the same payload as `.json`, `.md` or `.markdown` inside the
+working directory, atomically and path-contained. The pack never adds, raises
+or rescales a finding and never changes the trust score or the exit gate, and
+it never claims compliance or certification.
+
+```sh
+leaklens train.csv --target label --governance --json
+leaklens train.csv --target label --governance-out governance.md
+```
+
+Vocabulary, every field and the non-claims: [`docs/GOVERNANCE.md`](docs/GOVERNANCE.md).
+
 ## Pipeline and MLOps intelligence (opt-in)
 
 `--pipeline` reads the metadata a training pipeline leaves in the repository (DVC stages and locks, serialized DAG JSON, notebook cell order, dependency declarations) and asks whether the evaluation is circular. It is **off by default**, **read-only**, and needs no orchestrator: nothing is executed and no service is contacted. `pip install "leaklens-ml[yaml]"` adds `safe_load`-only YAML parsing for DVC files; without it, directory audits skip DVC metadata and naming a DVC file raises an actionable `PipelineUnavailable`.

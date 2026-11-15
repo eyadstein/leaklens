@@ -26,6 +26,7 @@ from .leakage import (
     temporal_overlap,
 )
 from .missingness import audit_missingness
+from .paths import PathOutsideRoot
 from .readers import read_dataset
 from .report_schema import REPORT_SCHEMA_URL, report_schema
 from .scanner import SKIP, scan_path
@@ -1025,6 +1026,17 @@ def main(argv=None) -> int:
         help="include deterministic confidence, root-cause, and remediation analysis",
     )
     p.add_argument(
+        "--governance",
+        action="store_true",
+        default=None,
+        help="add a provenance-labelled governance pack to the payload",
+    )
+    p.add_argument(
+        "--governance-out",
+        help="write the governance pack (.json or .md) inside the working "
+        "directory; implies --governance",
+    )
+    p.add_argument(
         "--graph-out",
         help="write the evidence graph (.mmd/.md, .dot/.gv or .json); "
         "implies --intelligence",
@@ -1442,6 +1454,23 @@ def main(argv=None) -> int:
             for item in plan.omitted_tests
         ]
     _attach_missing_evidence(rep, plan_records)
+    if a.governance or a.governance_out:
+        from . import governance
+
+        try:
+            card = governance.build_card(
+                rep, train=a.train, test=test_path, target=target
+            )
+            rep["governance"] = card.to_dict()
+            written = (
+                governance.write(rep["governance"], a.governance_out)
+                if a.governance_out
+                else None
+            )
+        except (governance.GovernanceError, PathOutsideRoot) as exc:
+            p.error(str(exc))
+        if written is not None and not a.json:
+            print(f"governance pack written: {written}")
     if graph_baseline_path or graph_snapshot_path:
         from .intelligence import (
             GraphSnapshot,

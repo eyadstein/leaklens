@@ -54,6 +54,7 @@ ENGINES = {
 AI = "ai"
 INTEGRATIONS = "integrations"
 INTELLIGENCE = "intelligence"
+GOVERNANCE = "governance"
 SURFACES = {
     "api",
     "cli",
@@ -112,6 +113,9 @@ FORBIDDEN = {
     "integrations": {"engines", "ai", "intelligence", "surfaces"},
     "intelligence": {"ai"},
     "ai": {"intelligence"},
+    # Phase 18 M7: the governance pack reads core payloads only; narration and
+    # engine work stay outside it.
+    "governance": {"ai", "engines", "surfaces", "integrations"},
 }
 
 
@@ -129,6 +133,8 @@ def _layer(module: str) -> str:
         return "integrations"
     if head == INTELLIGENCE:
         return "intelligence"
+    if head == GOVERNANCE:
+        return "governance"
     # Benchmarks, arena, __main__ and future one-off tools: nothing may import
     # them, and they may import anything.
     return "infra"
@@ -249,6 +255,7 @@ def test_a_new_edge_fails_with_a_readable_message():
         ("scanner", "engines"),
         ("analysis.text.dedup", "engines"),
         ("integrations.hf", "integrations"),
+        ("governance.cards", "governance"),
     ],
 )
 def test_layers_cover_the_phase13_modules(module, layer):

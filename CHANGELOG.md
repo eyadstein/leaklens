@@ -26,6 +26,12 @@
 
 - New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
 
+### Provenance-labelled governance pack (Phase 18 M7)
+
+- New opt-in `--governance` adds one `governance` pack to the JSON payload. Every field is labelled `asserted` (supplied by the caller, not verified), `measured` (computed by this run) or `unknown` (not supplied, so `null` with a source that says why); the unknowns are listed explicitly and the pack always ships its non-claims. `--governance-out PATH` renders the same payload as `.json`, `.md` or `.markdown` inside the working directory, path-contained through `paths.resolve_within` and replaced atomically.
+- The pack never adds, raises or rescales a finding and never changes the trust score or the exit gate. `leaklens/governance/` uses the standard library and `leaklens.paths` only and never imports `leaklens.ai`. Vocabulary, fields and non-claims: `docs/GOVERNANCE.md`.
+- M7 completes Phase 18; `docs/PHASE18_ACCEPTANCE.md` records the acceptance evidence for M1-M7.
+
 ### Published report schema (report-1)
 
 - New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
