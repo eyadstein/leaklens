@@ -665,6 +665,8 @@ def _scan_core(
             base = f.value
         if base is None:
             continue
+        if _unrelated_to_split(_all_names(base.func.value), full, bound):
+            continue
         used = (_all_names(sel) | _strings(sel)) if sel is not None else set()
         group_keys = set()
         for a in base.args:

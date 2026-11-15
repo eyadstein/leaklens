@@ -58,6 +58,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, strati
 UNRELATED_CASES = {
     "manual_scale_before_split": 'audit["z"] = (audit["x"] - audit["x"].mean()) / audit["x"].std()',
     "fillna_before_split": 'audit["spend"] = audit["spend"].fillna(audit["spend"].mean())',
+    "group_stat_before_split": 'audit["store_mean"] = audit.groupby("store")["sales"].transform("mean")',
 }
 
 
@@ -115,3 +116,12 @@ X = frame.drop(columns=["target"])
 X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
 """
     assert "fillna_before_split" in {f.kind for f in scan_source(src)}
+
+
+def test_unbound_frame_group_stat_stays_flagged():
+    src = """
+from sklearn.model_selection import train_test_split
+df["m"] = df.groupby("city")["sales"].transform("mean")
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
+"""
+    assert "group_stat_before_split" in {f.kind for f in scan_source(src)}
