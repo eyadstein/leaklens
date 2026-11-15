@@ -35,7 +35,7 @@ export const fixtures = {
           "severity": "low",
           "kind": "no_stratify",
           "column": "advanced_leaks.py:26",
-          "detail": "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+          "detail": "train_test_split() without stratify: if the target is categorical, an unstratified split can skew the class ratio between train and test; pass stratify=<labels>. For a regression target, ignore this.",
           "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
           "line": 26
         },
@@ -275,7 +275,7 @@ export const fixtures = {
           "severity": "low",
           "kind": "no_stratify",
           "column": "bad_pipeline.py:9",
-          "detail": "train_test_split() without stratify: on an imbalanced classification target, an unstratified split can skew the class ratio between train and test, so pass stratify=<labels> to preserve it",
+          "detail": "train_test_split() without stratify: if the target is categorical, an unstratified split can skew the class ratio between train and test; pass stratify=<labels>. For a regression target, ignore this.",
           "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
           "line": 9
         }
@@ -521,7 +521,7 @@ export const fixtures = {
           "severity": "medium",
           "kind": "id_like",
           "column": "txn_id",
-          "detail": "100.0% unique values; likely an identifier",
+          "detail": "100.0% unique values; one value per row",
           "fix": "Drop identifier columns; they let models memorize rows instead of learning patterns.",
           "line": null
         }
