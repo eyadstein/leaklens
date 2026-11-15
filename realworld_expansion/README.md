@@ -12,9 +12,24 @@ method, provenance schema, licence policy, dedup rules and limitations.
 | `sources.json` | Every channel investigated, including rejected ones and why |
 | `manifest.jsonl` | Candidates: provenance, hashes, workflow flags, scanner findings, review state |
 | `review_queue.jsonl` | Prioritised, repository-diversified queue for human review |
+| `review_batch_01.analysis.json` | The authored reading of the first 30 candidates (inputs to the dossiers) |
+| `review_batch_01.jsonl` | The 30 dossiers: provenance, licence, scanner context, cited refs, hypothesis, empty decision |
+| `REVIEW_BATCH_01.md` | The same batch as a document a reviewer reads |
 | `reviews.jsonl` | Append-only log of recorded decisions (created by the first recorded review; absent until then) |
 | `stats.json` | Counts: candidates, unique samples, repositories, licences, review progress |
 | `collection_state.json` | Resume cursors |
+
+The batch is built, not hand-written:
+
+```sh
+python scripts/collect_expansion.py batch                # analysis -> dossiers + markdown
+python scripts/collect_expansion.py show --id rwx_...    # one dossier with the cited source lines
+```
+
+`batch` is deterministic and the dossiers are never edited by hand; change the
+analysis file and rebuild. Code text is quoted only for permissive licences —
+copyleft and unknown-licence candidates carry references instead. See
+[`docs/REVIEW_GUIDE.md`](../docs/REVIEW_GUIDE.md).
 
 Notebook bytes are **not** in this directory (or in Git). They are cached
 content-addressed outside the repository; `sha256` in the manifest is what makes

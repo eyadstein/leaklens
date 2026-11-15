@@ -99,11 +99,24 @@ Five states, from `leaklens.corpus_expansion.REVIEW_STATES`:
 
 `not_reviewed` → `potential` / `uncertain` → `confirmed_leakage` / `legitimate`
 
-`SCORED_STATES` is only `("confirmed_leakage", "legitimate")`. `review()`
-refuses a scored verdict without both `evidence` and `explanation`, refuses an
-unknown state, and refuses a confidence outside `[0, 1]`. It records reviewer,
-timestamp and optional leakage mechanism, and returns a new record instead of
-mutating the candidate.
+`SCORED_STATES` is only `("confirmed_leakage", "legitimate")`. `validate_decision()`
+refuses a scored verdict without both a rationale and at least one code
+reference, refuses an unknown state, a placeholder reviewer, a `source` other
+than `human`, and a confidence outside `[0, 1]`.
+
+A decision is **appended** to `realworld_expansion/reviews.jsonl` and nowhere
+else. `apply_decisions()` merges the log into the records at read time, so
+`queue()` and `scored_records()` see decisions without `manifest.jsonl` being
+rewritten. The manifest is history; the decision log is the audit trail, and
+`review()` (a pure function) still returns a new record rather than mutating a
+candidate.
+
+The first batch is `realworld_expansion/review_batch_01.jsonl` plus
+`review_batch_01.analysis.json` and the human-readable
+`REVIEW_BATCH_01.md`. Building it (`batch`) is deterministic: dossiers are
+regenerated from the authored analysis, never hand-edited, and every dossier
+carries `decision: null`. See [`REVIEW_GUIDE.md`](REVIEW_GUIDE.md) for what a
+reviewer does with one.
 
 `queue()` builds the review queue: unreviewed, non-duplicate, review-eligible
 rows, ordered by (scanner signal, workflow richness, source, repo, path) with at
@@ -166,11 +179,15 @@ python scripts/collect_expansion.py finalize
 python scripts/collect_expansion.py validate    # provenance completeness
 python scripts/collect_expansion.py stats
 
+# rebuild the review dossiers from the authored analysis, then read one
+python scripts/collect_expansion.py batch
+python scripts/collect_expansion.py show --id rwx_0123456789ab
+
 # record one human decision (the only way a label enters the corpus)
 python scripts/collect_expansion.py review --id rwx_0123456789ab \
-  --state confirmed_leakage --evidence "notebook[cell 7]:2 scaler fitted before split" \
-  --mechanism preprocessing_scaling --explanation "StandardScaler.fit_transform on the full frame precedes the split" \
-  --confidence 0.9 --reviewer <name>
+  --state confirmed_leakage \
+  --rationale "StandardScaler.fit_transform on the full frame precedes the split" \
+  --ref "cell 7:2" --mechanism preprocess_before_split --reviewer <name>
 ```
 
 Requirements: `gh` authenticated (Code Search and repo metadata), and about

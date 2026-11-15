@@ -298,6 +298,407 @@ def review(
     return updated
 
 
+# --- review batch (Mission 2A) ----------------------------------------------
+
+# Deliberate source x signal plan: a batch of 30 must not be 30 obvious
+# positives, and must not come from one channel. Kaggle is over-sampled relative
+# to its 13% share of the queue because it is the scarcest independent channel.
+BATCH_PLAN = (
+    ("github_repos", {"high": 3, "medium": 2, "low": 2, "none": 1}),
+    ("github_search", {"high": 6, "medium": 3, "low": 4, "none": 2}),
+    ("kaggle_distilkaggle", {"high": 2, "medium": 2, "low": 2, "none": 1}),
+)
+SIGNAL_QUOTA = tuple(
+    (bucket, sum(plan.get(bucket, 0) for _source, plan in BATCH_PLAN))
+    for bucket in ("high", "medium", "low", "none")
+)
+BATCH_SIZE = sum(size for _name, size in SIGNAL_QUOTA)
+
+HYPOTHESIS_AUTHOR = "ai_unverified"
+# Attribution that can never be a real human decision.
+PLACEHOLDER_REVIEWERS = frozenset(
+    {
+        "",
+        "unassigned",
+        "unknown",
+        "none",
+        "n/a",
+        "na",
+        "tbd",
+        "todo",
+        "ai",
+        "a.i.",
+        "llm",
+        "model",
+        "gpt",
+        "assistant",
+        "bot",
+        "claude",
+        "chatgpt",
+        "openai",
+        "anonymous",
+    }
+)
+DECISION_FIELDS = (
+    "candidate_id",
+    "state",
+    "rationale",
+    "evidence_refs",
+    "reviewer",
+    "decided_at",
+    "source",
+)
+
+
+def signal_bucket(rec) -> str:
+    """Highest scanner severity on the record, or ``none``."""
+    severities = {finding.get("severity") for finding in rec.get("findings") or ()}
+    for name in ("high", "medium", "low"):
+        if name in severities:
+            return name
+    return "none"
+
+
+def workflow_signature(rec) -> str:
+    """Compact, stable description of which ML workflow markers fired."""
+    flags = rec.get("workflow") or {}
+    return "+".join(name for name, on in sorted(flags.items()) if on) or "no-markers"
+
+
+def _batch_pool(records, decisions=()) -> list[dict]:
+    decided = {dec["candidate_id"] for dec in decisions}
+    return [
+        rec
+        for rec in records
+        if not rec["duplicate_of"]
+        and rec.get("eligible_for_review")
+        and not rec.get("overlaps_frozen")
+        and rec["review"]["state"] == "not_reviewed"
+        and rec["id"] not in decided
+    ]
+
+
+def select_batch(records, decisions=(), per_repo: int = 1) -> list[str]:
+    """Deterministic, diversity-first batch of candidate ids.
+
+    Fills an explicit source x signal plan (:data:`BATCH_PLAN`), round-robin over
+    (licence, workflow signature) strata inside each cell, at most ``per_repo``
+    samples per repository. A short cell is topped up from the same source before
+    any other source is used, so a thin channel cannot collapse the batch. Every
+    choice is a pure function of the manifest, so re-running gives the same batch
+    while the manifest and decisions are unchanged.
+    """
+    pool = _batch_pool(records, decisions)
+    chosen: list[dict] = []
+    per_repo_count: Counter = Counter()
+    licence_counts: Counter = Counter()
+
+    def taken_ids() -> set[str]:
+        return {rec["id"] for rec in chosen}
+
+    def fill(source: str | None, bucket: str | None, quota: int) -> int:
+        already = taken_ids()
+        strata: dict[tuple, list[dict]] = {}
+        for rec in pool:
+            if rec["id"] in already:
+                continue
+            if source is not None and rec["source_id"] != source:
+                continue
+            if bucket is not None and signal_bucket(rec) != bucket:
+                continue
+            key = (license_status(rec.get("license_spdx")), workflow_signature(rec))
+            strata.setdefault(key, []).append(rec)
+        groups = {
+            key: sorted(group, key=lambda rec: rec["id"])
+            for key, group in strata.items()
+        }
+        picked = 0
+        level = 0
+        while picked < quota:
+            eligible = [
+                (key, group[level])
+                for key, group in groups.items()
+                if level < len(group)
+            ]
+            if not eligible:
+                break
+            # least-represented licence first, then a stable order: a small quota
+            # must not silently drop a whole licence state from the batch.
+            eligible.sort(key=lambda item: (licence_counts[item[0][0]], item[0]))
+            for key, rec in eligible:
+                if picked >= quota:
+                    break
+                if per_repo_count[rec["repo"]] >= per_repo:
+                    continue
+                chosen.append(rec)
+                per_repo_count[rec["repo"]] += 1
+                licence_counts[key[0]] += 1
+                picked += 1
+            level += 1
+        return picked
+
+    for source, plan in BATCH_PLAN:
+        for bucket in ("high", "medium", "low", "none"):
+            fill(source, bucket, plan.get(bucket, 0))
+        short = sum(plan.values()) - sum(
+            1 for rec in chosen if rec["source_id"] == source
+        )
+        if short > 0:
+            fill(source, None, short)
+    while len(chosen) < BATCH_SIZE:
+        if not fill(None, None, BATCH_SIZE - len(chosen)):
+            break
+    return [rec["id"] for rec in chosen]
+
+
+# Vocabulary a dossier hypothesis is drawn from. Closed so forty batches cannot
+# drift into forty spellings of the same mechanism, but a candidate is never
+# forced into a category: ``none_observed`` and ``legitimate_lookalike`` exist
+# precisely because most real notebooks are not leaking.
+MECHANISMS = (
+    "preprocess_before_split",
+    "target_leakage",
+    "target_encoding_leakage",
+    "feature_selection_on_holdout",
+    "duplicate_contamination",
+    "temporal_leakage",
+    "group_entity_leakage",
+    "augmentation_leakage",
+    "cv_contamination",
+    "test_set_reuse",
+    "legitimate_lookalike",
+    "none_observed",
+)
+HYPOTHESIS_CONFIDENCE = ("low", "medium", "high")
+
+# ``cell 128:4`` (one line), ``cell 128:3-6`` (a range), ``line 42`` (script).
+CODE_REF = re.compile(r"^(cell \d+:\d+(-\d+)?|line \d+)$")
+
+DOSSIER_FIELDS = (
+    "candidate_id",
+    "provenance",
+    "license",
+    "scanner",
+    "code_refs",
+    "excerpts",
+    "workflow",
+    "mechanism",
+    "why_it_may_apply",
+    "evidence_against",
+    "questions",
+    "hypothesis",
+    "decision",
+)
+
+
+def dossier(rec, analysis: dict, excerpts=()) -> dict:
+    """One review dossier: manifest provenance + AI analysis, decision empty.
+
+    The hypothesis is always marked ``ai_unverified`` and the decision is always
+    empty, so nothing here can be mistaken for ground truth. ``excerpts`` are
+    supplied by the caller (materialised from the cache) and must already have
+    passed the redistribution check: the licence guard lives in
+    :func:`validate_dossier`, which rejects code text on a non-permissive row.
+    """
+    missing = [
+        key
+        for key in (
+            "mechanism",
+            "why_it_may_apply",
+            "evidence_against",
+            "questions",
+            "code_refs",
+            "workflow_summary",
+        )
+        if not analysis.get(key)
+    ]
+    if missing:
+        raise ValueError(f"{rec['id']}: analysis missing {', '.join(missing)}")
+    return {
+        "candidate_id": rec["id"],
+        "provenance": {
+            "source_id": rec["source_id"],
+            "repo": rec["repo"],
+            "repo_url": rec.get("repo_url", ""),
+            "commit_sha": rec.get("commit_sha", ""),
+            "path": rec["path"],
+            "file_url": rec["file_url"],
+            "collected_at": rec["collected_at"],
+            "sha256": rec["sha256"],
+        },
+        "license": {
+            "spdx": rec.get("license_spdx") or "",
+            "status": license_status(rec.get("license_spdx")),
+            "redistributable": redistributable(rec.get("license_spdx")),
+        },
+        "scanner": {
+            "signal": signal_bucket(rec),
+            "findings": [
+                {"severity": f.get("severity"), "kind": f.get("kind")}
+                for f in rec.get("findings") or ()
+            ],
+        },
+        "code_refs": list(analysis["code_refs"]),
+        "excerpts": [{"ref": item["ref"], "text": item["text"]} for item in excerpts],
+        "workflow": {
+            "summary": analysis["workflow_summary"],
+            "markers": rec.get("workflow") or {},
+        },
+        "mechanism": analysis["mechanism"],
+        "why_it_may_apply": analysis["why_it_may_apply"],
+        "evidence_against": list(analysis["evidence_against"]),
+        "questions": list(analysis["questions"]),
+        "hypothesis": {
+            "author": HYPOTHESIS_AUTHOR,
+            "text": analysis["why_it_may_apply"],
+            "confidence": analysis.get("hypothesis_confidence", "low"),
+            "is_ground_truth": False,
+        },
+        "decision": None,
+    }
+
+
+def validate_dossier(entry, rec=None) -> list[str]:
+    """Problems with a dossier, one string each. ``rec`` checks the binding."""
+    errors = []
+    ident = entry.get("candidate_id", "<no id>")
+    for field in DOSSIER_FIELDS:
+        if field not in entry:
+            errors.append(f"{ident}: missing {field}")
+    if entry.get("decision") is not None:
+        errors.append(f"{ident}: decision must stay empty until a human records one")
+    hypothesis = entry.get("hypothesis") or {}
+    if hypothesis.get("author") != HYPOTHESIS_AUTHOR:
+        errors.append(f"{ident}: hypothesis must be marked {HYPOTHESIS_AUTHOR}")
+    if hypothesis.get("is_ground_truth") is not False:
+        errors.append(f"{ident}: hypothesis must not claim ground truth")
+    if hypothesis.get("confidence") not in HYPOTHESIS_CONFIDENCE:
+        errors.append(f"{ident}: hypothesis confidence must be low, medium or high")
+    if entry.get("mechanism") not in MECHANISMS:
+        errors.append(f"{ident}: mechanism must be one of MECHANISMS")
+    if not entry.get("code_refs"):
+        errors.append(f"{ident}: no code references")
+    refs = set()
+    for ref in entry.get("code_refs") or ():
+        value = ref.get("ref") if isinstance(ref, dict) else ref
+        if not CODE_REF.match(str(value)):
+            errors.append(f"{ident}: malformed code reference {value!r}")
+        else:
+            refs.add(str(value))
+    if not entry.get("questions"):
+        errors.append(f"{ident}: no reviewer questions")
+    if not entry.get("evidence_against"):
+        errors.append(f"{ident}: no counter-evidence recorded")
+    if not (entry.get("license") or {}).get("status"):
+        errors.append(f"{ident}: licence status missing")
+    # Redistribution is a licence rule, not a preference: code text may only be
+    # shipped for a permissive row, and only against a reference it cites.
+    for excerpt in entry.get("excerpts") or ():
+        if not (entry.get("license") or {}).get("redistributable"):
+            errors.append(f"{ident}: code excerpt on a non-permissive licence")
+            break
+        if excerpt.get("ref") not in refs:
+            errors.append(
+                f"{ident}: excerpt {excerpt.get('ref')!r} is not in code_refs"
+            )
+        if not str(excerpt.get("text") or "").strip():
+            errors.append(f"{ident}: empty code excerpt")
+    if rec is not None:
+        provenance = entry.get("provenance") or {}
+        for entry_key, rec_key in (
+            ("source_id", "source_id"),
+            ("repo", "repo"),
+            ("path", "path"),
+            ("sha256", "sha256"),
+            ("commit_sha", "commit_sha"),
+            ("file_url", "file_url"),
+        ):
+            if provenance.get(entry_key) != rec.get(rec_key):
+                errors.append(
+                    f"{ident}: provenance {entry_key} does not match manifest"
+                )
+    return errors
+
+
+def validate_decision(decision: dict) -> list[str]:
+    """Reject anything that is not a complete, human-attributed decision."""
+    errors = []
+    ident = decision.get("candidate_id", "<no id>")
+    for field in DECISION_FIELDS:
+        if field not in decision:
+            errors.append(f"{ident}: decision missing {field}")
+    if decision.get("source") != "human":
+        errors.append(f"{ident}: decision source must be 'human'")
+    reviewer = str(decision.get("reviewer") or "").strip()
+    if reviewer.lower() in PLACEHOLDER_REVIEWERS:
+        errors.append(f"{ident}: reviewer attribution is a placeholder")
+    if len(reviewer) > 64:
+        errors.append(f"{ident}: reviewer attribution is too long")
+    state = decision.get("state")
+    if state not in REVIEW_STATES:
+        errors.append(f"{ident}: invalid review state {state!r}")
+    refs = decision.get("evidence_refs")
+    if not isinstance(refs, list) or not all(
+        isinstance(ref, str) and ref.strip() for ref in refs or ()
+    ):
+        errors.append(
+            f"{ident}: evidence_refs must be a non-empty list of code references"
+        )
+    if state in SCORED_STATES:
+        if not str(decision.get("rationale") or "").strip():
+            errors.append(f"{ident}: a scored verdict needs a rationale")
+        if not refs:
+            errors.append(
+                f"{ident}: a scored verdict needs at least one code reference"
+            )
+    decided_at = str(decision.get("decided_at") or "")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", decided_at):
+        errors.append(f"{ident}: decided_at must be an ISO-8601 UTC timestamp")
+    if decision.get("confidence") is not None:
+        value = decision["confidence"]
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not 0 <= value <= 1
+        ):
+            errors.append(f"{ident}: confidence must be between 0 and 1")
+    return errors
+
+
+def apply_decisions(records, decisions) -> list[dict]:
+    """Merge human decisions into records without touching the manifest on disk.
+
+    Unknown ids or invalid decisions raise: a decision must never be silently
+    dropped or partially applied.
+    """
+    by_id = {rec["id"]: rec for rec in records}
+    merged = {rec["id"]: dict(rec) for rec in records}
+    for decision in decisions:
+        errors = validate_decision(decision)
+        if errors:
+            raise ValueError("; ".join(errors))
+        ident = decision["candidate_id"]
+        if ident not in by_id:
+            raise ValueError(f"decision for unknown candidate {ident}")
+        review_record = {
+            "state": decision["state"],
+            "evidence": "; ".join(decision["evidence_refs"]),
+            "mechanism": decision.get("mechanism"),
+            "explanation": decision.get("rationale", ""),
+            "confidence": decision.get("confidence"),
+            "reviewer": decision["reviewer"],
+            "decided_at": decision["decided_at"],
+        }
+        merged[ident]["review"] = review_record
+        merged[ident]["scored"] = decision["state"] in SCORED_STATES
+    return [merged[rec["id"]] for rec in records]
+
+
+def scored_records(records, decisions) -> list[dict]:
+    """The only records allowed into a scored set: human, definitive verdicts."""
+    return [rec for rec in apply_decisions(records, decisions) if rec.get("scored")]
+
+
 # --- validation -------------------------------------------------------------
 
 
@@ -327,11 +728,18 @@ def validate(records) -> list[str]:
 
 def load_manifest(path=MANIFEST) -> list[dict]:
     path = pathlib.Path(path)
+    if not path.exists():
+        return []
     return [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
+
+
+def load_decisions(path=REVIEWS) -> list[dict]:
+    """Human decisions, oldest first. An absent log means nobody has decided yet."""
+    return load_manifest(path)
 
 
 def write_manifest(path, records) -> None:

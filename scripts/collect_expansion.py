@@ -53,6 +53,11 @@ QUEUE = EXPANSION / "review_queue.jsonl"
 REVIEWS = EXPANSION / "reviews.jsonl"
 STATE = EXPANSION / "collection_state.json"
 STATS = EXPANSION / "stats.json"
+# A review batch is three files with one stem: authored analysis, machine-readable
+# dossiers, and the document a human actually reads.
+BATCH_STEM = EXPANSION / "review_batch_01"
+BATCH = BATCH_STEM.with_suffix(".jsonl")
+BATCH_MD = EXPANSION / "REVIEW_BATCH_01.md"
 
 MAX_BYTES = 2_000_000
 CODE_SEARCH_PAUSE = 7.0  # 10 requests/minute authenticated
@@ -675,28 +680,369 @@ def command_finalize(_args) -> int:
 
 
 def command_review(args) -> int:
+    """Record one decision. Appends to reviews.jsonl only: the manifest is history."""
     records = load_records()
     by_id = {record["id"]: record for record in records}
     if args.id not in by_id:
         log(f"unknown sample id: {args.id}")
         return 2
-    updated = corpus.review(
-        by_id[args.id],
-        state=args.state,
-        evidence=args.evidence,
-        explanation=args.explanation,
-        mechanism=args.mechanism,
-        confidence=args.confidence,
-        reviewer=args.reviewer,
-    )
-    records = [updated if record["id"] == args.id else record for record in records]
-    corpus.write_manifest(MANIFEST, records)
+    refs = [ref.strip() for ref in args.ref if ref.strip()]
+    malformed = [ref for ref in refs if not corpus.CODE_REF.match(ref)]
+    if malformed:
+        log(f"unusable code reference(s): {', '.join(malformed)}")
+        log("accepted forms: 'cell 128:4', 'cell 128:3-6', 'line 42'")
+        return 2
+    decision = {
+        "candidate_id": args.id,
+        "state": args.state,
+        "rationale": args.rationale,
+        "evidence_refs": refs,
+        "mechanism": args.mechanism,
+        "confidence": args.confidence,
+        "reviewer": args.reviewer,
+        "decided_at": now(),
+        "source": "human",
+    }
+    errors = corpus.validate_decision(decision)
+    if errors:
+        for error in errors:
+            log(f"  {error}")
+        log("decision rejected; nothing was written")
+        return 2
     EXPANSION.mkdir(parents=True, exist_ok=True)
     with REVIEWS.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(updated["review"], sort_keys=True) + "\n")
-    finalize()
-    log(f"recorded {args.state} for {args.id}")
+        handle.write(json.dumps(decision, sort_keys=True) + "\n")
+    decisions = corpus.load_decisions(REVIEWS)
+    scored = len(corpus.scored_records(records, decisions))
+    log(f"recorded {args.state} for {args.id} by {args.reviewer}")
+    log(f"{len(decisions)} decisions on record, {scored} scored (manifest untouched)")
     return 0
+
+
+def _cell_lines(dossier_rec, ref: str, context: int = 0) -> list[str] | None:
+    """Materialise the lines a dossier reference points at, or None if unavailable."""
+    path = object_path(dossier_rec["sha256"], dossier_rec["file_type"])
+    if not path.exists():
+        return None
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    match = re.match(r"^cell (\d+):(\d+)(?:-(\d+))?$", ref)
+    if not match:
+        line = int(ref.split()[1])
+        lines = raw.splitlines()
+        return lines[max(0, line - 1 - context) : line + context]
+    index, start = int(match.group(1)), int(match.group(2))
+    end = int(match.group(3) or start)
+    try:
+        notebook = json.loads(raw)
+        # Scanner refs use the full cell index (markdown included), so index the
+        # full list; a ref into a markdown cell is a stale reference, not a hit.
+        cell = notebook["cells"][index]
+        if cell.get("cell_type") != "code":
+            return None
+        source = cell.get("source", "")
+        if isinstance(source, list):
+            source = "".join(source)
+        lines = source.splitlines()
+    except (ValueError, IndexError, KeyError, TypeError):
+        return None
+    selected = lines[max(0, start - 1 - context) : end + context]
+    # A ref can land mid-statement; a quoted excerpt that stops at a comma reads
+    # like broken code, so follow continuations instead of truncating.
+    tail = end + context
+    while (
+        selected
+        and tail < len(lines)
+        and selected[-1].rstrip().endswith((",", "(", "[", "{", "\\"))
+    ):
+        selected.append(lines[tail])
+        tail += 1
+    return selected
+
+
+def command_show(args) -> int:
+    """Print one dossier and the cached source its references point at."""
+    dossiers = {row["candidate_id"]: row for row in corpus.load_manifest(BATCH)}
+    if args.id not in dossiers:
+        log(f"{args.id} is not in {BATCH.name}")
+        return 2
+    dossier = dossiers[args.id]
+    rec = next(
+        (row for row in load_records() if row["id"] == args.id),
+        {
+            "sha256": dossier["provenance"]["sha256"],
+            "file_type": dossier["provenance"]["path"].rsplit(".", 1)[-1],
+        },
+    )
+    provenance = dossier["provenance"]
+    print(f"{args.id}  [{dossier['scanner']['signal']} scanner signal]")
+    print(f"  source    {provenance['source_id']}")
+    print(f"  repo      {provenance['repo']} @ {provenance['commit_sha'] or 'HEAD'}")
+    print(f"  path      {provenance['path']}")
+    print(f"  url       {provenance['file_url']}")
+    print(
+        f"  licence   {dossier['license']['spdx'] or 'unknown'} "
+        f"({dossier['license']['status']}, "
+        f"{'redistributable' if dossier['license']['redistributable'] else 'references only'})"
+    )
+    print(f"  sha256    {provenance['sha256']}")
+    print(f"  workflow  {dossier['workflow']['summary']}")
+    print(
+        f"  mechanism {dossier['mechanism']} "
+        f"(hypothesis confidence {dossier['hypothesis']['confidence']})"
+    )
+    print("\n  why it may apply")
+    for line in _wrap(dossier["why_it_may_apply"]):
+        print(f"    {line}")
+    print("\n  evidence against")
+    for item in dossier["evidence_against"]:
+        for index, line in enumerate(_wrap(item)):
+            print(f"    {'-' if index == 0 else ' '} {line}")
+    print("\n  reviewer questions")
+    for number, item in enumerate(dossier["questions"], 1):
+        for index, line in enumerate(_wrap(item)):
+            print(f"    {number}. {line}" if index == 0 else f"       {line}")
+    print("\n  code references")
+    for ref in dossier["code_refs"]:
+        lines = _cell_lines(rec, ref["ref"], context=args.context)
+        print(f"    {ref['ref']}: {ref['note']}")
+        if lines is None:
+            print("      (cached source unavailable; set LEAKLENS_CORPUS_CACHE)")
+            continue
+        for number, line in enumerate(lines, 1):
+            print(f"      | {line[:160]}")
+    if dossier["decision"] is None:
+        print("\n  decision: none recorded")
+        print(
+            f"  record one with: python scripts/collect_expansion.py review --id {args.id} "
+            "--state <state> --rationale '<why>' --ref '<cell N:L>' --reviewer <name>"
+        )
+    return 0
+
+
+def _wrap(text: str, width: int = 92) -> list[str]:
+    words, lines, current = text.split(), [], ""
+    for word in words:
+        if len(current) + len(word) + 1 > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def command_batch(args) -> int:
+    """Build the dossiers for one authored analysis file."""
+    analysis_path = (
+        pathlib.Path(args.analysis)
+        if args.analysis
+        else BATCH.with_suffix(".analysis.json")
+    )
+    if not analysis_path.exists():
+        log(f"no analysis at {analysis_path}")
+        return 2
+    analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+    entries = analysis.get("candidates") or {}
+    records = load_records()
+    by_id = {record["id"]: record for record in records}
+    decisions = corpus.load_decisions(REVIEWS)
+    decided = {decision["candidate_id"] for decision in decisions}
+
+    unknown = sorted(set(entries) - set(by_id))
+    if unknown:
+        log(
+            f"analysis names candidates that are not in the manifest: {', '.join(unknown)}"
+        )
+        return 2
+    chosen = corpus.select_batch(records, decisions)
+    extra = sorted(set(entries) - set(chosen))
+    missing = sorted(set(chosen) - set(entries))
+    if extra:
+        log(
+            f"analysis is not the current batch (already decided?): {', '.join(extra[:5])}"
+        )
+        return 2
+    if missing:
+        log(f"analysis is missing current batch candidates: {', '.join(missing)}")
+        return 2
+    if decided & set(chosen):
+        log("a decided candidate is still in the batch; re-run after recording")
+        return 2
+
+    dossiers, errors = [], []
+    for ident in chosen:
+        rec = by_id[ident]
+        excerpts = []
+        if corpus.redistributable(rec.get("license_spdx")):
+            for ref in entries[ident]["code_refs"]:
+                lines = _cell_lines(rec, ref["ref"])
+                if lines:
+                    excerpts.append({"ref": ref["ref"], "text": "\n".join(lines)})
+        entry = corpus.dossier(rec, entries[ident], excerpts)
+        errors.extend(corpus.validate_dossier(entry, rec))
+        dossiers.append(entry)
+    if errors:
+        for error in errors[:40]:
+            log(f"  {error}")
+        log(f"{len(errors)} dossier problems; nothing written")
+        return 2
+
+    corpus.write_manifest(BATCH, dossiers)
+    BATCH_MD.write_text(
+        _render_batch(dossiers, analysis), encoding="utf-8", newline="\n"
+    )
+    log(f"{len(dossiers)} dossiers -> {BATCH.name}, {BATCH_MD.name}")
+    log(
+        f"  excerpts shipped for {sum(1 for d in dossiers if d['excerpts'])} "
+        f"of {len(dossiers)} (permissive licences only)"
+    )
+    return 0
+
+
+def _render_batch(dossiers, analysis) -> str:
+    counts: collections.Counter = collections.Counter()
+    licences: collections.Counter = collections.Counter()
+    sources: collections.Counter = collections.Counter()
+    mechanisms: collections.Counter = collections.Counter()
+    out = [
+        "# Review batch 01 - 30 candidates",
+        "",
+        "Human adjudication queue. **No decision has been recorded**: every dossier",
+        "below ends with an empty decision, and the analysis is an AI hypothesis",
+        "marked `unverified`, not a label.",
+        "",
+        "States: `confirmed_leakage`, `legitimate`, `potential`, `uncertain`,",
+        "`not_reviewed`. Only the first two are scored, and only after a human",
+        "records them. See [`docs/REVIEW_GUIDE.md`](../docs/REVIEW_GUIDE.md).",
+        "",
+        "Evidence is cited as `cell N:L` (zero-based notebook cell, one-based line).",
+        "Run `python scripts/collect_expansion.py show <id>` to print the cached",
+        "source those references point at. Code text appears below only for",
+        "permissive licences; copyleft and unknown-licence candidates carry",
+        "references instead of quoted code.",
+        "",
+    ]
+    for dossier in dossiers:
+        counts[dossier["scanner"]["signal"]] += 1
+        licences[dossier["license"]["status"]] += 1
+        sources[dossier["provenance"]["source_id"]] += 1
+        mechanisms[dossier["mechanism"]] += 1
+
+    out += [
+        "## Batch composition",
+        "",
+        "| Dimension | Distribution |",
+        "|---|---|",
+        f"| Scanner signal | {_counts(counts)} |",
+        f"| Licence | {_counts(licences)} |",
+        f"| Channel | {_counts(sources)} |",
+        f"| Hypothesis mechanism | {_counts(mechanisms)} |",
+        "",
+        f"Independent repositories: {len({d['provenance']['repo'] for d in dossiers})}"
+        f" of {len(dossiers)} candidates.",
+        "",
+        "## Index",
+        "",
+        "| # | Candidate | Repo | Licence | Signal | Hypothesis | Confidence |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for number, dossier in enumerate(dossiers, 1):
+        out.append(
+            f"| {number} | `{dossier['candidate_id']}` | {dossier['provenance']['repo']} "
+            f"| {dossier['license']['spdx'] or 'unknown'} | {dossier['scanner']['signal']} "
+            f"| {dossier['mechanism']} | {dossier['hypothesis']['confidence']} |"
+        )
+    out.append("")
+    for number, dossier in enumerate(dossiers, 1):
+        provenance = dossier["provenance"]
+        out += [
+            "---",
+            "",
+            f"## {number}. `{dossier['candidate_id']}`",
+            "",
+            f"- **Source**: {provenance['source_id']}",
+            f"- **Repository**: {provenance['repo']}"
+            f" at `{provenance['commit_sha'] or 'HEAD'}`",
+            f"- **Path**: `{provenance['path']}`",
+            f"- **URL**: {provenance['file_url']}",
+            f"- **Licence**: {dossier['license']['spdx'] or 'unknown'}"
+            f" ({dossier['license']['status']}; "
+            f"{'redistribution allowed' if dossier['license']['redistributable'] else 'references only, no code text'})",
+            f"- **SHA-256**: `{provenance['sha256']}`",
+            f"- **Scanner signal**: {dossier['scanner']['signal']}"
+            + (
+                " ("
+                + ", ".join(
+                    f"{finding['severity']} {finding['kind']}"
+                    for finding in dossier["scanner"]["findings"][:4]
+                )
+                + ")"
+                if dossier["scanner"]["findings"]
+                else " (none)"
+            ),
+            "",
+            f"**Workflow.** {dossier['workflow']['summary']}",
+            "",
+            f"**Possible mechanism: `{dossier['mechanism']}`**"
+            f" (hypothesis confidence: {dossier['hypothesis']['confidence']})",
+            "",
+            dossier["why_it_may_apply"],
+            "",
+            "**Evidence against, or alternative explanations.**",
+            "",
+        ]
+        out += [f"- {item}" for item in dossier["evidence_against"]]
+        out += ["", "**Questions the reviewer must resolve.**", ""]
+        out += [
+            f"{index}. {item}" for index, item in enumerate(dossier["questions"], 1)
+        ]
+        out += ["", "**Code references.**", ""]
+        for ref in dossier["code_refs"]:
+            out.append(f"- `{ref['ref']}` - {ref['note']}")
+        if dossier["excerpts"]:
+            out += ["", "```python"]
+            for excerpt in dossier["excerpts"]:
+                out += [f"# {excerpt['ref']}", excerpt["text"], ""]
+            out.append("```")
+        elif not dossier["license"]["redistributable"]:
+            out += [
+                "",
+                "_Code text omitted: licence is not permissive. "
+                f"Run `python scripts/collect_expansion.py show {dossier['candidate_id']}`._",
+            ]
+        out += [
+            "",
+            "**AI hypothesis (unverified - not ground truth).** "
+            f"{dossier['hypothesis']['confidence']} confidence, author "
+            f"`{dossier['hypothesis']['author']}`. {dossier['hypothesis']['text']}",
+            "",
+            "**Decision.** none recorded",
+            "",
+            "```sh",
+            f"python scripts/collect_expansion.py review --id {dossier['candidate_id']} \\",
+            "  --state <confirmed_leakage|legitimate|potential|uncertain> \\",
+            "  --rationale '<what you concluded and why>' \\",
+            f"  --ref '{dossier['code_refs'][0]['ref']}' --reviewer <your name>",
+            "```",
+            "",
+        ]
+    out += [
+        "---",
+        "",
+        "## What happens to a decision",
+        "",
+        "`review` appends one validated JSON line to `reviews.jsonl`. It never",
+        "rewrites `manifest.jsonl`, `review_queue.jsonl` or this document. The",
+        "decision log is the only place a label exists, and only",
+        "`confirmed_leakage` / `legitimate` rows are eligible for a scored set.",
+        "",
+    ]
+    return "\n".join(out)
+
+
+def _counts(counter) -> str:
+    return ", ".join(f"{name} {count}" for name, count in sorted(counter.items()))
 
 
 def command_validate(_args) -> int:
@@ -731,15 +1077,33 @@ def main(argv=None) -> int:
         part = sub.add_parser(name, help=help_text)
         part.set_defaults(func=func)
 
-    review = sub.add_parser("review", help="record one human decision")
+    review = sub.add_parser("review", help="record one human decision (append-only)")
     review.add_argument("--id", required=True)
     review.add_argument("--state", required=True, choices=corpus.REVIEW_STATES)
-    review.add_argument("--evidence", default="")
-    review.add_argument("--explanation", default="")
-    review.add_argument("--mechanism", default=None)
+    review.add_argument(
+        "--rationale", required=True, help="why this state, in your words"
+    )
+    review.add_argument(
+        "--ref",
+        action="append",
+        default=[],
+        help="code reference, repeatable: 'cell 128:4' or 'line 42'",
+    )
+    review.add_argument("--mechanism", default=None, choices=corpus.MECHANISMS)
     review.add_argument("--confidence", type=float, default=None)
-    review.add_argument("--reviewer", default="unassigned")
+    review.add_argument("--reviewer", required=True, help="your attribution")
     review.set_defaults(func=command_review)
+
+    batch = sub.add_parser("batch", help="build review dossiers from the analysis file")
+    batch.add_argument("--analysis", default=None, help="defaults to review_batch_01")
+    batch.set_defaults(func=command_batch)
+
+    show = sub.add_parser("show", help="print one dossier and its cached source")
+    show.add_argument("--id", required=True)
+    show.add_argument(
+        "--context", type=int, default=0, help="extra lines around each ref"
+    )
+    show.set_defaults(func=command_show)
 
     args = parser.parse_args(argv)
     return args.func(args)
