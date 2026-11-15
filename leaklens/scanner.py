@@ -756,7 +756,7 @@ def _scan_core(
             if _name(c) != "fillna" or c.lineno >= first:
                 continue
             vals = list(c.args) + [kw.value for kw in c.keywords]
-            uses_stat = False
+            stat_names = set()
             for v in vals:
                 for n in ast.walk(v):
                     if (
@@ -764,11 +764,10 @@ def _scan_core(
                         and isinstance(n.func, ast.Attribute)
                         and n.func.attr in ("mean", "median", "mode")
                     ):
-                        uses_stat = True
-                        break
-                if uses_stat:
-                    break
-            if not uses_stat:
+                        stat_names |= _all_names(n.func.value)
+            if not stat_names:
+                continue
+            if _unrelated_to_split(_all_names(c.func.value) | stat_names, full, bound):
                 continue
             out.append(
                 Finding(

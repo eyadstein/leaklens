@@ -57,6 +57,7 @@ X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, strati
 
 UNRELATED_CASES = {
     "manual_scale_before_split": 'audit["z"] = (audit["x"] - audit["x"].mean()) / audit["x"].std()',
+    "fillna_before_split": 'audit["spend"] = audit["spend"].fillna(audit["spend"].mean())',
 }
 
 
@@ -92,3 +93,25 @@ def prep(df):
 X_train, X_test, y_train, y_test = train_test_split(prep(X), y, random_state=0, stratify=y)
 """
     assert "manual_scale_before_split" in {f.kind for f in scan_source(src)}
+
+
+def test_unbound_frame_fillna_stays_flagged():
+    src = """
+from sklearn.model_selection import train_test_split
+df["x"] = df["x"].fillna(df["x"].mean())
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
+"""
+    assert "fillna_before_split" in {f.kind for f in scan_source(src)}
+
+
+def test_split_frame_derived_from_full_is_still_flagged():
+    src = """
+import pandas as pd
+from sklearn.model_selection import train_test_split
+frame = pd.read_csv("modelling.csv")
+frame = frame.fillna(frame.mean())
+y = frame["target"]
+X = frame.drop(columns=["target"])
+X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0, stratify=y)
+"""
+    assert "fillna_before_split" in {f.kind for f in scan_source(src)}
