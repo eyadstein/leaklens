@@ -32,6 +32,11 @@
 - The pack never adds, raises or rescales a finding and never changes the trust score or the exit gate. `leaklens/governance/` uses the standard library and `leaklens.paths` only and never imports `leaklens.ai`. Vocabulary, fields and non-claims: `docs/GOVERNANCE.md`.
 - M7 completes Phase 18; `docs/PHASE18_ACCEPTANCE.md` records the acceptance evidence for M1-M7.
 
+### Detector fixes: mixed timezones and unrelated pre-split frames (Phase 19C Wave 1)
+
+- Temporal split checks compare timestamps as UTC instants. Exports that mix timezone-aware and naive values, or that spell the same instant with different offsets, no longer raise `TypeError`; naive values are read as UTC and unparseable/all-NaT columns produce no finding. The same helper (`leakage.temporal_extents`) backs `intelligence.analyze_dataset_impact`, so its impact report serialises on mixed input. Naive-only input still renders offset-free text.
+- `manual_scale_before_split`, `fillna_before_split`, `group_stat_before_split`, `frequency_encode_before_split` and `target_encode_before_split` skip an EDA computation on a dataframe the split never divides: the rule now requires the receiver to be bound in the file and disjoint from the frame `train_test_split` divides. Receivers that are not bound here (module globals, function parameters) keep their findings, and a known limitation remains: a leak on a helper-returned frame that the dataflow cannot trace is missed when the name is also locally bound. Existing baselines will show these findings as `resolved`.
+
 ### Published report schema (report-1)
 
 - New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
