@@ -55,6 +55,7 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Optional-engine availability | `leaklens/availability.py` (`probe`, `EngineUnavailable`); `sqlscan`/`images` override the error class |
 | Path containment | `leaklens/paths.py` (`resolve_within`, `contained`); refuses foreign drives/UNC anchors before `resolve()` |
 | Missingness audit | `leaklens/missingness.py`; benchmark `leaklens/bench_missing.py` + `docs/MISSINGNESS_BENCHMARK.md` |
+| Real-world expansion corpus (candidates, not labels) | `leaklens/corpus_expansion.py` (ids, licences, dedup, review states, queue) + `scripts/collect_expansion.py` (channels, cache, resume); data `realworld_expansion/`; docs `docs/REALWORLD_EXPANSION.md`; tests `tests/test_corpus_expansion.py`. Candidate only: nothing here feeds `leakage.score()` or any detector |
 | Experimental AI layer | `leaklens/ai/` (`semantics.py`, `features.py`, `corpus.py`, `learned.py`, `reasoning.py`, `schemas.py`, `analysis.py`); benchmark `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md`; design `docs/AI_INTELLIGENCE.md` |
 | Prompt-injection corpus (M-S6) | `leaklens/ai/prompt_injection.py` + `prompt_injection_corpus.json`; `tests/test_prompt_injection.py`; `python -m leaklens.ai.prompt_injection --check`; docs `docs/PROMPT_INJECTION.md` |
 
