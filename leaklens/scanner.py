@@ -11,7 +11,6 @@ from pathlib import Path
 
 from .leakage import Finding
 from .paths import contained
-from .temporal import scan_temporal
 from .source import (
     BENIGN,
     FEATURE_SELECTION,
@@ -29,6 +28,7 @@ from .source import (
     _sev,
     _tnames,
 )
+from .temporal import scan_temporal
 
 FIT = {"fit", "fit_transform", "fit_resample"}
 # Splitters whose folds are random only when shuffle=True (fold order is deterministic without it).
