@@ -702,6 +702,7 @@ docker run --rm -p 8000:8000 leaklens-api
 - uses: eyadstein/leaklens@main
   with:
     path: notebooks
+    fail-under: 80
 ```
 
 ## HTML report

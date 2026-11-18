@@ -7,6 +7,9 @@ inputs:
   path:
     description: File or folder to scan
     default: "."
+  fail-under:
+    description: Optional minimum trust score (0-100); fail when the scan scores below it
+    required: false
 runs:
   using: composite
   steps:
@@ -15,5 +18,13 @@ runs:
         python-version: "3.11"
     - run: pip install "${{ github.action_path }}"
       shell: bash
-    - run: leaklens --scan "${{ inputs.path }}"
+    - run: |
+        args=()
+        if [[ -n "$LEAKLENS_FAIL_UNDER" ]]; then
+          args+=(--fail-under "$LEAKLENS_FAIL_UNDER")
+        fi
+        leaklens --scan "$INPUT_PATH" "${args[@]}"
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        LEAKLENS_FAIL_UNDER: ${{ inputs.fail-under }}
