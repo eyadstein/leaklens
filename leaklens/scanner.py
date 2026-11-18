@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .leakage import Finding
 from .paths import contained
+from .temporal import scan_temporal
 from .source import (
     BENIGN,
     FEATURE_SELECTION,
@@ -226,7 +227,8 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     return merge(
         _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
         scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
-        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
+        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
+        + scan_temporal(src, label),
     )
 
 
