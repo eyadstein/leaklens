@@ -47,7 +47,7 @@ from sklearn.model_selection import train_test_split
 train_test_split(X, y)
 future = y.shift(-1)
 """
-    assert not ({"future_target_feature_before_split", "future_target_feature_before_split"} & kinds(source))
+    assert not ({"future_target_feature_before_split"} & kinds(source))
 
 
 def test_rolling_unrelated_feature_is_not_reported():
