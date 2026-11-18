@@ -18,12 +18,18 @@ def _target_expression(node: ast.AST, aliases: dict[str, set[str]]) -> bool:
     for child in ast.walk(node):
         if isinstance(child, ast.Subscript):
             key = child.slice
-            if isinstance(key, ast.Constant) and isinstance(key.value, str):
-                if key.value.lower() in _TARGET_NAMES:
-                    return True
-        if isinstance(child, ast.Name) and child.id.lower() in aliases:
-            if aliases[child.id.lower()] & _TARGET_NAMES:
+            if (
+                isinstance(key, ast.Constant)
+                and isinstance(key.value, str)
+                and key.value.lower() in _TARGET_NAMES
+            ):
                 return True
+        if (
+            isinstance(child, ast.Name)
+            and child.id.lower() in aliases
+            and aliases[child.id.lower()] & _TARGET_NAMES
+        ):
+            return True
     return False
 
 
@@ -33,9 +39,12 @@ def _negative_shift(call: ast.Call) -> bool:
     for value in values:
         if isinstance(value, ast.UnaryOp) and isinstance(value.op, ast.USub):
             return True
-        if isinstance(value, ast.Constant) and isinstance(value.value, (int, float)):
-            if value.value < 0:
-                return True
+        if (
+            isinstance(value, ast.Constant)
+            and isinstance(value.value, (int, float))
+            and value.value < 0
+        ):
+            return True
     return False
 
 
@@ -87,10 +96,10 @@ def scan_temporal(src: str, label: str = "<src>") -> list[Finding]:
             continue
         receiver = func.value
         if func.attr == "shift" and _negative_shift(item):
-            kind = "future_looking_shift_before_split"
+            kind = "future_target_feature_before_split"
             detail = "Negative shift reads a later row before the train/test split."
         elif func.attr == "rolling" and _includes_current_or_future(item):
-            kind = "future_looking_rolling_before_split"
+            kind = "future_target_feature_before_split"
             detail = "Rolling window includes the current or a future row before the train/test split."
         else:
             continue
