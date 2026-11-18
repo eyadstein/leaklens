@@ -42,10 +42,10 @@ def _negative_shift(call: ast.Call) -> bool:
 def _includes_current_or_future(call: ast.Call) -> bool:
     center = next((item.value for item in call.keywords if item.arg == "center"), None)
     closed = next((item.value for item in call.keywords if item.arg == "closed"), None)
-    if isinstance(closed, ast.Constant) and closed.value == "left":
-        return False
     if isinstance(center, ast.Constant) and center.value is True:
         return True
+    if isinstance(closed, ast.Constant) and closed.value == "left":
+        return False
     return not (isinstance(closed, ast.Constant) and closed.value == "neither")
 
 
