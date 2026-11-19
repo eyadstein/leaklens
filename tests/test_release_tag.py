@@ -21,6 +21,7 @@ from scripts.validate_release import (
 )
 
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _wheel_names(version="0.13.0"):
@@ -481,11 +482,59 @@ def test_root_manifest_include_is_sdist_only(tmp_path):
     assert "README.md" not in expected_members(root)
 
 
-def test_every_workflow_action_is_sha_pinned():
+def test_every_action_reference_is_sha_pinned():
     pattern = re.compile(r"^\s*(?:-\s*)?uses:\s*(\S+?)(?:\s*#.*)?$", re.MULTILINE)
     unpinned = []
-    for path in sorted(WORKFLOWS.glob("*.yml")):
+    for path in [*sorted(WORKFLOWS.glob("*.yml")), ROOT / "action.yml"]:
         for ref in pattern.findall(path.read_text(encoding="utf-8")):
             if "@" not in ref or not re.search(r"@[0-9a-f]{40}$", ref):
                 unpinned.append(f"{path.name}: {ref}")
     assert not unpinned, "unpinned action(s):\n" + "\n".join(unpinned)
+
+
+def _text(name):
+    return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+
+def test_ci_workflow_is_read_only_and_cancels_only_pull_request_runs():
+    text = _text("ci.yml")
+    assert re.search(r"^permissions:\n  contents: read$", text, re.MULTILINE)
+    assert not re.search(r"^\s+\w+: write$", text, re.MULTILINE)
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in text
+    assert "group: ci-${{ github.workflow }}-${{ github.ref }}" in text
+
+
+def test_ci_jobs_are_bounded_and_checkouts_drop_credentials():
+    text = _text("ci.yml")
+    assert text.count("runs-on: ubuntu-latest") == text.count("timeout-minutes:")
+    assert text.count("actions/checkout@") == text.count("persist-credentials: false")
+
+
+def test_ci_rebuilds_the_wheel_from_the_sdist():
+    text = _text("ci.yml")
+    assert re.search(r"python -m build --wheel --outdir .* dist/\*\.tar\.gz", text)
+    assert "from-sdist/*.whl" in text
+
+
+def test_pr_bot_requires_review_for_packaging_paths():
+    text = _text("pr-bot.yml")
+    for path in (
+        "^action\\.yml$",
+        "^MANIFEST\\.in$",
+        "^\\.pre-commit-hooks\\.yaml$",
+        "^\\.pre-commit-config\\.yaml$",
+        "^scripts\\/",
+    ):
+        assert path in text, path
+
+
+def test_release_workflow_is_environment_gated_and_publishes_last():
+    text = _text("release.yml")
+    assert "environment: pypi" in text
+    assert "id-token: write" in text
+    assert "contents: read" in text
+    assert text.count("id-token: write") == 1
+    assert "cancel-in-progress: false" in text
+    publish = text.index("pypa/gh-action-pypi-publish")
+    assert publish > text.index("validate_release.py --sdist")
+    assert publish > text.index("generate_sbom.py")

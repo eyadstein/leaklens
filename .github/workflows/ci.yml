@@ -3,14 +3,26 @@ on:
   push:
     branches: [main]
   pull_request:
+# Every job only reads the repository. Declaring it here keeps the token
+# read-only even if the repository default is ever widened.
+permissions:
+  contents: read
+# Superseded pull-request runs are worthless; cancel them. Push runs on main
+# are never cancelled, because a release may depend on that result.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         python: ["3.10", "3.11", "3.12", "3.14"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
@@ -45,8 +57,11 @@ jobs:
       - run: python -m leaklens.bench_realworld --no-profile
   spelling:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -55,8 +70,11 @@ jobs:
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
   package:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -67,14 +85,23 @@ jobs:
       - run: python -m build
       - run: python scripts/validate_release.py --wheel dist/*.whl
       - run: python scripts/validate_release.py --sdist dist/*.tar.gz
+      # An sdist that cannot rebuild the same wheel is broken for anyone
+      # installing from source; prove it here instead of at publish time.
+      - name: Rebuild the wheel from the sdist
+        run: |
+          python -m build --wheel --outdir "$RUNNER_TEMP/from-sdist" dist/*.tar.gz
+          python scripts/validate_release.py --wheel "$RUNNER_TEMP"/from-sdist/*.whl
       - run: pip install dist/*.whl
       # Run from a neutral directory so the checkout cannot shadow the wheel.
       - run: python -m leaklens --version
         working-directory: ${{ runner.temp }}
   sql:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -85,8 +112,11 @@ jobs:
       - run: python -m leaklens.bench_sql
   security:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -102,8 +132,11 @@ jobs:
       - run: python -m leaklens --version
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -112,8 +145,11 @@ jobs:
       - run: ruff format --check leaklens tests scripts
   api:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
@@ -124,8 +160,11 @@ jobs:
       - run: python scripts/smoke_public_api.py
   site:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"

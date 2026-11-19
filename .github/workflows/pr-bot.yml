@@ -99,7 +99,7 @@ jobs:
             // sensitive files need a human
             const files = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: n, per_page: 100});
             const sensitive = files.map(f => f.filename).filter(f =>
-              /^\.github\/|^pyproject\.toml$|^setup\.(py|cfg)$|requirements.*\.txt$|^Dockerfile|^LICENSE/.test(f));
+              /^\.github\/|^pyproject\.toml$|^setup\.(py|cfg)$|requirements.*\.txt$|^Dockerfile|^LICENSE|^action\.yml$|^MANIFEST\.in$|^\.pre-commit-hooks\.yaml$|^\.pre-commit-config\.yaml$|^scripts\//.test(f));
             if (sensitive.length) {
               await label('needs-owner-review', '0E8A16');
               await say('@' + owner + ' CI passes, but this PR touches sensitive files (' + sensitive.join(', ') + '), so it needs your review before merging.');
