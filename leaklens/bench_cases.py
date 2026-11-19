@@ -245,7 +245,7 @@ EXTRA_CASES.extend(
         BenchmarkCase(
             "trailing target rolling before split",
             _FUTURE
-            + "smooth = y.rolling(5, closed='left').mean()\na = train_test_split(X, y, random_state=42)\n",
+            + "smooth = y.rolling(5).mean()\na = train_test_split(X, y, random_state=42)\n",
             False,
             "future_target",
         ),

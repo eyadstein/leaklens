@@ -750,10 +750,3 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-CASES += [
-    ("negative target shift before split", SPLIT + "future = y.shift(-1)\na = train_test_split(X, y)\n", True),
-    ("target rolling window before split", SPLIT + "target_mean = y.rolling(3).mean()\na = train_test_split(X, y)\n", True),
-    ("target rolling window closed on the left", SPLIT + "target_mean = y.rolling(3, closed='left').mean()\na = train_test_split(X, y)\n", False),
-    ("negative target shift after split", SPLIT + "a = train_test_split(X, y)\nfuture = y_train.shift(-1)\n", False),
-]

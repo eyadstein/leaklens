@@ -50,12 +50,7 @@ def _negative_shift(call: ast.Call) -> bool:
 
 def _includes_current_or_future(call: ast.Call) -> bool:
     center = next((item.value for item in call.keywords if item.arg == "center"), None)
-    closed = next((item.value for item in call.keywords if item.arg == "closed"), None)
-    if isinstance(center, ast.Constant) and center.value is True:
-        return True
-    if isinstance(closed, ast.Constant) and closed.value == "left":
-        return False
-    return not (isinstance(closed, ast.Constant) and closed.value == "neither")
+    return isinstance(center, ast.Constant) and center.value is True
 
 
 def scan_temporal(src: str, label: str = "<src>") -> list[Finding]:
@@ -65,8 +60,10 @@ def scan_temporal(src: str, label: str = "<src>") -> list[Finding]:
         return []
 
     split_lines = [
-        item.lineno for item in ast.walk(tree)
-        if isinstance(item, ast.Call) and (
+        item.lineno
+        for item in ast.walk(tree)
+        if isinstance(item, ast.Call)
+        and (
             (isinstance(item.func, ast.Name) and item.func.id == "train_test_split")
             or (isinstance(item.func, ast.Attribute) and item.func.attr == "split")
         )

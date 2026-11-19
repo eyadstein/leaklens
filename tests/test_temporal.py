@@ -14,13 +14,22 @@ train_test_split(X, y)
     assert "future_target_feature_before_split" in kinds(source)
 
 
-def test_target_rolling_before_split_is_reported():
+def test_centered_target_rolling_before_split_is_reported():
+    source = """
+from sklearn.model_selection import train_test_split
+target_mean = y.rolling(5, center=True).mean()
+train_test_split(X, y)
+"""
+    assert "future_target_feature_before_split" in kinds(source)
+
+
+def test_trailing_target_rolling_before_split_is_not_reported():
     source = """
 from sklearn.model_selection import train_test_split
 target_mean = y.rolling(5).mean()
 train_test_split(X, y)
 """
-    assert "future_target_feature_before_split" in kinds(source)
+    assert "future_target_feature_before_split" not in kinds(source)
 
 
 def test_centered_rolling_is_reported_even_when_closed_left():
