@@ -2,339 +2,497 @@
 
 ## Unreleased
 
-### Spell-check with codespell (#532)
-
-- New `.pre-commit-config.yaml` with the codespell hook (v2.4.3), skipping only the `realworld` notebook corpus that is kept verbatim as fixtures and ignoring the repository's legitimate vocabulary: the `fpr`/`FPR` metric, the `te` and `strat` abbreviations, and the `unparseable`/`disjointness`/`re-used` spellings.
-- A `spelling` job in CI runs pre-commit so the check is enforced without a local install.
-
-### Investigation plans (Phase 18 M1)
-
-- New deterministic `investigation` block under `--intelligence`: ordered `inspect_evidence`, `suggested_test`, `missing_evidence` and `narration_slot` steps, each citing evidence ids that already exist in the payload and finding ids that already exist in the scan. The plan is built by `leaklens/intelligence/investigation.py` without importing `leaklens.ai`; `leaklens.ai.schemas` re-exports the plan types unchanged (ADR-025). Schema and limits: `docs/INVESTIGATION.md`.
-
-### Detector-mapped suggested tests and missing-evidence report (Phase 18 M2/M3)
-
-- `suggested_test` plan steps now name a registered detector kind (`detector`) and the question it answers (`question`), selected from the cluster's own finding kinds. No check is invented; an unknown kind is omitted at runtime into `omitted_tests` with reason `unregistered_detector`, and constructing the step with an unregistered kind raises `ValueError`.
-- New `missing_evidence` payload collection, present only when something was skipped. It enumerates every engine skip, split limitation and omitted test with `area`, `reason`, `effect`, `source`, `count` and optional `finding_ids`, plus per-reason `counts`. It never changes the trust score or the exit gate. Schema: `docs/INVESTIGATION.md`.
-
-### Optional narration (Phase 18 M4)
-
-- `--intelligence --ai-llm` fills each cluster's `narration_slot` through `ai.reasoning.narrate_investigation`, which adapts the investigation plan to `enrich_plan`. A note may only name an evidence id the plan already carries; malformed JSON, an unknown id or an unsupported safety claim discards the response.
-- `narration` becomes `llm` only when a slot was filled; any validation failure reports `deterministic_fallback` and an unreachable provider reports `ai_unavailable`. Steps, evidence, findings, `missing_evidence`, the trust score and the exit code never change, and `InvestigationPlan.without_narration()` restores the AI-free plan byte for byte.
-- New print-only `python -m leaklens.bench_investigation` compares a narrated plan with its narration-free twin across fixed cases; it never writes documentation.
-
-### Monitoring report intake (Phase 18 M5)
-
-- New opt-in `--monitoring-report PATH` reads a caller-supplied drift/skew JSON report read-only and size-capped. Each breached metric becomes a `low`, diagnostic `monitoring_drift_report`/`monitoring_skew_report` finding; missing, malformed, oversized or out-of-root files become counted skips and never change the trust score or the exit gate. Usage: `docs/INVESTIGATION.md`.
-
-### Provenance-labelled governance pack (Phase 18 M7)
-
-- New opt-in `--governance` adds one `governance` pack to the JSON payload. Every field is labelled `asserted` (supplied by the caller, not verified), `measured` (computed by this run) or `unknown` (not supplied, so `null` with a source that says why); the unknowns are listed explicitly and the pack always ships its non-claims. `--governance-out PATH` renders the same payload as `.json`, `.md` or `.markdown` inside the working directory, path-contained through `paths.resolve_within` and replaced atomically.
-- The pack never adds, raises or rescales a finding and never changes the trust score or the exit gate. `leaklens/governance/` uses the standard library and `leaklens.paths` only and never imports `leaklens.ai`. Vocabulary, fields and non-claims: `docs/GOVERNANCE.md`.
-- M7 completes Phase 18; `docs/PHASE18_ACCEPTANCE.md` records the acceptance evidence for M1-M7.
-
-### Detector fixes: mixed timezones and unrelated pre-split frames (Phase 19C Wave 1)
-
-- Temporal split checks compare timestamps as UTC instants. Exports that mix timezone-aware and naive values, or that spell the same instant with different offsets, no longer raise `TypeError`; naive values are read as UTC and unparseable/all-NaT columns produce no finding. The same helper (`leakage.temporal_extents`) backs `intelligence.analyze_dataset_impact`, so its impact report serialises on mixed input. Naive-only input still renders offset-free text.
-- `manual_scale_before_split`, `fillna_before_split`, `group_stat_before_split`, `frequency_encode_before_split` and `target_encode_before_split` skip an EDA computation on a dataframe the split never divides: the rule now requires the receiver to be bound in the file and disjoint from the frame `train_test_split` divides. Receivers that are not bound here (module globals, function parameters) keep their findings, and a known limitation remains: a leak on a helper-returned frame that the dataflow cannot trace is missed when the name is also locally bound. Existing baselines will show these findings as `resolved`.
-
-### Detector precision: classification advice, numeric identifiers, calendar sorts (Phase 19C Wave 2)
-
-- `no_stratify` only claims an "imbalanced classification target" when the file also shows classification evidence: a classifier (`LogisticRegression`, `SVC`, any `*Classifier`) or a classification metric (`accuracy_score`, `f1_score`, `precision_score`, `recall_score`, `roc_auc_score`, `confusion_matrix`, `classification_report`, `log_loss`). Otherwise the same low finding says the advice applies only if the target is categorical and to ignore it for regression, where `stratify=<continuous labels>` raises. Kind, severity, fingerprint and score are unchanged.
-- `id_like` requires an identifier-like column name for numeric columns (`id`, `uuid`, `guid`, `key`, `index`, `idx`, `row`, delimited). A unique integer counter, a float measurement or an epoch timestamp is a feature, not an identifier, and is no longer reported; `customer_id` stored as an integer still is. String columns keep the uniqueness-only rule, and the detail now states the evidence ("100.0% unique values; one value per row") instead of concluding identity. Known limitation: a numeric identifier with an uninformative name (e.g. `customer`, `member`) is not reported here; `single_feature_leaks` still catches it when it predicts the target.
-- `temporal_split_shuffle` no longer treats an exact cyclic calendar attribute (`day_of_week`, `weekday`, `day_name`, `dayofweek`, `month_name`, `month`, `quarter`, `hour`, `minute`, `week_of_year`) as a time axis, so chart-prep `sort_values("day_of_week")` before a split is clean. `date`, `timestamp`, `datetime`, `year`, `week`, derived names such as `sale_month`, and a time-like receiver still count. Known limitation: a genuine time column literally named `month` or `hour` is no longer flagged.
-
-### Published report schema (report-1)
-
-- New `leaklens/schemas/report-1.schema.json` (JSON Schema 2020-12) describes the document written by `--json` and by the `text`, `dl` and `images` surfaces: `trust_score`, `findings` with their evidence and fingerprint, and the optional `counts`, `policy`, `resolved`, `field`, `documents` and `skipped` sections. Finding keys are closed, so a detector that grows a field must say so; top-level sections stay open, so a command that adds one (`audit`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) keeps its reports valid.
-- New `leaklens schema` prints the schema, and every JSON report now carries `$schema` naming it. Both are additive: no finding, severity, trust score, exit code or existing field changed, and a report written before this release still validates.
-- `jsonschema` is a test-only dependency (`[dev]`), not a runtime one. See `docs/REPORT_SCHEMA.md` for the contract, the version policy and the limits.
-
-### Scanner: stratify advisory
-
-- New low-severity `no_stratify` code check: `train_test_split(X, y, ...)` without `stratify=` is flagged, because on an imbalanced classification target an unstratified split can skew the class ratio between train and test. Not flagged: splits that pass `stratify=`, `shuffle=False` ordered splits (stratify is incompatible with them), single-array splits with no separate labels, and `**kwargs` expansions that may carry `stratify`. Ships with advice text, a detector-manifest entry, five benchmark cases and tests.
-
-### CI covers Python 3.14 (#543)
-
-- The test matrix in `.github/workflows/ci.yml` now runs the suite, the LeakLens self-scan and all benchmarks on Python 3.14 alongside 3.10-3.12, matching the versions the README already lists as locally verified. 3.13 remains outside the matrix and is still not claimed as verified.
-
-### Declared-split disjointness (Phase 17 M3)
-
-- New opt-in `leaklens splits DATASET` audit reads the splits a vision dataset already declares and reports image content that appears in more than one partition. It supports COCO annotation JSON (`annotations/*.json`, split inferred from a `train`/`val`/`test` token in the file name), YOLO `data.yaml`/`dataset.yaml` (`train`/`val`/`test` directories, path lists or `.txt` image lists, relative to the dataset root) and Pascal VOC `ImageSets/Main/{train,val,test}.txt` resolved through `JPEGImages/`. Auto-detection checks VOC, then YOLO, then COCO.
-- Identity is SHA-256 over the file bytes, reusing `images.file_digest`; the audit never decodes an image, so Pillow is not required and the M-S5 decode budgets are untouched. A cross-split duplicate and a path declared in two splits produce a `high` `image_split_overlap` finding; duplicates entirely inside one partition are reported as counts, not findings. Missing, ambiguous, remote, traversing, control-character and oversized declarations are counted with stable reasons, and a partial audit states its limitations. No network access, no data writes and no new mandatory dependency (YOLO configs reuse the existing optional `yaml` extra). See `docs/VISION_AUDIT.md`.
-- README updated as a complete project guide; no version bump and no release.
-
-### Exact and perceptual image clustering (Phase 17 M2)
-
-- `leaklens images` now groups images as well as pairing them: byte-identical files form exact groups (SHA-256 of the file bytes, only after the M-S5 budgets accepted the file), and perceptual near-duplicates form connected-component clusters on the existing 64-bit dHash. `--json` gains a `clustering` payload (`exact_duplicates`, `exact_groups`, `clusters` with train/test counts and `exact_pairs`, `uninformative`) and the text output summarizes both. `image_overlap()` keeps its signature, cost and finding unchanged, and the exit code is untouched.
-- A cluster is a connected component, not a clique; uniform (flat-colour) hashes are excluded from clusters, and members are namespaced `train:`/`test:` with the shared `near_duplicate.cluster_key` as a stable id. See `docs/VISION_AUDIT.md` for the exact/perceptual contracts, the supported transformation envelope, the blind spots and the cluster policy.
-- Added `python -m leaklens.bench_vision` (writes only with `--write`): 180 generated cases over separate calibration and holdout seeds, a published threshold sweep (selected: 6 bits), per-family results, exact groups, a cluster check and scaling. The corpus digest is pinned, so a generator change fails instead of quietly moving the numbers. See `docs/VISION_BENCHMARK.md`.
-
-### Audit manifest and offline verification (M-S3)
-
-- `--manifest PATH` writes a deterministic, unsigned digest manifest of an audit: declared input digests, result-affecting options, the detector catalogue, findings, policy outcome, trust score and gate decision.
-- `leaklens verify MANIFEST` recomputes the manifest and its declared inputs offline with the standard library (exit 0 clean, 1 mismatch, 2 unreadable/unsupported), reporting changed sections plus missing, modified and unsafe-path inputs. It detects content changes, not who wrote the manifest. See `docs/AUDIT_MANIFEST.md`.
-
-### Image decode budgets (M-S5)
-
-- `leaklens images` now bounds every image before decoding: 64 MiB encoded bytes, 20,000 px per side, 64 MP per file, 64 animation frames, and a 2 GP pixel budget shared by both splits. Refusals are reported by stable reason in the new `refused` map and text line, separately from `unreadable`; `--json` also gains `decoded_pixels`.
-- A corrupt image no longer crashes the audit; decoder exceptions are counted as unreadable. Pillow's global decompression-bomb limit is unchanged. See `docs/IMAGE_DECODE_BUDGETS.md`.
-
-### Customizable LLM prompt templates (#256)
-
-- The default prompt template for LLM explanations now lives in `leaklens/prompts/explain.txt` and is packaged with the wheel (`MANIFEST.in`).
-- Added `--llm-prompt-template PATH`, the `LEAKLENS_LLM_PROMPT_TEMPLATE` environment variable, and a project-level `.leaklens/prompt.txt` override.
-- Providers render findings through the selected template using the `{severity}`, `{kind}`, `{location}`, `{location_label}` and `{detail}` placeholders; unknown placeholders are preserved and braces that are not valid placeholders are left untouched.
-
-
-### AI model artifact and provenance
-
-- The served model is now a checked-in plain-JSON artifact (`leaklens/ai/model.json`, schema `leaklens-ai-artifact-1`, about 20 KB) holding the fitted scaler, coefficients, calibrator, threshold, feature importances, evaluation and model card. `get_model(compare_candidates=False)` loads it when its SHA-256 digest, corpus digest, feature-catalogue digest, model version and scikit-learn minor version all match the running build; a cold runtime load drops from a 1.339 s fit to 1.69 ms while producing bit-identical predictions and local contributions. The benchmark path still refits all eleven candidates on purpose.
-- `ModelCard` gained `artifact_digest`, `corpus_digest`, `feature_catalogue_digest` and `library_version` (all optional, so older payloads still validate). `artifact_fallback_reason()` reports why a request fitted instead of loading. A missing, truncated, oversized, hand-edited, stale-corpus, stale-feature, wrong-version or incompatible-library artifact always falls back to the in-memory fit; JSON cannot execute code and no pickle is used.
-- `python -m leaklens.ai.artifact` regenerates the file from the current corpus and features. The artifact tests exercise the real `get_model` serving path, check parity at 1e-9 on all 48 real-world units and 47 locked-test cases, cover the corruption matrix, the cache, and prove a fresh fit reproduces the checked-in payload exactly. `docs/AI_PERFORMANCE.md` records the cold-load measurement.
-
-### AI reasoning: Phase 10 root-cause coverage
-
-- The AI reasoning plan (`leaklens/ai/reasoning.py`) and the deterministic intelligence engine (`leaklens/intelligence/orchestrator.py`) now classify the Phase 10 finding kinds instead of falling back to a generic group or "unclassified risk": `sql_target_as_feature`, `sql_split_predicate_missing` and `sql_future_window` map to `sql_lineage`, `sql_unresolved_column` to `sql_unresolved`, the three `missingness_*` kinds to `informative_missingness`, and `distribution_shift` to `distribution_shift`. Each has a specific root cause, explanation, remediation and verification steps; drift stays a low diagnostic.
-- Unknown finding kinds still fall back to "Review: ..." in the AI plan and `unclassified_leakage` in the intelligence report. No finding severity, evidence, fingerprint, trust score, exit code, policy status, model, threshold or confidence value changed.
-- Extended `tests/test_ai_reasoning.py` and `tests/test_intelligence.py` with one parameterized case per kind, a grouping test, an unknown-kind fallback test and a real `audit_missingness` run feeding the intelligence engine.
-
-### Phase 11.5: live workspace updates, history and comparisons
-
-- Added `GET /api/scans/{id}/events` and `GET /api/datasets/{id}/events` as bounded server-sent event streams. They read the existing session snapshots, emit only on change, send heartbeats, and end with `done`; dataset engine failures emit `failure` first. Unknown or trimmed sessions return 404 before streaming, streams never span sessions, and the UI keeps the existing polling path as a fallback when `EventSource` is unavailable or the stream breaks.
-- Added `GET /api/history`: newest-first metadata for the retained source scans and dataset audits (type, target, state, wall-clock start/completion, duration, result/report availability and a small summary). It is explicitly in-memory only, respects the existing 20-per-kind retention, and is lost on restart; no storage layer or extra source content was added.
-- Added `GET /api/compare/scans` and `GET /api/compare/datasets`. They validate same-kind compatibility (source target/SQL setting; dataset path/target/threshold/held-out/time/group settings), then reuse `Baseline.from_findings()` and `baseline.compare()` on stable fingerprints. Results classify `added`, `unchanged`, `changed` and `no_longer_present`, preserve each current finding's policy status, suppression and `requires_attention`, and report `inconclusive` instead of `resolved` or `added` when either side is partial or cancelled. Summaries include suppressed/unclassified counts, count consistency, truncation and check details.
-- The workspace UI gains live progress with reconnecting/polling fallback, a retention-labelled history table that reopens results/graphs/reports, and a comparison panel with summary counts and finding/graph navigation. Existing filters, previews, dataset summaries, policy controls, graph navigation and exports are preserved.
-- Extended `tests/test_workspace.py` with SSE ordering/completion/failure/reconnect/trimmed-session coverage, polling fallback, history metadata/retention/restart, compatible and incompatible comparisons, all change categories, suppression preservation, partial-scan safeguards, fingerprint/evidence consistency and count/navigation checks; updated `docs/WORKSPACE.md` and `README.md`.
-
-### Phase 11.4: interactive evidence graph navigation in the workspace
-
-- Added `GET /api/scans/{id}/graph` and `GET /api/datasets/{id}/graph`: read-only projections of the graph `intelligence.analyze_findings` already built. Source results spread `evidence`/`clusters`/`links` at the top level; dataset results nest them under `intelligence`. No graph is reconstructed and no node, edge, provenance or rationale is invented.
-- Nodes keep the engine's stable `evidence_id`, finding index, metadata, cluster anchor, component, degree, `isolated` flag and bidirectional neighbours with the recorded relation, direction and rationale. Invalid, duplicate, self-referencing and dangling records are skipped and counted; missing/malformed payloads return `available: false` with a reason; an empty graph is available with zero nodes.
-- Server-side filters (`kind`, `relation`, `severity`, `status`, `q`), bounded paging (`offset`, default `limit` 100, max 500), `focus` by evidence id and `finding` by index support bidirectional navigation. Unknown focus ids stay null; finding focus prefers primary evidence over detector detail. Source results now expose `graph_links_truncated`; dataset payloads do not carry it, so `relationships_truncated` is `null` (unknown) there.
-- The shared workspace graph panel adds filters, debounced search, paging, node details, neighbour inspection, metadata/observation details and finding-to-evidence / evidence-to-finding navigation for both scan types. It reuses the Phase 11.3 statuses unchanged, keeps suppressed findings and their evidence inspectable, and never changes results, trust score, baselines or suppressions.
-- Extended `tests/test_workspace.py` with graph UI controls, source/dataset serialisation, evidence/link identity and neighbour symmetry, navigation both ways, filters/search/paging, size caps, empty/isolated/malformed/dangling data, 404/409 session boundaries and suppression preservation; updated `docs/WORKSPACE.md` and `README.md`.
-
-### Phase 11.3: baseline and suppression visibility in the workspace
-
-- Source scans and dataset audits now run findings through the existing `policy.apply_policy()` step. The workspace UI shows the policy engine's real `new`, `unchanged`, `changed` and `suppressed` statuses, previous severity for changed findings, suppression reason/fingerprint/expiry, `requires_attention`, fingerprints and the original evidence. Suppressed findings stay in the results and stop counting toward `score()`, exactly as in the CLI.
-- Baseline selection is a validated path relative to the workspace root, falling back to `[baseline].path` from `.leaklens.toml`. `Baseline.load` owns validation; missing, malformed, incompatible, non-UTF-8 and out-of-root baselines fail the request with an explicit 422 and are never replaced with an empty baseline. `[[suppressions]]` from the same config apply to both scan types.
-- Results add `policy` (baseline counts, suppression rules/diagnostics, emitted status counts, unclassified count), `resolved` entries and per-finding `status`/`requires_attention`/`previous`/`suppression`. Counts are derived from returned findings and only emitted statuses are shown, so a suppression-only scan does not pretend to have a baseline. The source and dataset HTML reports include the same policy section.
-- The UI gains a shared baseline field with config feedback, status filters and summaries for both panels, status chips, previous/suppression details and a resolved list. Suppression remains visible and is never described as a fix.
-- The workspace stays read-only: it loads and compares baselines but does not create or update them. Explicit, atomic baseline writes remain the CLI's `--write-baseline` / `--update-baseline`. A cancelled source scan skips baseline comparison so partial results cannot look resolved.
-- `Baseline.load` now reports non-UTF-8 files as `BaselineError` instead of leaking a decode error. Extended `tests/test_workspace.py` with config/explicit baseline selection, validation and traversal, all four statuses, suppression-only scans, count consistency, resolved entries, report rendering, and source/dataset parity with the CLI policy result; updated `docs/WORKSPACE.md`.
-
-### Phase 11.2: dataset audits in the workspace
-
-- `leaklens workspace` now audits datasets too: `POST /api/datasets/inspect` lists columns, preview rows and target candidates, and `POST /api/datasets` runs a background audit of a file under the workspace root with the target, threshold, optional held-out dataset, and optional time/group columns.
-- No audit logic was added to `workspace.py`: the request is resolved and guarded with `upload_guard.guard_upload` under the public API's `GuardLimits`, then handed to `public_api.run_audit_job` (or `run_inspect_job` for the preview), so parsing, target validation, detectors, impact, `score()`, the intelligence payload and `report.render` all stay the existing code paths. Results carry two presentation-only additions per finding (`index`, `advice`).
-- The dataset UI is a second panel in the same page: path → inspect → target/threshold/time/group/held-out → audit → trust score, findings grouped by evidence cluster, recommendations, dataset summary, held-out impact, HTML report and raw JSON. Formats the installed parsers cannot read are listed with the reason instead of being offered.
-- A source scan and a dataset audit share one activity slot, so either returns 409 while the other runs. Audit stages are `queued` → `auditing` → `done`/`failed`/`cancelled`; cancellation is honoured while queued and refused with an explicit 409 once `run_audit_job` is running.
-- Engine failures (unknown target/option column, parse errors, oversized frames) keep their `code` and message on the status, results and report endpoints and in the UI instead of being swallowed.
-- Extended `tests/test_workspace.py` with the dataset workflow (engine parity with `run_audit_job` and the CLI trust score, target/threshold validation, held-out impact, formats, traversal, empty/malformed files, serialisation, failures, cross-kind locking, cancellation) and updated `docs/WORKSPACE.md`.
-
-### Phase 11: interactive scan workspace
-
-- Added `leaklens workspace [DIR]`: a local, read-only FastAPI page (`leaklens/workspace.py`, `leaklens/workspace_ui.py`) that scans a file or folder with live per-file progress, cancellation, severity/kind filters, evidence-cluster grouping, source preview, one HTML report and the raw JSON results.
-- The workspace reuses the existing deterministic layers unchanged: `scanner.scan_targets`/`scan_file` for scope and scanning, `Finding.to_dict(root=...)` for fingerprints, `intelligence.analyze_findings` for clusters/links/confidence/recommendations, `leakage.score` for the trust score and `report.render` for the export.
-- Extracted `scanner.scan_targets()` so `scan_path` and the workspace enumerate exactly the same files.
-- Safety: binds `127.0.0.1` by default, all paths must resolve inside the workspace root, one scan at a time (409 otherwise), at most 5,000 files, 1 MB source previews, and a per-file error is recorded without ending the scan.
-- Added `tests/test_workspace.py` (lifecycle, payload and fingerprint shape, cluster coverage, path escapes, busy refusal, cancellation, source windows, report) and `docs/WORKSPACE.md`.
-
-### Scanner traversal: grouped AST index
-
-- `_scan_core`, `scan_cv` and `scan_flow` now iterate a type-grouped index of the cached node tuple (`_node_index`) instead of re-checking every node with `isinstance` in each pass. Grouping keeps `ast.walk` order within each node type, so finding order, stable keys/fingerprints and last-assignment-wins behaviour are unchanged. Direct `scan_cv`/`scan_flow` calls keep their public signatures and build the index themselves.
-- Measured locally on Windows with Python 3.14.3: repeated `scan_path("leaklens")` over 65 files fell from 0.192–0.203 s to 0.150–0.158 s (~22%). Cold scans stay ~0.66 s because `ast.parse` dominates, and warm peak memory stays ~0.42 MiB because the index is transient per file.
-- The index is deliberately not stored in the source cache: it would save ~10 ms per warm scan but retain an extra reference per cached node. A descendant index for `_all_names`/`_strings` was also rejected because per-node descendant lists would cost far more memory than the ~45 ms they could save.
-- Added tests for index-versus-walk equivalence, indexed versus plain pass output, cached AST immutability, deterministic ordering and fingerprints, nested scopes and malformed sources.
-
-### Scanner performance: shared parse and bounded source cache
-
-- `scan_source` now parses each input once and shares the AST, its walked node tuple and the stable structural keys across the core, flow and cross-validation passes instead of parsing and walking three times and recomputing the same digests. Direct `scan_cv`/`scan_flow` calls keep their previous public signatures and behavior.
-- Added a process-local, bounded parsed-source cache keyed by the exact SHA-256 of the text, not by mtime or size. Edits and file replacements miss immediately; identical content under different labels reuses only the tree and keys, so locations and findings stay label-aware. The cache is thread-safe, capped at 128 entries / 2,000,000 source characters, skips inputs over 1,000,000 characters, and never caches malformed sources.
-- Measured locally on Windows with Python 3.14.3: cold `scan_path("leaklens")` over 65 files fell from 1.70 s to ~0.68 s (~60%); a repeated scan in the same process fell to ~0.19 s (~89%). A 50k-row dataset scan stays dominated by scikit-learn cross-validation (~0.20 s), while feature and near-duplicate hashing cost ~19 ms and ~16 ms, so the new work targets the measured scanner bottleneck rather than changing dataset detectors.
-- Parallel scanning was measured and rejected: for the same 65 files a 4-worker process pool took 2.84 s and a 4-worker thread pool 1.00 s versus 0.54 s sequential. Windows spawn overhead and the scan's Python-level AST work outweigh the benefit at this granularity, so sequential order and output remain the default.
-- Added regression tests for cache hits/misses, changed and replaced files, unchanged output versus an uncached scan, duplicate content under different labels, malformed and missing files, thread safety, deterministic findings/fingerprints, and entry/source/character limits.
-
-### Unified baseline intelligence (0.14.0 phase 10 wave 7)
-
-- Evidence identity is now location-neutral: lines, notebook cells, finding indices and rebuilt evidence ids no longer decide identity, so a finding that only moved lines is `unchanged` and reports `changes: ["location"]` with `baseline_location`, `current_location` and `location_changed`. Genuine source, kind, description, support or metadata changes still classify as `changed`; fingerprint-bearing evidence keeps fingerprint identity.
-- Fingerprint-less evidence uses a content digest plus the file/feature part of its location, so identical findings in different files remain distinct. Duplicate records continue to be matched by deterministic ordinal and a differing duplicate count emits a warning instead of guessing.
-- Added an explicit completeness model (`Completeness(state, reasons)`) serialized under `summary.completeness`. Legacy snapshots without detail derive `complete`/`incomplete` from the existing boolean, so version 1 snapshots still load. Comparison exposes `baseline_completeness`, `current_completeness`, `context_compatible`, and `completeness` in JSON; missing evidence is `uncertain`, never `resolved`, when either side is incomplete or the context differs.
-- Truncated evidence links are now tracked exactly (`EvidenceGraph.links_truncated`), propagate through `IntelligenceReport` without changing its public payload, and make a scan incomplete for comparison purposes.
-- Legacy API (`POST /scan`, `POST /audit`) and the public live-scan API now accept opt-in `graph_baseline` plus `include_graph_snapshot`. Comparison reuses `GraphSnapshot`/`compare_graph_snapshots()`, validates schema and size (2 MiB), rejects malformed snapshots with 422/413, never touches the filesystem or persists requests, and keeps default payloads unchanged. `GET /capabilities` advertises the opt-in fields and limit.
-- Config gains a strict opt-in `[graph]` table: `enabled`, `baseline`, `snapshot`, `update_snapshot`, `fail_on_new`. Other graph keys require `enabled = true`; paths must be project-relative/inside the config directory, the baseline must exist, and snapshots are never replaced without `update_snapshot`. Explicit CLI flags remain authoritative.
-- CLI, JSON, HTML and SARIF now derive from the same comparison result: terminal output prints locations and completeness reasons, HTML shows location moves and incomplete-scan reasons with escaping, JSON carries completeness, and SARIF run metadata includes snapshot completeness plus the compact comparison summary (`moved` count included).
-- Added regression tests for line movement, unrelated insertions, different files, duplicates, conservative ambiguous matches, genuine changes, complete/incomplete/unknown scans, legacy snapshot loading, API validation/size limits, config parsing/precedence, HTML location/completeness rendering, SARIF completeness and link truncation.
-
-### Baseline-aware evidence graph comparisons (0.14.0 phase 10 wave 6)
-
-- Added `leaklens/intelligence/graph_baseline.py`: validated, deterministic evidence-graph snapshots (`schema: "leaklens-evidence-graph"`, version 1, separate from the existing `--graph-out` JSON) and `compare_graph_snapshots()`. Snapshots record evidence, clusters, links, finding fingerprints, completeness, tool version, fingerprint schema and the analysis context.
-- Comparison matches evidence by stable finding fingerprint and role/kind, never by list position or display id. It classifies evidence as `new`, `unchanged`, `changed`, `resolved` or `uncertain`, reports content and relationship changes, tracks cluster changes, keeps duplicates with deterministic ordinals, and tolerates reordered findings, rebuilt evidence ids, reordered links and identical re-runs without false changes.
-- Missing baseline evidence is reported as `uncertain` instead of `resolved` when either scan was incomplete (for example a `parse_error`), the analysis context differs (target, test, group, time, split column, dialect, threshold or drift mode), or a dangling link was skipped. Tool-version drift is a warning; fingerprint-schema and snapshot-version mismatches are refused.
-- Snapshot persistence is strict and local: unknown keys, wrong types, malformed JSON, non-UTF-8 input, oversized files, unknown evidence references and unsupported versions exit 2 with a clear message. Writes are atomic and refuse directories, symlinks and missing parents; an existing snapshot is never replaced without `--update-graph-snapshot`.
-- CLI: new `--graph-baseline PATH`, `--graph-snapshot PATH`, `--update-graph-snapshot` and `--fail-on-graph-new`. Baseline and snapshot flags imply `--intelligence`; human output prints counts and only non-unchanged evidence, `--json` adds a `graph_baseline` object, and `--html` renders a comparison section. The only new gate is opt-in `--fail-on-graph-new` (new evidence only); default findings, scores, severities and exit codes are unchanged.
-- SARIF gains compact, opt-in graph metadata: per-result `properties.leaklens.graph` with `evidence_ids`, `evidence_count` and optional comparison `state`, plus a run-level summary/comparison under `properties.leaklens.graph`. Evidence bodies, rationales and the full graph are not duplicated; output without graph options keeps its previous shape and stays deterministic.
-- Added regression tests for snapshot round-trip/determinism, atomic writes and overwrite refusal, all five states, reordering and id changes, duplicate fingerprints, relationship-only and cluster changes, incomplete/context incompatibility, empty graphs, malformed/oversized/non-UTF-8/schema-mismatched snapshots, CLI comparison and error paths, the opt-in gate, exit neutrality, HTML escaping and SARIF graph metadata.
-- Updated `docs/INTELLIGENCE.md` and the README with the snapshot workflow, state meanings, uncertainty rules, SARIF/CI usage and interpretation limits.
-
-### Inspectable evidence graphs and SQL lineage fixes (0.14.0 phase 10 wave 5)
-
-- Added deterministic graph exploration to `EvidenceGraph`: `evidence_by_id`, `cluster_for(finding_index)`, `neighbors(evidence_id)` (relation, direction, record), `relation_counts()` and `summary()`. Unknown ids return empty results, neighbours are ordered by evidence id then relation, and no operation mutates the graph. `IntelligenceReport.to_graph()` returns the same graph without recomputing it.
-- Added portable graph exports: `EvidenceGraph.to_mermaid()` and `.to_dot()` render clusters as subgraphs, evidence as nodes and relations as edges; JSON export uses the existing `to_dict()`. Node ids are positional and stable, labels are collapsed and escaped (quotes, backslashes, brackets and pipes), dangling links are skipped, and empty graphs render valid empty documents.
-- CLI: `--graph-out PATH` writes the evidence graph and implies `--intelligence`; `.mmd`/`.mermaid`/`.md` infer Mermaid, `.dot`/`.gv` infer DOT and `.json` infers JSON. `--graph-format {mermaid,dot,json}` overrides inference. Unknown extensions, unwritable paths and missing directories exit 2 with a clear message. Graph export never changes findings, the trust score, the exit code or the input file.
-- HTML reports gain an "Evidence links" table (source, relation, target, rationale) beside the existing cluster table, with a per-cluster evidence count; all values keep the existing escaping.
-- Both API surfaces expose the graph only on request: legacy `POST /scan` takes `intelligence=true` and `POST /audit` takes `intelligence=true`; the public API takes `include_intelligence=true` for `/audit` and `/scan`. Default payloads are unchanged, graph data is JSON-serializable, and `GET /capabilities` advertises intelligence as opt-in.
-- Fixed SQL lineage correctness: quoted identifiers (`"label"`, backticked BigQuery names, table-qualified names and doubled-quote escapes) are decoded from the parsed lineage leaves, so quoted target columns are detected in all four dialects; single-quoted string literals are never treated as identifiers. Every SELECT branch of `UNION`, `UNION ALL`, `INTERSECT` and `EXCEPT`, including parenthesised and nested combinations, is now analysed, while repeated statements and repeated branches still collapse to one fingerprint-stable finding.
-- Fixed detector-evidence links: a `supports` link now points at the primary record of the finding the detector evidence was attached to, not at the cluster representative. Detector records with a missing or unknown finding index produce no link instead of an invented target.
-- Added regression coverage for graph traversal, neighbour ordering, Mermaid/DOT escaping and determinism, empty graphs, CLI success/format/path/exit neutrality, HTML link rendering, both API opt-in paths, quoted SQL identifiers across dialects, all set-operation types, nested branches, duplicate collapse, and detector-link mapping.
-
-### Evidence-graph intelligence (0.14.0 phase 10 wave 4)
-
-- Added `leaklens/intelligence/provenance.py`: a deterministic evidence graph over existing findings. `anchor_for` maps a finding to an inspectable anchor using the detector manifest and fingerprint normaliser (`dataset:<feature>`, `split[:<feature>]`, `file:<path>`, `image`, `finding:<kind>`); code findings group by file, not line. `build_evidence_graph` groups findings into `EvidenceCluster`s, links existing evidence records (`supports`, `corroborates`, `same_anchor`), orders clusters deterministically (priority, confidence, anchor) and caps links at 400.
-- Added validated `EvidenceCluster` and `EvidenceLink` contracts in `leaklens/intelligence/schemas.py`. Clusters copy severity and priority from the underlying findings and reference existing finding indices and evidence ids; they cannot invent findings, severities or unbounded aggregates.
-- Detector evidence is preserved in `leaklens/intelligence/context.py`: the historical `scanner-000000` primary record keeps its id and metadata, and every attached detector record becomes a stable `scanner-000000-e01` record with `role=detector` and a mapped source. New `primary_evidence`, `detector_evidence` and `evidence_for_finding()`; `finding_count` still counts distinct findings.
-- Added `assess_cluster_confidence` in `confidence.py`: the existing heuristic over one primary record per finding plus capped corroboration bonuses for distinct finding kinds (+0.03 each, max 3), detector records (+0.02 each, max 3) and multiple surfaces (+0.02), clamped to 0.95. The existing `assess_confidence` formula and its asserted scores are unchanged, and whole-report confidence still uses one primary record per finding, so its previous output is preserved.
-- `IntelligenceReport` gains additive `clusters` and `links`; `analyze_findings` builds the graph once from the shared context. Measured `DatasetImpact` notes are routed to the split, group or time cluster they describe instead of only being reported globally.
-- CLI: `--intelligence` prints the cluster count, top clusters with their priority and confidence, measured impact, and the first matching next step and verification. The trust score and exit code are unchanged. HTML gains an "Evidence clusters" table with escaping; JSON output is additive and deterministic. No new dependency, network call or model.
-- Added `docs/INTELLIGENCE.md` covering anchors, both confidence formulas, guarantees and limitations, and linked it from the README and the experimental AI documentation.
-- Tests cover anchor mapping, clustering, link bounds and relations, detector-evidence preservation, cluster confidence, measured-impact routing, determinism, and CLI/JSON/HTML integration.
-
-### Optional SQL lineage and drift diagnostics (0.14.0 phase 10 wave 3)
-
-- Added `leaklens/sqlscan.py`: optional, offline SQL analysis using SQLGlot (MIT, evaluated at 30.17.0; optional extra `sql = ["sqlglot>=25"]`). It parses SQL text only — no execution, database connection or credentials. Rules: `sql_target_as_feature` (high, confirmed lineage), `sql_future_window` (medium, frame ends with `FOLLOWING`), `sql_split_predicate_missing` (low, declared split column on a known table but no predicate) and `sql_unresolved_column` (low diagnostic for ambiguous/unavailable lineage). Reuses `parse_error` for unparseable input. Dialects are explicit (`ansi`, `postgres`, `bigquery`, `snowflake`) with no silent fallback; unsupported dialects are rejected at the CLI/config/API boundary. Conservative contract: only confirmed lineage flags a target, bare projections/renames/filters are clean, and unresolved lineage (including `SELECT *` without a schema and unqualified columns over several tables) fails safe with a diagnostic. Bounded to 20 statements and 200 projections per statement; evidence never includes string literals; structural stable keys keep fingerprints stable when lines move.
-- Added `leaklens/drift.py`: opt-in train/test distribution-drift diagnostics using pandas/numpy only (no SciPy). Two-sample KS for numeric columns, total-variation distance over the top-k categories for categorical columns, and missingness-rate delta for every column; one low `distribution_shift` finding per column with aggregate evidence only. Safeguards: `min_rows` on both splits, `min_effect` floor, deterministic evenly spaced subsampling above `max_rows`, column and category caps, constant/fully-missing/unsupported/target columns skipped, `skipped`/`insufficient_data` statuses instead of findings.
-- Added an additive `Finding.diagnostic` flag (serialized only when true). `leakage.score()`, the default CLI exit gate, and existing findings are unchanged; diagnostics never count toward the score. SARIF exposes `properties.leaklens.diagnostic`, HTML renders a drift section only when the audit ran, and the JSON report gains an additive `drift` object.
-- CLI: `--sql`, `--sql-dialect {ansi,postgres,bigquery,snowflake}` and `--drift`. Explicit `.sql` files are analyzed; folders need `--sql` or `[sql].enabled`. Missing SQLGlot reports the install command instead of silently skipping. `leaklens init` documents the new tables.
-- Configuration: strict `[sql]` (`enabled`, `dialect`, `split_column`, bounded `schema`) and `[drift]` (`enabled`, `min_rows`, `min_effect`, `max_rows`, `max_columns`, `max_categories`). Unknown keys, invalid dialects, empty schemas and out-of-range values exit 2.
-- API: `POST /scan` dispatches `.sql` names to the SQL scanner with optional `dialect`, `target`, `split_column` and `schema_map` (HTTP 422 when SQLGlot is missing or options are invalid); `POST /audit` accepts an optional `test` upload and `drift=true`, returning an additive `drift` report with an identical trust score.
-- Added `leaklens/bench_sql.py` + `docs/SQL_BENCHMARK.md`: 19 deterministic labeled SQL cases (5 leaky / 14 clean) across dialects, CTEs, joins, unions, aggregates, windows, split filters and deliberately ambiguous input. Measured precision/recall/F1 1.00, false-positive rate 0.00 (TP/FP/TN/FN = 5/0/14/0). The benchmark reports `unavailable` and exits 0 when SQLGlot is absent, so the default CI matrix stays green; a dedicated CI job installs `.[dev,sql]` and runs it.
-- Added `leaklens/bench_drift.py` + `docs/DRIFT_BENCHMARK.md`: 10 deterministic labeled pairs (4 leaky / 6 clean) covering numeric, categorical, missingness and high-cardinality shifts plus identical, small-sample, constant, all-missing, target-ignored and no-test controls. Measured precision/recall/F1 1.00, false-positive rate 0.00.
-- Added `docs/SQL_LINEAGE.md` and `docs/DRIFT.md` with rules, the feasibility-gate result, supported dialects, limitations, safeguards and interpretation. Manifest/docs regenerated for the four new kinds; tests cover missing-dependency behavior, dialect rejection, conservative lineage, diagnostics, privacy, fingerprints, drift safeguards, config/CLI/API/SARIF/HTML integration and the benchmark contract. These are strong synthetic controls and do not estimate real-world accuracy.
-
-### Reliable auditing workflow (0.14.0 phase 10 wave 2)
-
-- Added `leaklens/baseline.py`: a versioned, deterministic JSON baseline (`schema: "leaklens-baseline"`, version 1, `fingerprint_schema: 1`) that records only stable fingerprints plus finding kind, severity and column. Loading is strict (unknown keys, duplicates, malformed JSON and non-integer versions are rejected with the file location); a baseline written with a different fingerprint schema is refused instead of compared. Writes are atomic (`mkstemp` + `fsync` + `os.replace`), refuse directories, symlinks and missing parents, and never overwrite without an explicit update. Comparison classifies findings as new, unchanged, changed (same identity, different severity) or resolved (recorded but no longer present).
-- Added `leaklens/suppression.py`: exact-fingerprint rules with a required reason and optional ISO expiry. There are no wildcards. Duplicate rules, invalid fingerprints, missing reasons and malformed dates fail closed; expired rules and rules that match no current finding are reported as diagnostics and never applied. Suppression only labels a finding — severity, evidence, fingerprint and kind are untouched, and the finding stays in JSON, SARIF and HTML with `status: "suppressed"` and the rule reason.
-- Added `leaklens/config.py` and made `.leaklens.toml` real: a strict schema for the existing flags, `[baseline]`, `[[suppressions]]` and `[missingness]`. Precedence is defaults < configuration < explicit CLI flags, the file is discovered as `./.leaklens.toml` unless `--config` is given, paths are resolved relative to the file and output paths must stay inside its directory. Unknown keys, wrong types, invalid values and unsafe paths exit 2 with the offending location. No code execution, plugin loading or network access.
-- Added `leaklens/missingness.py`: conservative target-, split- and group-aware missingness checks. `missingness_target_signal` and `missingness_split_shift` are capped at medium; `missingness_group_signal` is low. Every signal needs minimum rows/missing/present counts and an effect-size floor (`z >= 3`, rate difference or correlation thresholds). Insufficient samples, constant columns, entirely missing columns and missing split metadata are reported as skips. Evidence contains only aggregate rates and counts — never raw rows or group identifiers — and the detector never imputes or changes the data or split. Uses pandas/numpy only (no SciPy) with linear-time per-column work.
-- Added `leaklens/policy.py`, shared by the CLI and API: it applies baselines and suppressions without duplicating findings or mutating them, exposes the active subset that drives `leakage.score()` and the default exit gate, and serializes statuses and diagnostics.
-- CLI: new `--config`, `--baseline`, `--write-baseline`, `--update-baseline` and `--fail-on-new`. Machine-readable output gains additive `policy`, per-finding `status`/`suppression` and a separate `resolved` list only when a policy is used; human output adds baseline counts, suppression counts and status suffixes. `init` now writes a starter that documents the policy and missingness tables, and `doctor` validates `.leaklens.toml` (including an explicit `--config PATH`).
-- API: `/scan` accepts an optional baseline document and suppression list; `/audit` accepts both as optional JSON form fields and always includes an additive `missingness` report. Invalid policy returns 422. Existing fields and meanings are preserved; `policy`/`resolved` appear only when requested. SARIF gains optional status/suppression metadata and keeps its exact previous shape with no policy. HTML gains a policy section and a status column only when status data exists.
-- Default behavior is unchanged: exit 1 for a high-severity active finding or a trust score below `--fail-under`; suppressing a high finding removes it from that gate, while `--fail-on-new` (or `[baseline].fail_on_new`) is the only new, opt-in failure mode.
-- Added `leaklens/bench_missing.py` + `docs/MISSINGNESS_BENCHMARK.md`: 10 deterministic labeled cases (6 leaky / 4 clean) covering binary, string and numeric targets, split shift, a feature absent from train, group association and four safeguards. Measured precision/recall/F1 1.00, false-positive rate 0.00, no misclassified cases. These are strong synthetic controls and do not estimate real-world accuracy.
-- Added tests for baseline serialization/validation/atomic writes/schema refusal/comparison, suppression exactness/expiry/duplicates/privacy/no mutation, configuration schema/precedence/discovery/path confinement/init safety, missingness signals/safeguards/determinism/privacy, the labeled benchmark, the CLI policy workflow and exit codes, SARIF/HTML/API additive output, and manifest coverage for the three new kinds (40 total).
-
-### Reliable CI findings (0.14.0 phase 10 wave 1)
-
-- Added `leaklens/evidence.py`: immutable, bounded, JSON-safe `Evidence` records (`source`, `kind`, `description`, optional `location`/`observed`/`expected`) with control-character rejection and a hard cap of 16 records per finding. Evidence explains why a detector fired; it never carries raw dataset values, credentials, image bytes or full source.
-- Added `leaklens/fingerprint.py`: deterministic, domain-separated SHA-256 over a versioned canonical form (`schema=1`, detector kind, surface, repo-relative POSIX path, affected feature, optional detector-supplied stable key). Line numbers, notebook cells, detail text, timestamps and observed counts are excluded, so moved lines keep their identity while a moved file, changed kind or changed feature does not.
-- Migrated `target_leakage`, `split_overlap`, `temporal_leakage`, `group_overlap`, `near_duplicate_overlap` and `image_overlap` to emit evidence. Their counts, ratios and bounds are reported without copying rows, identifiers, timestamps or image data.
-- Added `leaklens/manifest.py` and generated `docs/DETECTORS.md`: every one of the 37 emitted finding kinds now records its surface, default severity, advice key, benchmark case or explicit `no_bench_reason`, documentation anchor and introduced version. `tests/_meta/test_detector_contract.py` scans the production emitters, validates the manifest, checks every benchmark name and fails on a deliberately unknown kind.
-- JSON findings gain additive `evidence` and `fingerprint` fields; SARIF gains `properties.leaklens.evidence` and `partialFingerprints["leaklensFinding/v1"]`; the FastAPI `/audit` and `/scan` payloads expose the same fields. Existing fields, finding kinds, severities, `leakage.score()`, CLI exit codes and benchmark expectations are unchanged, and evidence remains optional for third-party callers.
-- Added tests for evidence validation/bounds/privacy, fingerprint determinism across processes and working directories, Windows/POSIX path normalization, line movement, stable keys, manifest contracts, JSON/SARIF determinism and backward-compatible `Finding(...)` construction.
-- Hardened fingerprint identity before release (Wave 1.1): repeated same-kind code findings in one file now receive deterministic stable keys derived from the offending construct's structural AST shape and enclosing function/class (never line numbers or message text), so two `train_test_split` calls or two `cross_val_score` calls no longer share a fingerprint. Dataset and split columns are always canonicalized as features, so columns such as `ratio:1` and `ratio:2` stay distinct. Fingerprint digests for code findings change relative to the initial Wave 1 implementation; the schema and domain version remain `1`.
-
-### AI reliability and false-positive reduction (0.14.0 phase 7)
-
-- Added an independently authored Phase 7 development corpus (`leaklens/ai/corpus_phase7.py`): **40 hard-positive/hard-negative cases in 20 template pairs** that contain the same surface constructs (scaler, `KFold`, `sort_values`, `groupby`, `shift(-1)`, `get_dummies`) but wire them correctly or incorrectly. Every case records provenance, label rationale and limitations; no example is copied from the Phase 5 locked test or the Phase 6 real-world holdout. Development is now **259 cases (136 leaky / 123 legitimate), 174 groups, 19 sources**; training is 219 cases from 15 sources.
-- Added a **frozen 12-case Phase 7 holdout** from 5 further source families, written and frozen before the final fit. It is imported only by the benchmark and its tests, never by training, and was scored once without tuning.
-- Hardened feature extraction in `leaklens/ai/features.py`: fold-local fit detection, target-only encoder fits, `target_in_assignment` excluding model/CV calls, display-only statistics ignored, group boundaries that require an identifier in the modelling frame, temporal indicators that require a real time column before the split, forward-label columns recognised when explicitly dropped, and target-feature risk limited to pre-split assignments. These guards fixed the Phase 6 lookalike errors without loosening any leak detector.
-- Replaced global feature-importance citations with **signed local log-odds contributions** (`LearnedModel.local_contributions`) derived from the fitted scaler and coefficients, with an occlusion fallback for non-linear candidates. Hypotheses now cite only signals active in that unit, list opposing signals, report a margin and an uncertainty band, and mark low-margin units `[needs review]` with reduced confidence. Global importances remain in the benchmark only.
-- Added a **runtime hypothesis gate**: a learned hint is emitted only when at least one context-aware semantic risk indicator is active, unless a deterministic finding corroborates the unit. Scores driven only by script shape are suppressed at hypothesis level but still reported by the model.
-- Measured after the changes (development): grouped out-of-fold precision **0.955** (from 0.911), recall **0.930** (from 0.863), F1 **0.943** (from 0.887), FPR **0.048** (from 0.095); validation Brier **0.0018**, ECE **0.0251** (from 0.0088 / 0.0655); validation and external transfer remain perfect. The Phase 5 locked test is unchanged at accuracy 0.979, precision 1.000, recall 0.960, F1 0.980, FPR 0.000.
-- Measured on the frozen Phase 7 holdout: accuracy 0.917, precision 0.857, recall 1.000, F1 0.923, FPR 0.167 (TP/FP/FN/TN = 6/1/0/5), Brier 0.0865, ECE 0.1108. The single false positive is a fold-local transformer whose slice fit the extractor cannot tie to a split boundary; it is reported and was not tuned away. The runtime gate on development reaches precision 1.000, recall 0.963, F1 0.981 and FPR 0.000 (TP/FP/TN/FN = 131/0/123/5).
-- Extended `leaklens/bench_ai.py` and `docs/AI_BENCHMARK.md` with the Phase 7 holdout, runtime-gate and local-attribution sections, and updated `docs/AI_INTELLIGENCE.md` and the model card (`leaklens-ai-p7-2026.11`). The Phase 5 locked test and the Phase 6 real-world holdout corpus were not modified, re-labelled or tuned against; the Phase 6 real-world report remains a historical record at its original threshold.
-
-### Real-world AI generalization (0.14.0 phase 6)
-
-- Added a frozen real-world holdout in `leaklens/ai/corpus_realworld.py`: **48 manually reviewed pipeline units** (24 leaky, 24 legitimate) from **12 permissively licensed public repositories**, in **39 pipeline families** and **14 categories**. Every case records repository, licence, commit-pinned URL, path, retrieval date, provenance class and a label rationale. Four cases are verbatim excerpts; 44 are reviewed reconstructions and are labelled as such. `docs/REALWORLD_CORPUS.md` records provenance, labelling method, freeze digest and limits; `docs/realworld_holdout.json` is the machine-readable freeze record. A post-freeze provenance audit resolved 16 of 23 cited paths at their pinned commits; the seven unresolved citations (13 reconstruction cases) are listed in `docs/REALWORLD_CORPUS.md`. The corpus was not edited, so the digest and measured scores are unchanged.
-- Split the corpus by repository and pipeline family. No holdout repository appears in the authored training, validation or Phase 5 locked-test corpora. The Phase 5 locked test is unchanged. The holdout was frozen in commit `d3209e1` before the Phase 6 feature and model changes in this change set.
-- Added `leaklens/ai/realworld.py` + `leaklens/bench_realworld.py`: single-pass evaluation with confusion matrices, per-category, per-repository, per-family and per-provenance metrics, Wilson intervals, repository-cluster bootstrap intervals (2,000 resamples), Brier score and expected calibration error, and every false positive/miss with its probability, active features, traceable code lines and label rationale. Reports are written to `docs/AI_REALWORLD.md` and `docs/AI_PERFORMANCE.md`.
-- Expanded the feature extractor from 98 to 112 indicators (108 used by the model) with Phase 6 signals for functional and hand-written scaling, full-frame `fillna`, `get_dummies`, CV on the test partition, `GroupKFold` without `groups`, repeated test scoring, frequency encoding, default shuffle after sorting, fold-local fitting, search over a pipeline, one-hot-only preprocessing, train-only transformer fitting and safe target lags (`leaklens/ai/features.py`). Added 34 Phase 6 development cases in 17 leaky/legitimate pairs (`corpus_phase6.py`) covering the Phase 5 external errors; development is now 219 cases across 154 groups.
-- Compared 11 candidates on grouped CV and validation: the existing logistic regression, L1 and class-balanced variants, shallow random forests, extra trees, gradient boosting and histogram gradient boosting. Class-balanced logistic regression was selected on validation; the model remains a single CPU-only linear pipeline with no GPU, network or serialized weights. No NLP/deep-learning candidate was adopted because no independent evaluation showed a measurable benefit. The runtime path fits only that frozen candidate (about 0.4 s cold locally); the full 11-model comparison is a benchmark step, so an opt-in API request stays inside the server timeout.
-- Measured on the frozen holdout: **accuracy 0.833, precision 0.767, recall 0.958, F1 0.852, FPR 0.292** (TP/FP/FN/TN = 23/7/1/17). The report lists all 7 false positives and the single miss, per-category metrics, cluster intervals and calibration (Brier 0.115, ECE 0.126). This is reported as measured; it is **not** a production-accuracy claim and it is lower than the authored locked test.
-- Added a separate smoke check on **real public notebooks**: 8 notebooks with definitive hand labels from `realworld/` score 5/5 leaky and 2/3 legitimate (accuracy 0.875, precision 0.833, recall 1.000). The sample is tiny, non-random and belongs to the earlier scanner corpus; the report says so.
-- AI hypotheses now cite the code lines that activated the strongest model signals, name the top signal in the title, and carry the calibrated probability and global feature importances as evidence. They remain separate from deterministic findings and capped at `medium`.
-- Root-cause grouping now covers every Phase 6 finding kind: tuning on test/full data, CV on the test partition, test-set reuse, `GroupKFold` without groups, preprocessing/resampling outside the CV loop, shuffled temporal splits and out-of-order notebook execution. Each has specific actions, verification steps and (where useful) a corrected code hint.
-- Added `docs/AI_PERFORMANCE.md`: cold training, feature extraction and batch/single-row inference latency, peak memory and model footprint on the holdout and on a 49-file project scan (Python 3.14, Windows). Inference is CPU-only and sub-millisecond per unit.
-- CI now runs `python -m leaklens.bench_realworld`.
-
-### Experimental AI intelligence (0.14.0 phase 5)
-
-- Rebuilt the learned detector's feature extractor (`leaklens/ai/features.py`) from 61 to 98 interpretable indicators (94 used by the model), adding split/fit *ordering*, frame identity (train vs test vs all rows), target-derived columns, duplicate handling, grouping, temporal order and EDA-only summaries. `log_lines`, `log_bytes`, `has_random_state` and `target_column_passed` are deliberately excluded from the model so results cannot depend on corpus size or incidental flags.
-- Split the authored corpus by scenario source and template family into disjoint sets: 145 training cases from 9 sources (`leaklens/ai/corpus.py`), 40 validation cases from 4 further sources (`corpus_validation.py`) and a 47-case locked test from 4 more sources (`corpus_test.py`) that training never imports. Development totals are 185 cases across 137 template groups. Near-duplicate and feature-identical examples were co-grouped so no grouped fold can see one copy on each side.
-- Reworked training (`leaklens/ai/learned.py`): eight lightweight candidates are compared with grouped cross-validation, the winner is confirmed on validation, probabilities are calibrated with a Platt sigmoid fitted on grouped out-of-fold scores, and the decision threshold is chosen on validation only. The locked test is evaluated once at the frozen threshold.
-- Added an independent locked-test protocol to `leaklens/bench_ai.py` and `docs/AI_BENCHMARK.md`: split-integrity checks (shared sources/groups/duplicates), candidate table, train/validation/locked-test metrics and confusion matrices, per-category and per-source results, calibration, named mistakes, external transfer, overfitting checks and limitations. Phase 4 baseline numbers are reproduced in the same report.
-- Measured locked independent test (47 unseen cases): accuracy 0.979, precision 1.000, recall 0.960, F1 0.980, false-positive rate 0.000 (TP/FP/FN/TN = 24/0/1/22). Validation: 21/0/0/19. Grouped out-of-fold training: accuracy 0.897, F1 0.901. External transfer to the existing scanner cases: F1 0.881. The single locked-test miss is a random split over repeated applicants whose only cue is an unseen identifier name; it was not tuned against.
-- Fixed feature-importance reporting to read the *fitted* pipeline instead of the unfitted spec, so the reported global signals are meaningful rather than uniform.
-- Extended `ModelCard` with version, validation example count, calibration, candidate and protocol fields, and rendered them in the HTML report. The AI layer remains opt-in and never changes deterministic findings, severity, the trust score or the exit code.
-
-### Experimental AI intelligence (0.14.0 phase 4)
-
-- Added the optional, offline `leaklens.ai` package. It is opt-in (`--ai`, `--ai-llm`, `include_ai=true`, Python `leaklens.ai`) and never changes deterministic findings, severity, the trust score or the exit code.
-- Added deterministic semantic rules (`leaklens/ai/semantics.py`) over code, notebooks and dataset metadata: concat-before-split, target-derived features, future fills, centered windows, negative shifts, runtime clocks, target-proxy and future-information names, identifiers and shared train/test keys. Code is parsed, never executed.
-- Added a small in-memory CPU gradient-boosted detector (`leaklens/ai/learned.py`) over 61 interpretable indicators, trained on a 72-case/26-group labeled corpus (`leaklens/ai/corpus.py`). Groups never cross folds; the model is never serialized or loaded. The shipped threshold is fixed at 0.65 so behavior is stable across scikit-learn releases.
-- Added strict evidence-bound schemas (`leaklens/ai/schemas.py`): confidence ≤ 0.95, severity hints capped at medium, unique evidence ids, validated group/hypothesis/evidence cross-references, control-character rejection, and an explicit `changes_deterministic_findings: false`.
-- Added root-cause grouping, remediation actions, code hints and verification steps (`leaklens/ai/reasoning.py`). Optional `--ai-llm` rephrasing receives sanitized group metadata only and falls back deterministically on provider failure, malformed JSON, invented group ids or unsupported safety claims.
-- Prompt-injection defense: instruction-like comments and column names are reported as an `info` `untrusted_instruction` hypothesis and never followed. Dataset analysis receives metadata only, never rows or values.
-- Integrated with the CLI (`--ai`, `--ai-llm`, JSON `ai` object, text summary, safe fallback warning), the HTML report (escaped, separate experimental section), the public live-scan API (`include_ai` on `/audit` and `/scan`, AI capability declaration) and the website live page (opt-in checkbox, separate `textContent` rendering).
-- Added `leaklens/bench_ai.py` + `docs/AI_BENCHMARK.md` with grouped cross-validation precision/recall/F1/FPR, external transfer to the existing scanner cases, a threshold sweep, semantic regression results, top signals, explicit false positives/misses and limitations. CI runs it. It is explicitly **not** an improvement claim.
-- Added `docs/AI_INTELLIGENCE.md`, README and docs-site sections, and tests for schemas, semantics, learning discipline, reasoning/fallback, orchestration, CLI/report integration, the public API, the site and the benchmark.
-
-### Deployment readiness (0.14.0 phase 3.1)
-
-- Validated `render.yaml` against Render's published Blueprint JSON schema and replaced the deprecated `autoDeploy: true` with `autoDeployTrigger: checksPass`, so a push to `main` redeploys the backend only after GitHub Actions passes. Added a `buildFilter` so docs-only or site-only commits do not rebuild the API.
-- Documented the exact owner-run deployment path in [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md): the Render Blueprint shortcut, free-plan review, `/health` and `/capabilities` checks, `scripts/smoke_public_api.py --url`, the `?api=` test, the `live-config.js` switch and the rollback to disconnected.
-- `scripts/build_site.py` and `tests/test_site.py` now accept an empty `apiBase` or a clean HTTPS origin in `docs/assets/live-config.js`; credentials, paths, queries and plain HTTP are rejected. The default remains empty and the deployed site remains disconnected.
-- Built and ran `Dockerfile.api` locally (Linux image, non-root uid 10001, healthy, one worker). The real-HTTP smoke test and additional end-to-end checks passed against the container: real findings and score arithmetic, clean datasets and clean code, report generation and HTML escaping, CORS allow/deny, malformed and mismatched uploads, traversal, oversized/row-limit rejection, rate limiting, generic errors, and no filesystem changes after uploads. `docker stop` exited 0 in under a second.
-- Drove the actual `docs/live.html` frontend against the container in headless Chrome: `?api=` connection, real `/inspect`, target selection, real `/audit`, rendered score/findings, and an HTML report download all worked with no console errors. That check exposed a null-guard bug in `docs/assets/site.js` on pages with an empty audit container; it is fixed, and `check_site_layout.mjs` now fails on uncaught page errors.
-- **No Render account credentials were available in this environment, so no public backend is deployed and the GitHub Pages site is still disconnected.** The repository cannot deploy itself.
-
-### Live scanning platform (0.14.0 phase 3)
-
-- Added `leaklens.public_api`: a separate hardened FastAPI app for untrusted uploads, with `GET /health`, `GET /capabilities`, `POST /inspect`, `POST /audit` (optional held-out file, group and time columns) and `POST /scan`. It has no `/predict`, no model deserialisation, no accounts and no persistent storage.
-- Added `leaklens/upload_guard.py`: filename sanitisation, extension allowlist, real content sniffing for CSV/JSON/XLSX/Parquet/Feather, ZIP traversal/encryption/expansion checks, and row/column/cell limits applied before and after parsing. Uploads are parsed from an in-memory buffer and are never written to disk.
-- Added request hardening: declared and chunked body-size limits, bounded per-client sliding-window rate limiting (`leaklens/ratelimit.py`), a single-worker scan runner with a wall-clock timeout and `503 scan_busy`/`504 scan_timeout` envelopes, generic error bodies, conservative security headers, CORS allowlisting and stable request IDs.
-- Added `docs/live.html` and `docs/assets/live.js` + `live-engine.mjs`: a real drag-and-drop live scan page with backend connection, client-side validation, column inspection, target/group/time selectors, threshold, real elapsed progress, cancellation, retry/offline states, severity/kind/search filters, audit and measured split-impact panels, and downloadable HTML/JSON reports. It never replays prerecorded fixtures and explicitly says **No backend connected** when no URL is configured.
-- Deployment: `Dockerfile.api` (non-root, one worker, proxy headers, healthcheck), `render.yaml` free Render Blueprint, and [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) with verified free limits, cold starts, environment variables and the security model. No public backend is deployed by this repository; GitHub Pages remains static and disconnected until a URL is supplied.
-- Added `api` extra (`fastapi`, `uvicorn`, `python-multipart`), `scripts/smoke_public_api.py` (real HTTP smoke test), `tests/test_upload_guard.py` (31 tests), `tests/test_public_api.py` (45 tests) and `tests/site/live-engine.test.mjs` (18 tests). CI now has an `api` job and the `site` job runs both Node suites.
-- Updated the site navigation, landing hero, docs, report link, 404 page and README, and extended `build_site.py`, `test_site.py` and `check_site_layout.mjs` to validate the live page and reject a hard-coded backend URL.
-
-### Website and demo (0.14.0 phase 2)
-
-- Rebuilt the GitHub Pages site in `docs/` as a real product site: landing page, interactive demo, documentation, example report and a 404, all hand-written HTML/CSS/ES modules with no bundler, external font or third-party script.
-- Added `docs/demo.html`, which replays verified scanner output for seven fixtures (leaky and safe code, leaky and clean transaction tables, exact and normalised split overlap). Every result is labelled **prerecorded**; the page states that GitHub Pages cannot execute Python and shows the live CLI command for each fixture.
-- Added `scripts/build_site_fixtures.py` (deterministic fixtures from `scan_source`, `leakage.scan/score`, the overlap checks and `fixes.advice`) and `scripts/build_site.py` (regenerate + validate links, fragments, assets, landmarks, version and score arithmetic). CI fails when the recorded output drifts.
-- Added a dependency-free canvas 3-D field on the landing page built from real rows in the split fixture, with drag/keyboard rotation, duplicate highlighting and reduced-motion/offscreen pausing.
-- Added `examples/safe_pipeline.py`, the corrected pipeline used as the clean code fixture.
-- Added frontend tests: `tests/test_site.py` (fixtures, links, accessibility landmarks, JS syntax) and `tests/site/demo-engine.test.mjs` (Node's built-in runner). A new `site` CI job runs `build_site.py --check` and the Node tests; `scripts/check_site_layout.mjs` performs local desktop/tablet/mobile checks in headless Chrome or Edge.
-- README now points at the new site, demo and documentation, and explains how to regenerate the fixtures.
-
-### Detection engine (0.14.0 phase 1)
-
-- New `leaklens/partition.py`: infers train/test/validation roles from `train_test_split` unpacking, name hints (`test`, `holdout`, `te`) and cheap aliases. Tuning on an arbitrarily named second return value is now caught; a validation split is deliberately treated as legitimate.
-- Hyperparameter tuning and test-set reuse (`leaklens/cvcheck.py`):
-  - `tuning_on_test_data` (high) now also covers hand-rolled `for C in [...]` loops fitted on the test partition.
-  - `tuning_before_split` (medium): a search or CV call on the full dataset before the explicit split.
-  - `tuning_on_full_data` (medium): a search fitted on the original frame after the split exists.
-  - `cv_on_test_data` (medium): `cross_val_score`/`cross_validate` over the held-out partition.
-  - `test_set_reuse` (low): the test partition is scored three or more times, i.e. used for model selection.
-  - `group_cv_missing_groups` (medium): `GroupKFold`/group splitter used without `groups=`, including inside `GridSearchCV`.
-  - Nested CV (`cross_val_score(GridSearchCV(...), X_train, ...)`) and tuning on a validation split stay clean.
-- High-cardinality / target-derived encoding (`leaklens/scanner.py`, `flow.py`):
-  - `target_encode_before_split` (high): target means/aggregates pasted into a feature via `map`/`replace`/`merge`, including inline `groupby`, or a `TargetEncoder`/`CatBoostEncoder`/`WOEEncoder` fitted before the split.
-  - `frequency_encode_before_split` (low): `value_counts` mapped into a column before the split; the label is not involved, so this is reported as a suspicious pattern rather than confirmed leakage.
-  - `feature_selection_before_split` (high): `SelectKBest`/`SelectPercentile`/`SelectFromModel`/`RFE`/`SequentialFeatureSelector` fitted before the split (previously misclassified as generic preprocessing).
-- Other gaps:
-  - `temporal_split_shuffle` (high when `shuffle=True`, medium otherwise): `train_test_split` over a frame sorted by a time column with shuffling.
-  - `notebook_out_of_order_execution` (low): non-monotonic `execution_count` in `.ipynb`; also emitted when another cell fails to parse.
-  - `feature_overlap` (high/medium) and `near_duplicate_overlap` (medium) in `leaklens/leakage.py`; the CLI runs exact → feature-vector → normalised near-duplicate checks with bounded sampling (50k/20k rows).
-- Every new finding kind has an `--explain` remediation hint (`leaklens/fixes.py`).
-- Benchmarks:
-  - `leaklens/bench_advanced.py`: 32 new labeled cases (tuning 12, encoding 9, feature selection 5, group CV 2, temporal 4), reported separately so historical 109-case counts stay stable.
-  - `leaklens/bench_data.py`: 12 synthetic dataset cases with precision/recall and per-case runtime (`python -m leaklens.bench_data`).
-  - `docs/DATA_BENCHMARK.md` and the advanced section of `docs/BENCHMARK.md` are generated by those commands; both benchmarks run in CI.
-- Tests: `test_partition.py`, `test_tuning_advanced.py`, `test_encoding_advanced.py`, `test_temporal_group.py`, `test_notebook_order.py`, `test_duplicate_overlap.py`, `test_bench_advanced.py`, `test_bench_data.py` (68 new tests).
+Changes on `main` since the published `0.13.0` release. **The next release has
+not been published.** Draft notes are in
+[docs/releases/0.14.0.md](docs/releases/0.14.0.md); the version, date and
+publication are not yet authorised.
+
+Optional capabilities name the extra they require (`[sql]`, `[yaml]`,
+`[images]`, `[app]`, `[api]`). Diagnostic engines never
+change `leakage.score()`, an existing finding's severity, or the default exit
+gate.
+
+### Added
+
+#### Detection
+
+- **Partition inference** (`leaklens/partition.py`) identifies train, test and
+  validation roles from `train_test_split` unpacking, name hints (`test`,
+  `holdout`, `te`) and cheap aliases, so tuning on an arbitrarily named second
+  return value is caught. A validation split stays legitimate.
+- **Tuning and test-set reuse** (`leaklens/cvcheck.py`): `tuning_on_test_data`
+  now also covers hand-rolled `for C in [...]` loops fitted on the test
+  partition; new `tuning_before_split`, `tuning_on_full_data`,
+  `cv_on_test_data`, `test_set_reuse` and `group_cv_missing_groups`. Nested CV
+  and tuning on a validation split stay clean.
+- **Encoding and feature selection**: `target_encode_before_split`,
+  `frequency_encode_before_split` and `feature_selection_before_split`
+  (`SelectKBest`, `SelectPercentile`, `SelectFromModel`, `RFE`,
+  `SequentialFeatureSelector`).
+- **Temporal and notebook checks**: `temporal_split_shuffle`,
+  `notebook_out_of_order_execution`, and `future_target_feature_before_split`
+  for negative target shifts and centered target rolling windows built before
+  the split.
+- **Split overlap**: `feature_overlap` and `near_duplicate_overlap`, run with
+  bounded sampling (50k/20k rows).
+- **`no_stratify`** low-severity advisory for `train_test_split(X, y, ...)`
+  without `stratify=`. Not flagged: splits that pass `stratify=`,
+  `shuffle=False` ordered splits, single-array splits without separate labels,
+  and `**kwargs` expansions that may carry `stratify`.
+- **Derived-variable dataflow** (#19): the scanner follows multi-hop variables
+  derived from the full dataset (`X2 = X.copy(); X3 = f(X2)` and column
+  selections) and seeds split tracking from cross-validation splitters, so
+  full-data fits behind derived names are reported.
+- Every new kind has an `--explain` remediation hint, benchmark cases and a
+  detector-manifest entry (`docs/DETECTORS.md`).
+
+#### Evidence, baselines and policy
+
+- **Evidence** (`leaklens/evidence.py`): immutable, bounded, JSON-safe records
+  (`source`, `kind`, `description`, optional `location`/`observed`/`expected`)
+  with control-character rejection and a 16-record cap. Evidence explains why a
+  detector fired and never carries raw rows, credentials, image bytes or full
+  source. `target_leakage`, `split_overlap`, `temporal_leakage`, `group_overlap`,
+  `near_duplicate_overlap` and `image_overlap` emit it.
+- **Fingerprints** (`leaklens/fingerprint.py`): deterministic, domain-separated
+  SHA-256 over a versioned canonical form. Line numbers, notebook cells, detail
+  text, timestamps and observed counts are excluded, so moved lines keep their
+  identity. Repeated same-kind code findings get stable keys from the offending
+  construct's structural AST shape and enclosing scope.
+- **Detector manifest** (`leaklens/manifest.py`, `docs/DETECTORS.md`): every
+  emitted kind records its surface, default severity, advice key, benchmark case
+  or explicit reason, documentation anchor and introduced version.
+- **Baselines** (`leaklens/baseline.py`): a versioned, deterministic JSON
+  baseline that records stable fingerprints plus kind, severity and column.
+  Loading is strict, atomic writes refuse directories/symlinks/missing parents,
+  and comparison classifies `new`, `unchanged`, `changed` and `resolved`.
+- **Suppressions** (`leaklens/suppression.py`): exact-fingerprint rules with a
+  required reason and optional ISO expiry. No wildcards; suppression only labels
+  a finding and never changes severity, evidence, fingerprint or kind.
+- **Configuration** (`leaklens/config.py`): a strict `.leaklens.toml` schema for
+  the existing flags plus `[baseline]`, `[[suppressions]]`, `[missingness]`,
+  `[sql]`, `[drift]`, `[graph]` and `[pipeline]` tables. Precedence is defaults <
+  configuration < explicit CLI flags; unknown keys, wrong types, invalid values
+  and unsafe paths exit 2 with the offending location.
+- **Shared policy** (`leaklens/policy.py`): baselines and suppressions are
+  applied once for the CLI and API, without duplicating or mutating findings.
+- **Report schema** (`leaklens/schemas/report-1.schema.json`): JSON Schema
+  2020-12 for the `--json` document and the `text`, `dl` and `images` surfaces.
+  Every JSON report carries `$schema`, and `leaklens schema` prints the same
+  document. Finding and evidence keys are closed so a typo fails validation,
+  while top-level sections stay open to additive growth. Additive: existing
+  fields, scores and exit codes are unchanged. `jsonschema` is a test-only
+  dependency (`[dev]`), not a runtime one; the contract is documented in
+  [docs/REPORT_SCHEMA.md](docs/REPORT_SCHEMA.md).
+- **Audit manifest** (`leaklens/manifest.py`): `--manifest PATH` writes a
+  deterministic, unsigned digest manifest; `leaklens verify MANIFEST` recomputes
+  it offline (exit 0 clean, 1 mismatch, 2 unreadable/unsupported). It detects
+  content changes, not who wrote the manifest. See
+  [docs/AUDIT_MANIFEST.md](docs/AUDIT_MANIFEST.md).
+- **Graph snapshots** (`leaklens/intelligence/graph_baseline.py`): validated,
+  deterministic evidence-graph snapshots and `compare_graph_snapshots()`,
+  exposed through `--graph-baseline`, `--graph-snapshot`,
+  `--update-graph-snapshot` and the opt-in `--fail-on-graph-new` gate.
+
+#### Evidence graph and intelligence
+
+- **Evidence graph** (`leaklens/intelligence/provenance.py`): findings grouped
+  into inspectable `EvidenceCluster`s and `EvidenceLink`s over existing evidence;
+  detector evidence preserved as stable `scanner-000000-e01`-style records;
+  deterministic cluster ordering and a 400-link cap. Additive `clusters` and
+  `links` in `IntelligenceReport`.
+- **Graph exploration and export**: `evidence_by_id`, `cluster_for`,
+  `neighbors`, `relation_counts`, `summary`, plus `to_mermaid()`, `to_dot()` and
+  `to_dict()`. `--graph-out` writes `.mmd`/`.md`, `.dot`/`.gv` or `.json` and
+  implies `--intelligence`; `--graph-format` overrides inference. HTML reports
+  gain an evidence-links table.
+- **Unified baseline intelligence**: location-neutral evidence identity, a
+  completeness model (`summary.completeness`), and conservative `uncertain`
+  comparisons when either side is incomplete or the analysis context differs.
+- **Investigation plans** (`leaklens/intelligence/investigation.py`): an ordered,
+  deterministic plan under `--intelligence` with `inspect_evidence`,
+  `suggested_test`, `missing_evidence` and `narration_slot` steps. Suggested
+  tests name a registered detector kind and question; `missing_evidence` records
+  every skip with a reason and never changes the score.
+- **Monitoring report intake** (`--monitoring-report PATH`): reads a
+  caller-supplied drift/skew JSON report read-only and size-capped. Each
+  breached metric becomes a low, diagnostic `monitoring_drift_report` or
+  `monitoring_skew_report` finding. Missing, malformed, oversized or out-of-root
+  files are counted skips and never change the trust score or the exit gate.
+  See [docs/INVESTIGATION.md](docs/INVESTIGATION.md).
+- **Governance pack** (`leaklens/governance/`): opt-in `--governance` labels
+  every field `asserted`, `measured` or `unknown`, lists its non-claims, and
+  renders to `.json` or `.md` with `--governance-out`. It never adds or rescales
+  a finding. See [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
+
+#### SQL, drift and missingness
+
+- **SQL lineage** (`leaklens/sqlscan.py`, `[sql]` → `sqlglot>=25`, evaluated at
+  30.17.0): offline parsing only, no execution or database connection. Rules
+  `sql_target_as_feature` (high), `sql_future_window` (medium),
+  `sql_split_predicate_missing` (low) and diagnostic `sql_unresolved_column`.
+  Explicit dialects `ansi`, `postgres`, `bigquery`, `snowflake` with no silent
+  fallback; bounded to 20 statements and 200 projections. See
+  [docs/SQL_LINEAGE.md](docs/SQL_LINEAGE.md).
+- **Drift diagnostics** (`leaklens/drift.py`, opt-in `--drift`): two-sample KS
+  for numeric columns, total-variation distance for categorical columns and
+  missingness-rate deltas, one low `distribution_shift` finding per column,
+  pandas/numpy only. See [docs/DRIFT.md](docs/DRIFT.md).
+- **Missingness** (`leaklens/missingness.py`): conservative target-, split- and
+  group-aware signals (`missingness_target_signal` and
+  `missingness_split_shift` capped at medium, `missingness_group_signal` low),
+  aggregate-only evidence and no imputation. See
+  [docs/MISSINGNESS.md](docs/MISSINGNESS.md).
+- **Pipeline and MLOps intelligence** (`leaklens/pipeline.py`, opt-in
+  `--pipeline`, `[yaml]` for DVC files): read-only audit of `dvc.yaml`,
+  `dvc.lock`, `*.dvc`, `*.dag.json`, notebook cell order and requirement pins.
+  Kinds `pipeline_split_overlap` (high), `pipeline_unresolved_lineage`,
+  `pipeline_param_drift`, `pipeline_missing_digest` and
+  `pipeline_unpinned_dependency`. It never runs a stage or imports DVC/MLflow.
+  See [docs/PIPELINE.md](docs/PIPELINE.md).
+- **Text and LLM contamination** (`leaklens text TRAIN EVAL`,
+  `leaklens/analysis/text/`): exact and near-duplicate overlap,
+  hash-only contamination against user-supplied eval fingerprints, static RAG
+  wiring checks and optional user-supplied embedding similarity. Kinds
+  `text_exact_duplicate`, `text_near_duplicate`, `text_eval_contamination`,
+  `rag_index_leakage` and `text_embedding_similarity` are diagnostics. See
+  [docs/TEXT.md](docs/TEXT.md).
+- **Deep-learning and artifact audit** (`leaklens dl DIR`,
+  `leaklens/analysis/dl/`): static inspection of training code, framework
+  configs, checkpoints and requirement pins. Kinds `dl_split_overlap` (high),
+  `dl_training_protocol_mismatch`, `artifact_unsafe_format`,
+  reproducible-seed and dependency-pin advisories. It never imports
+  torch/TensorFlow/Keras/ONNX, unpickles a checkpoint or executes scanned code.
+  See [docs/DL_AUDIT.md](docs/DL_AUDIT.md).
+
+#### AI assistance (optional, experimental)
+
+- **Offline AI layer** (`leaklens.ai`, opt-in `--ai`, `--ai-llm`,
+  `include_ai=true`): deterministic semantic rules, a small CPU-only learned
+  detector, evidence-bound hypotheses capped at `medium`/`0.95`, root-cause
+  grouping and deterministic fallback. It never changes deterministic findings,
+  severity, the trust score or the exit code.
+- **Model artifact** (`leaklens/ai/model.json`): a checked-in, plain-JSON
+  artifact holding the fitted scaler, coefficients, calibrator, threshold,
+  importances and model card. A matching SHA-256, corpus, feature-catalogue,
+  version and scikit-learn check loads it; any mismatch falls back to an
+  in-memory fit. JSON cannot execute code and no pickle is used.
+- **Local explanations**: signed local log-odds contributions, opposing signals,
+  a margin and an uncertainty band; low-margin units are marked `[needs review]`.
+  Global importances remain benchmark-only.
+- **Runtime hypothesis gate**: a learned hint is emitted only when a
+  context-aware risk indicator is active, unless a deterministic finding
+  corroborates the unit.
+- **Investigation narration** (`--intelligence --ai-llm`): fills an
+  investigation plan's `narration_slot` only with evidence ids the plan already
+  carries; malformed or unsupported replies fall back deterministically.
+- **Prompt-injection hardening**: a versioned 47-case synthetic corpus, pinned
+  digests, an offline evaluator, and prompt builders that flatten control
+  characters and reject invented safety/severity verdicts. See
+  [docs/PROMPT_INJECTION.md](docs/PROMPT_INJECTION.md).
+- **Customizable LLM prompt templates** (#256): the default template lives in
+  `leaklens/prompts/explain.txt`; `--llm-prompt-template PATH`,
+  `LEAKLENS_LLM_PROMPT_TEMPLATE` and `.leaklens/prompt.txt` override it.
+
+#### Reporting, API and workspace
+
+- **JSON Schema** for reports plus `leaklens schema` and `$schema` on every JSON
+  document (see Evidence, baselines and policy).
+- **SARIF metadata**: additive `properties.leaklens` evidence, fingerprints,
+  diagnostic flags, policy status and optional graph metadata; output without
+  those options keeps its previous shape.
+- **HTML reports**: evidence-links and evidence-cluster tables, drift and policy
+  sections, location moves and incomplete-scan reasons, all escaped.
+- **Interactive workspace** (`leaklens workspace [DIR]`): a local, read-only
+  FastAPI page with live per-file progress, cancellation, filters, evidence
+  clusters, source preview, one HTML report and raw JSON. Later phases add
+  dataset audits, baseline/suppression visibility, evidence-graph navigation,
+  history, comparisons and bounded server-sent events. It binds `127.0.0.1`,
+  confines paths to the root, runs one scan at a time and never writes baselines.
+  See [docs/WORKSPACE.md](docs/WORKSPACE.md).
+- **Public live-scan API** (`leaklens.public_api`, `[api]`): a separate hardened
+  FastAPI app for untrusted uploads with `GET /health`, `GET /capabilities`,
+  `POST /inspect`, `POST /audit` and `POST /scan`; no `/predict`, no model
+  deserialisation, no accounts and no persistent storage.
+- **Upload guard** (`leaklens/upload_guard.py`): filename sanitisation,
+  extension allowlist, content sniffing, ZIP traversal/encryption/expansion
+  checks, and row/column/cell limits applied before and after parsing. Uploads
+  are parsed from memory and never written to disk.
+- **Request hardening**: body-size limits, bounded per-client rate limiting,
+  a single-worker scan runner with a wall-clock timeout, generic error bodies,
+  conservative security headers, CORS allowlisting and stable request IDs.
+- **Live page** (`docs/live.html`): a real drag-and-drop scan page that connects
+  to a configured backend, validates inputs, inspects columns and produces
+  reports; it says **No backend connected** when no URL is configured.
+- **Deployment assets**: `Dockerfile.api` (non-root, one worker, healthcheck),
+  `render.yaml` Blueprint with `autoDeployTrigger: checksPass`, and
+  [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md). No public backend is deployed
+  by this repository.
+
+#### Datasets, splits and vision
+
+- **Image clustering** (`leaklens images`): byte-identical exact groups and
+  perceptual near-duplicate connected-component clusters, with an additive
+  `clustering` JSON payload, `train:`/`test:` namespaced members and the shared
+  `near_duplicate.cluster_key`. `image_overlap()` keeps its signature, cost and
+  finding.
+- **Image decode budgets**: bounded encoded bytes, pixels per side, total
+  megapixels, animation frames and a shared pixel budget; refusals use stable
+  reasons and a corrupt image is counted as unreadable instead of crashing. See
+  [docs/IMAGE_DECODE_BUDGETS.md](docs/IMAGE_DECODE_BUDGETS.md).
+- **Declared-split audit** (`leaklens splits DATASET`): reads COCO, YOLO and
+  Pascal VOC split declarations and reports image content appearing in more than
+  one partition as a `high` `image_split_overlap` finding, using SHA-256 over
+  file bytes and never decoding an image. Duplicates entirely inside one
+  partition are counts, not findings. See [docs/VISION_AUDIT.md](docs/VISION_AUDIT.md).
+
+#### Site and demo
+
+- **Product site** (`docs/`): landing page, interactive demo, documentation,
+  example report and 404, all hand-written HTML/CSS/ES modules with no bundler,
+  external font or third-party script.
+- **Prerecorded demo** (`docs/demo.html`): replays verified scanner output for
+  seven fixtures; every result is labelled **prerecorded** and shows the live
+  CLI command.
+- **Deterministic fixtures**: `scripts/build_site_fixtures.py` and
+  `scripts/build_site.py` regenerate and validate links, fragments, assets,
+  landmarks, version and score arithmetic; CI fails when recorded output drifts.
+- **Accessible 3-D field** on the landing page, built from real split rows, with
+  drag/keyboard rotation, duplicate highlighting and reduced-motion/offscreen
+  pausing.
+- `examples/safe_pipeline.py`, the corrected pipeline used as the clean code
+  fixture.
+
+### Changed
+
+- **Detector precision** (Phase 19C Wave 2):
+  - `no_stratify` only claims an "imbalanced classification target" when the file
+    also shows classification evidence (a classifier or a classification
+    metric); otherwise the same low finding explains that the advice applies
+    only to categorical targets.
+  - `id_like` requires an identifier-like column name for numeric columns; a
+    unique integer counter, float measurement or epoch timestamp is no longer
+    reported, while `customer_id` stored as an integer still is. String columns
+    keep the uniqueness rule, and the detail now states evidence rather than
+    concluding identity.
+  - `temporal_split_shuffle` no longer treats exact cyclic calendar attributes
+    (`day_of_week`, `month`, `hour`, …) as a time axis, so chart-prep sorts
+    before a split are clean. `date`, `timestamp`, `datetime`, `year`, `week`,
+    derived names and time-like receivers still count.
+  - Kind, severity, fingerprint and score are unchanged where the finding
+    remains. Known limitations: a numeric identifier with an uninformative name
+    is still caught only by `single_feature_leaks`, and a genuine time column
+    literally named `month` or `hour` is no longer treated as a time axis. See
+    [docs/DETECTORS.md](docs/DETECTORS.md).
+- **Detector precision** (Phase 19C Wave 1): `manual_scale_before_split`,
+  `fillna_before_split`, `group_stat_before_split`,
+  `frequency_encode_before_split` and `target_encode_before_split` now require
+  the receiver to be bound in the file and disjoint from the frame the split
+  divides. Receivers that are not bound locally (module globals, function
+  parameters) keep their findings. A known limit remains: a leak on a
+  helper-returned frame the dataflow cannot trace is missed when the name is
+  also locally bound. Existing baselines will show the removed findings as
+  `resolved`.
+- **Temporal detection accuracy**: the interim `future_looking_*` kinds (never
+  released) are consolidated into `future_target_feature_before_split`, with
+  target-like renamed labels recognised (`target`, `labels`, `outcome`, …).
+- **Baseline identity** is location-neutral; a finding that only moved lines is
+  `unchanged` and reports `changes: ["location"]`. Missing evidence is
+  `uncertain`, never `resolved`, when either side is incomplete.
+- **AI quality** (Phase 6/7): the feature extractor grew from 98 to 112
+  indicators, 40 hard-positive/hard-negative development pairs and a frozen
+  12-case Phase 7 holdout were added, 11 candidates were compared, and
+  class-balanced logistic regression was selected on validation. The Phase 5
+  locked test and Phase 6 real-world corpus were not re-tuned. Measured
+  results: the Phase 5 locked test scored accuracy 0.979, precision 1.000,
+  recall 0.960, F1 0.980 and FPR 0.000; the frozen real-world holdout (48
+  reviewed units from 12 repositories) scored accuracy 0.833, precision 0.767,
+  recall 0.958, F1 0.852 and FPR 0.292; the Phase 7 holdout scored accuracy
+  0.917, precision 0.857, recall 1.000, F1 0.923 and FPR 0.167. These are
+  measured numbers, not a production-accuracy claim. See
+  [docs/AI_BENCHMARK.md](docs/AI_BENCHMARK.md) and
+  [docs/AI_REALWORLD.md](docs/AI_REALWORLD.md).
+- **AI real-notebook smoke check**: 8 public notebooks with definitive hand labels
+  from the earlier scanner corpus score 5/5 leaky and 2/3 legitimate (accuracy
+  0.875, precision 0.833, recall 1.000). The sample is tiny and non-random, and
+  the report says so.
+- **AI root-cause coverage** now classifies SQL lineage, unresolved SQL,
+  missingness and distribution-shift findings as well as tuning on test/full
+  data, CV on the test partition, test-set reuse, `GroupKFold` without groups,
+  preprocessing/resampling outside the CV loop, shuffled temporal splits and
+  out-of-order notebook execution. Unknown kinds still fall back to a generic
+  review.
+- **AI model serving** uses the checked-in artifact when it validates, otherwise
+  an in-memory fit; predictions and local contributions are bit-identical.
+- **`leaklens init`** now prints a pre-commit snippet pinned to the latest
+  published release tag (`v0.13.0`) instead of the mutable `main` branch, and the
+  site documentation pins the same revision.
+- **`leaklens doctor`** validates `.leaklens.toml` (including an explicit
+  `--config PATH`), and `init` writes a starter that documents the policy,
+  missingness, SQL, drift, graph and pipeline tables.
+- **Website and deployment**: `render.yaml` uses
+  `autoDeployTrigger: checksPass` and a `buildFilter` so docs-only commits do not
+  rebuild the API; the deployed site remains static and disconnected.
+- **Feature-importance reporting** reads the fitted pipeline rather than the
+  unfitted spec.
+
+### Fixed
+
+- SQL lineage now decodes quoted identifiers across dialects and analyses every
+  `UNION`/`UNION ALL`/`INTERSECT`/`EXCEPT` branch, including nested and
+  parenthesised combinations, while repeated statements still collapse to one
+  fingerprint-stable finding.
+- Detector-evidence links now point at the primary record of the finding the
+  detector evidence was attached to, not the cluster representative; unknown
+  finding indices produce no link.
+- Temporal split checks no longer raise `TypeError` on exports that mix
+  timezone-aware and naive values or spell the same instant with different
+  offsets; naive values are read as UTC and unparseable/all-NaT columns produce
+  no finding.
+- A corrupt image no longer crashes `leaklens images`; decoder exceptions are
+  counted as unreadable.
+- `Baseline.load` reports non-UTF-8 files as `BaselineError` instead of leaking a
+  decode error, and the workspace keeps display labels relative to its root.
+- The live page no longer throws in `docs/assets/site.js` on pages with an empty
+  audit container; `check_site_layout.mjs` now fails on uncaught page errors.
+- Release metadata validation now checks the version in `pyproject.toml`, the
+  runtime package, `CITATION.cff` and the changelog heading, and fails when they
+  disagree.
+- Benchmark counts and documentation stay consistent with the consolidated
+  detector set.
+
+### Security
+
+- **Path containment** (`leaklens/paths.py`): `resolve_within` normalises with
+  `os.path.realpath`, accepts only paths inside the root prefix, and rejects
+  embedded NUL bytes before touching the filesystem, so siblings, symlinks and
+  junctions cannot escape.
+- **File selection**: directory scans keep only regular files whose real path
+  stays inside the scanned directory, so a FIFO named `*.py` cannot block a scan
+  and a symlink pointing outside is skipped.
+- **Baseline loading** refuses non-regular files before reading, so a FIFO or
+  device cannot hang or exhaust the process.
+- **Upload and live-API hardening**: content sniffing, archive traversal and
+  expansion limits, body-size limits, rate limiting, a single-worker timeout,
+  generic errors and conservative CORS/security headers.
+- **Prompt-injection defense**: untrusted finding fields are flattened before
+  prompt rendering, invented severity/safety claims are dropped, and a versioned
+  corpus plus offline evaluator guard the behaviour.
+- **Release pipeline hardening**:
+  - the release validates tag format, tag/version match, main ancestry and the
+    dispatch ref before any tag content runs;
+  - wheel and sdist membership is derived from the tagged tree and validated
+    byte for byte;
+  - the SBOM defaults to `sbom/sbom.json`, is refused inside `dist/`, and is
+    uploaded separately;
+  - the PyPI publisher is pinned to the verified `v1.14.3` commit and publishes
+    last under the `pypi` environment with OIDC.
+- **CI hardening**: read-only workflow permissions, PR-only concurrency
+  cancellation, bounded job timeouts, no persisted checkout credentials, a
+  wheel rebuilt and validated from the sdist, and owner review required when a
+  PR touches the Action, `MANIFEST.in`, pre-commit configuration or `scripts/`.
+- `pip-audit`, Bandit, CodeQL `security-extended` and `pip-licenses` remain in
+  CI; action references are SHA-pinned, including the composite `action.yml`.
+
+### Performance
+
+Measured locally on Windows with Python 3.14.3; these are local measurements,
+not general guarantees.
+
+- **Scanner parsing** (`scan_source`): each input is parsed and walked once and
+  the AST, node tuple and stable structural keys are shared across the core,
+  flow and CV passes. A bounded, content-addressed, thread-safe source cache
+  (128 entries / 2,000,000 characters, inputs over 1,000,000 characters skipped)
+  avoids reparsing. Cold `scan_path("leaklens")` over 65 files fell from 1.70 s
+  to ~0.68 s (~60%); a repeated scan in the same process fell to ~0.19 s (~89%).
+- **Scanner traversal** (`_node_index`): passes iterate a type-grouped index
+  instead of re-checking every node with `isinstance`. Repeated warm scans fell
+  from 0.192–0.203 s to 0.150–0.158 s (~22%) with unchanged finding order and
+  fingerprints. The index is transient per file, not stored in the cache.
+- **AI artifact cold load**: loading the checked-in `model.json` drops from a
+  1.339 s fit to 1.69 ms while producing bit-identical predictions. See
+  [docs/AI_PERFORMANCE.md](docs/AI_PERFORMANCE.md) and
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+- Parallel scanning was measured and rejected: for the same 65 files a 4-worker
+  process pool took 2.84 s and a 4-worker thread pool 1.00 s versus 0.54 s
+  sequential.
+
+### Developer Experience
+
+- **Spell-check** (#532): `.pre-commit-config.yaml` runs codespell (v2.4.3)
+  with a documented skip/ignore list, and a CI `spelling` job enforces it.
+- **Python 3.14** (#543): the test matrix runs the suite, the self-scan and all
+  benchmarks on 3.14 alongside 3.10–3.12. 3.13 remains outside the matrix and is
+  not claimed as verified.
+- **Initialization**: `leaklens init` writes a commented starter config, prints
+  a pre-commit snippet pinned to the published tag, and refuses to overwrite
+  without `--force`; `doctor` validates the config.
+- **Benchmarks**: `bench_vision`, `bench_sql`, `bench_drift`, `bench_missing`,
+  `bench_text`, `bench_dl`, `bench_pipeline`, `bench_investigation` and
+  `bench_realworld` provide deterministic, labelled regression guards; each
+  writes documentation only when asked. `bench_advanced` adds 32 labelled
+  cases and `bench_data` 12 synthetic dataset cases, reported separately so the
+  historical scanner counts stay stable.
+- **Contributor corpus tooling**: `scripts/collect_expansion.py` can resume a
+  candidate collection for the real-world expansion corpus; candidates never
+  feed `leakage.score()` or any detector and are reviewed separately. See
+  [docs/REALWORLD_EXPANSION.md](docs/REALWORLD_EXPANSION.md).
+
+### Documentation
+
+- Redesigned the English README as a project front page with a banner, table of
+  contents, detection matrix, architecture, audit lifecycle and evidence model,
+  and added complete Arabic (`docs/README.ar.md`) and Japanese
+  (`docs/README.ja.md`) counterparts with the same facts and Mermaid diagrams.
+- Added `docs/assets/banner.svg` with accessible title/description, plus
+  [docs/INTELLIGENCE.md](docs/INTELLIGENCE.md),
+  [docs/INVESTIGATION.md](docs/INVESTIGATION.md),
+  [docs/GOVERNANCE.md](docs/GOVERNANCE.md),
+  [docs/VISION_AUDIT.md](docs/VISION_AUDIT.md),
+  [docs/AUDIT_MANIFEST.md](docs/AUDIT_MANIFEST.md),
+  [docs/REPORT_SCHEMA.md](docs/REPORT_SCHEMA.md),
+  [docs/WORKSPACE.md](docs/WORKSPACE.md),
+  [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md),
+  [docs/SQL_LINEAGE.md](docs/SQL_LINEAGE.md),
+  [docs/DRIFT.md](docs/DRIFT.md),
+  [docs/MISSINGNESS.md](docs/MISSINGNESS.md),
+  [docs/PIPELINE.md](docs/PIPELINE.md),
+  [docs/TEXT.md](docs/TEXT.md),
+  [docs/DL_AUDIT.md](docs/DL_AUDIT.md) and
+  [docs/AI_INTELLIGENCE.md](docs/AI_INTELLIGENCE.md).
+- Added benchmark methodology and results: `docs/VISION_BENCHMARK.md`,
+  `docs/SQL_BENCHMARK.md`, `docs/DRIFT_BENCHMARK.md`,
+  `docs/MISSINGNESS_BENCHMARK.md`, `docs/TEXT_BENCHMARK.md`,
+  `docs/DL_BENCHMARK.md`, `docs/PIPELINE_BENCHMARK.md`,
+  `docs/AI_BENCHMARK.md`, `docs/AI_REALWORLD.md`, `docs/AI_PERFORMANCE.md` and
+  `docs/DATA_BENCHMARK.md`.
+- Labelled the advanced detection cases in `docs/BENCHMARK.md` as
+  **unreleased on main** rather than `0.14.0`, and corrected stale command
+  references on the site.
+- Documented real-world corpus provenance and limits in
+  `docs/REALWORLD_CORPUS.md` and the AI expansion roadmap in
+  `docs/AI_ML_EXPANSION_ROADMAP.md`.
+
+### Internal
+
+- Added a deterministic report schema, detector manifest, version-consistency
+  validator, wheel/sdist completeness validator, SBOM generator with a `dist/`
+  guard, and action-contract tests; release validation now runs in CI before a
+  tag can publish.
+- Added the `package` CI job that builds and validates both distributions, and
+  the `api`, `sql`, `site`, `spelling` and `security` jobs that exercise the
+  optional extras and the HTTP surfaces.
+- Added extensive regression coverage across evidence, fingerprints, baselines,
+  suppressions, policy, configuration, missingness, SQL, drift, vision,
+  workspace, public API, upload guard, AI schemas/reasoning/corpus, prompt
+  injection, release tags, action contract and workflow contracts.
+- Added corpus infrastructure and acceptance records:
+  `docs/PHASE13_ACCEPTANCE.md`, `docs/PHASE14_ACCEPTANCE.md`,
+  `docs/PHASE15_ACCEPTANCE.md`, `docs/PHASE16_ACCEPTANCE.md` and
+  `docs/PHASE18_ACCEPTANCE.md`.
+- Kept every new engine additive: no network calls in normal scanning, no new
+  mandatory dependency, no code execution of scanned input, and no change to
+  `leakage.score()` or the default exit gate.
 
 ## 0.13.0
 - `leaklens doctor` checks Python/LeakLens versions, install location, core and optional dependencies, and TOML config validity (text or `--json`; no network calls); Python 3.10 uses `tomli`
