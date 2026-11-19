@@ -12,3 +12,10 @@ services:
       - "8501:8501"
     volumes:
       - ./models:/app/models
+    # The image healthcheck probes the API on :8000; this service runs Streamlit.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

@@ -59,6 +59,14 @@ def test_path_input_works_without_fail_under(tmp_path):
     assert main(_action_args(tmp_path, None)) == 0
 
 
+def test_invalid_path_fails_the_action(tmp_path, capsys):
+    missing = tmp_path / "checkout-did-not-happen"
+    assert main(_action_args(missing, None)) == 2
+    err = capsys.readouterr().err
+    assert "scan target not found" in err
+    assert str(missing) in err
+
+
 def test_omitting_fail_under_keeps_the_default_threshold_behavior(tmp_path):
     target = tmp_path / "medium.py"
     target.write_text(MEDIUM, encoding="utf-8")

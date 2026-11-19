@@ -1059,8 +1059,14 @@ def scan_targets(path, *, sql=None) -> list[Path]:
     the same set the one-shot scan uses. A directory scan keeps only regular
     files whose real path stays inside that directory, so a FIFO, a directory
     named ``*.py`` or a symlink pointing outside is skipped instead of read.
+
+    Raises ``FileNotFoundError`` when ``path`` does not exist: a typo must not
+    be mistaken for a valid scan that found nothing. An existing directory with
+    no scannable files is still a valid empty scan.
     """
     p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"scan target not found: {path}")
     suffixes = {".py", ".ipynb"}
     if sql is not None and sql.enabled:
         suffixes.add(".sql")
@@ -1083,7 +1089,8 @@ def scan_path(path, *, sql=None, target=None) -> list[Finding]:
     """Scan Python/notebook files, plus ``.sql`` files when enabled or explicit.
 
     Directories include ``.sql`` only when SQL settings are enabled; an explicit
-    ``.sql`` file is always analyzed because the caller named it.
+    ``.sql`` file is always analyzed because the caller named it. Raises
+    ``FileNotFoundError`` when ``path`` does not exist.
     """
     files = scan_targets(path, sql=sql)
     out = []

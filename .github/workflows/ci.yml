@@ -176,3 +176,32 @@ jobs:
       # a link or asset is missing, or the static pages lose an a11y landmark.
       - run: python scripts/build_site.py --check
       - run: node --test tests/site/demo-engine.test.mjs tests/site/live-engine.test.mjs
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # Build only: the runner never publishes or pushes an image.
+      - name: Build the default image
+        run: docker build --tag leaklens:ci .
+      - name: Verify the runtime user and healthcheck
+        run: |
+          user="$(docker image inspect leaklens:ci --format '{{.Config.User}}')"
+          test -n "$user"
+          test "$user" != "root"
+          test "$user" != "0"
+          health="$(docker image inspect leaklens:ci --format '{{json .Config.Healthcheck}}')"
+          test "$health" != "null"
+      - name: Smoke test the health endpoint
+        run: |
+          docker run --detach --name leaklens-ci --publish 8000:8000 leaklens:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs leaklens-ci
+          exit 1

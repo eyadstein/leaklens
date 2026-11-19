@@ -64,7 +64,7 @@ leaklens train.csv --target label
 leaklens train.csv --test test.csv --target label --time date
 ```
 
-A clean run prints `LeakLens trust score: 100/100` and exits `0`. A high-severity finding, a score below `--fail-under`, or a new finding under the opt-in `--fail-on-new` exits `1`; invalid arguments or configuration exit `2`. That single contract makes the same command usable locally and in CI.
+A clean run prints `LeakLens trust score: 100/100` and exits `0`. A high-severity finding, a score below `--fail-under`, or a new finding under the opt-in `--fail-on-new` exits `1`; invalid arguments or configuration exit `2`. A `--scan` path that does not exist is invalid input, so it exits `2` instead of reporting a clean scan. That single contract makes the same command usable locally and in CI.
 
 ## See it catch a leak
 

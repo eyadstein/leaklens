@@ -1293,6 +1293,9 @@ def main(argv=None) -> int:
                 fs += scan_path(source)
         except ImportError as exc:
             p.error(str(exc))
+        except FileNotFoundError as exc:
+            print(f"leaklens: {exc}", file=sys.stderr)
+            return 2
     if a.pipeline and not scan_targets:
         p.error("--pipeline audits --scan paths; add --scan PATH")
     if a.pipeline:

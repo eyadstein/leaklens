@@ -261,19 +261,21 @@ leaklens --scan . --sarif leaklens.sarif</code></pre>
 
         <section id="config" data-doc-section>
           <h2>Configuration</h2>
-          <p><code>leaklens init</code> writes a documented <code>.leaklens.toml</code>. The file is a reference today: the CLI does not read it yet, and explicit flags always win. Treat the generated file as documentation for the options you may want to pass.</p>
+          <p><code>leaklens init</code> writes a commented <code>.leaklens.toml</code>. LeakLens reads <code>./.leaklens.toml</code> from the current directory when it exists, or the file passed with <code>--config PATH</code>. Precedence is built-in defaults, then the config file, then explicit CLI flags.</p>
           <div class="docs-code">
             <div class="docs-code-bar"><span>.leaklens.toml</span><button class="copy-button" type="button" data-copy="leaklens init">Copy command</button></div>
-            <pre><code>[leaklens]
-# threshold = 0.95          # --threshold
-# explain = false           # --explain
-# fail_under = 80           # --fail-under
-# sarif = "leaklens.sarif"  # --sarif
-# html = "report.html"      # --html
-# badge = "badge.json"      # --badge
-# scan = ["notebooks"]      # --scan</code></pre>
+            <pre><code># Top-level keys mirror the CLI flags (dashes become underscores).
+# target = "label"
+# test = "test.csv"
+# threshold = 0.95
+# explain = false
+# fail_under = 80
+# sarif = "leaklens.sarif"
+# html = "report.html"
+# badge = "badge.json"
+# scan = ["notebooks"]</code></pre>
           </div>
-          <p class="caveat">This is an honest limitation, not a hidden feature. If you need configuration in CI today, put the flags in the workflow or a shell script.</p>
+          <p class="caveat">The file is optional: without it, behavior is exactly the CLI default. Unknown keys, wrong types and unsafe output paths exit <code>2</code>; <code>leaklens doctor</code> validates the configuration without network access.</p>
         </section>
 
         <section id="ci" data-doc-section>
@@ -365,7 +367,7 @@ uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000</code></pre>
           </div>
           <p><code>GET /health</code> and <code>GET /capabilities</code> describe the deployment. <code>POST /inspect</code> lists columns, <code>POST /audit</code> runs the dataset detectors (optionally with a held-out file plus group and time columns), and <code>POST /scan</code> runs the static Python scanner. Uploads default to 4 MiB, 5,000 rows and 200 columns, are parsed in memory, and are never retained.</p>
           <div class="docs-callout"><strong>Deployment status:</strong> the GitHub Pages site is static and ships without a connected backend, so <a href="live.html">Live scan</a> shows an explicit “not connected” state until you supply a URL. A free Render web service plus <code>Dockerfile.api</code> and <code>render.yaml</code> are documented in the repository; the free instance sleeps after idle time, has 512 MB RAM, and offers no persistent storage. See <a href="https://github.com/eyadstein/leaklens/blob/main/docs/LIVE_SCANNING.md" rel="noopener">LIVE_SCANNING.md</a> for verified limits and the security model.</div>
-          <p>Docker users can run <code>docker compose up --build</code> for the API on port 8000 and the UI on 8501.</p>
+          <p>Docker users can run <code>docker compose up --build</code> for the API on port 8000 and the UI on 8501. The image runs as unprivileged uid <code>10001</code> and declares a healthcheck on <code>/health</code>; the Compose UI service healthchecks Streamlit instead.</p>
         </section>
 
         <section id="benchmarks" data-doc-section>
@@ -407,8 +409,10 @@ uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000</code></pre>
           <p>Unknown suffixes fall back to CSV by design. Pass a filename with the correct suffix or convert the file first.</p>
           <h3>The command exits 1 but no high finding is printed</h3>
           <p>Check whether <code>--fail-under</code> is set: the gate also fails when the trust score is below the floor. Remove the flag or raise the score.</p>
-          <h3>My <code>.leaklens.toml</code> is ignored</h3>
-          <p>This is expected in 0.13.0. The file is documentation-only; pass flags explicitly. The limitation is recorded in the <a href="https://github.com/eyadstein/leaklens/blob/main/CHANGELOG.md" rel="noopener">changelog</a>.</p>
+          <h3>My <code>.leaklens.toml</code> is not applied</h3>
+          <p>LeakLens reads <code>./.leaklens.toml</code> from the current directory, or the path passed with <code>--config</code>; it does not search parent directories or read <code>pyproject.toml</code>. Explicit CLI flags override the file. Run <code>leaklens doctor</code> (optionally <code>--config PATH</code>) to validate it; invalid keys, types or output paths exit <code>2</code>.</p>
+          <h3>A <code>--scan</code> path does not exist</h3>
+          <p>LeakLens exits <code>2</code> and names the missing path. It never reports a clean scan for a target it could not find. Check the path, or pass a dataset instead of <code>--scan</code>.</p>
           <h3>Doctor reports a missing optional extra</h3>
           <p>Optional extras are listed but do not fail the check. Only a missing core dependency, Python below 3.10, or invalid TOML returns exit 1.</p>
           <h3>I need help or found a bug</h3>

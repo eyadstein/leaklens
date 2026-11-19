@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import importlib.util
 import json
 import re
@@ -14,6 +15,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from leaklens import __version__
+from leaklens.config import load_config
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -372,3 +374,28 @@ def test_landing_page_integrity_and_accessibility_fixes():
     assert "min-width: 0" in css
     report = (DOCS / "report.html").read_text(encoding="utf-8")
     assert report.count('<div class="table-wrap">') == 2
+
+
+def _docs_section(section_id: str) -> str:
+    text = (DOCS / "docs.html").read_text(encoding="utf-8")
+    return text.split(f'id="{section_id}"', 1)[1].split("</section>", 1)[0]
+
+
+def test_documented_config_sample_is_loadable(tmp_path):
+    """The config example on the site must be a valid `.leaklens.toml`."""
+    section = _docs_section("config")
+    match = re.search(r"<pre><code>(.*?)</code></pre>", section, re.DOTALL)
+    assert match, "config section lost its sample"
+    path = tmp_path / ".leaklens.toml"
+    path.write_text(html.unescape(match.group(1)), encoding="utf-8")
+    config = load_config(path)
+    assert config.path == path.resolve()
+    assert config.scan == ()
+
+
+def test_config_section_describes_the_real_loader():
+    """The site must not repeat the v0.13.0 claim that the file is unread."""
+    section = _docs_section("config")
+    assert "--config" in section
+    assert "does not read it" not in section
+    assert "[leaklens]" not in section
