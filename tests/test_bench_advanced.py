@@ -1,4 +1,4 @@
-"""Advanced benchmark set (0.14.0 detection phase)."""
+"""Advanced benchmark set for the unreleased detection-engine phase."""
 
 from leaklens.bench import evaluate
 from leaklens.bench_advanced import ADVANCED_CASES

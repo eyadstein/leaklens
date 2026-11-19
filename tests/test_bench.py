@@ -81,3 +81,9 @@ def test_cases_are_registered_before_the_main_guard():
         and node.lineno > guard
     ]
     assert not late, f"case registration after the __main__ guard: lines {late}"
+
+
+def test_markdown_labels_advanced_cases_unreleased():
+    text = bench.markdown(evaluate())
+    assert "## Advanced detection cases (unreleased on main)" in text
+    assert "0.14.0" not in text

@@ -44,7 +44,9 @@ The benchmark contains the original regression baseline and an expanded set of c
 | True negatives | 21 |
 | False negatives | 0 |
 
-## Advanced detection cases (0.14.0)
+## Advanced detection cases (unreleased on main)
+
+These cases run on `main` and are not part of a published release yet. The latest published release is 0.13.0.
 
 | Metric | Value |
 |---|---:|

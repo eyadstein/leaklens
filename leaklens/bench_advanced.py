@@ -1,4 +1,4 @@
-"""Advanced detection cases added in the 0.14.0 detection-engine phase.
+"""Advanced detection cases for the unreleased detection-engine phase.
 
 Kept separate from ``bench_cases.EXTRA_CASES`` so the historical benchmark
 counts stay stable and regressions in either set are visible on their own.

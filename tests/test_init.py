@@ -1,8 +1,9 @@
+import re
 from pathlib import Path
 
 import pytest
 
-from leaklens.cli import PRE_COMMIT_SNIPPET, main
+from leaklens.cli import PRE_COMMIT_REV, PRE_COMMIT_SNIPPET, main
 
 
 def _flag_text(text):
@@ -88,9 +89,22 @@ def test_starter_config_is_valid_toml(tmp_path):
     assert policy["suppressions"][0]["reason"]
 
 
-def test_snippet_matches_readme():
-    readme = Path(__file__).resolve().parents[1] / "README.md"
+@pytest.mark.parametrize(
+    "name", ["README.md", "docs/README.ar.md", "docs/README.ja.md"]
+)
+def test_snippet_matches_readme(name):
+    readme = Path(__file__).resolve().parents[1] / name
     assert PRE_COMMIT_SNIPPET in readme.read_text(encoding="utf-8")
+
+
+def test_snippet_pins_a_published_release_tag():
+    assert "rev: main" not in PRE_COMMIT_SNIPPET
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", PRE_COMMIT_REV)
+
+
+def test_site_docs_pin_the_same_revision():
+    site = Path(__file__).resolve().parents[1] / "docs" / "docs.html"
+    assert f"rev: {PRE_COMMIT_REV}" in site.read_text(encoding="utf-8")
 
 
 def test_init_does_not_overwrite(tmp_path):

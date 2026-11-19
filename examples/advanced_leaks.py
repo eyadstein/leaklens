@@ -1,4 +1,4 @@
-"""Deliberately leaky pipeline covering the 0.14.0 detectors.
+"""Deliberately leaky pipeline covering the advanced detectors.
 
 Run ``leaklens --scan examples/advanced_leaks.py --explain`` to see each
 finding and its fix.  Nothing here touches the network or runs real training;

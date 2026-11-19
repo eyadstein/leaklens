@@ -191,9 +191,14 @@ STARTER_CONFIG = """# LeakLens settings for this project.
 # max_categories = 20
 """
 
-PRE_COMMIT_SNIPPET = """repos:
+# Latest published GitHub tag. Bump only after that release exists, not on a
+# version bump in pyproject.toml, so generated configs never point at a tag
+# that cannot be fetched.
+PRE_COMMIT_REV = "v0.13.0"
+
+PRE_COMMIT_SNIPPET = f"""repos:
   - repo: https://github.com/eyadstein/leaklens
-    rev: main
+    rev: {PRE_COMMIT_REV}
     hooks:
       - id: leaklens
 """
