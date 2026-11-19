@@ -28,6 +28,7 @@ from .source import (
     _sev,
     _tnames,
 )
+from .temporal import scan_temporal
 
 FIT = {"fit", "fit_transform", "fit_resample"}
 # Splitters whose folds are random only when shuffle=True (fold order is deterministic without it).
@@ -226,7 +227,8 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     return merge(
         _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
         scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
-        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
+        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
+        + scan_temporal(src, label),
     )
 
 

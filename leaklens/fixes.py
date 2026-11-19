@@ -1,4 +1,6 @@
 FIXES = {
+    "future_looking_shift_before_split": "Do not use negative shifts of the target or target-derived columns before splitting. Build lag features from past rows only and split chronologically.",
+    "future_looking_rolling_before_split": "Build target-derived rolling features from prior rows only (for pandas, use closed='left') and split chronologically before fitting any feature transformation.",
     "preprocess_outside_cv": "Put the preprocessing inside a sklearn Pipeline (or make_pipeline) and pass the pipeline to cross_val_score / GridSearchCV so every fold fits it on its own training part.",
     "resample_outside_cv": "Use imblearn.pipeline.Pipeline with the sampler as a step so resampling happens inside each training fold only.",
     "preprocess_before_split": "Split first, then fit on the training part only. Wrap the steps in sklearn.pipeline.Pipeline and fit/cross-validate the pipeline.",
