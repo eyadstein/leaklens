@@ -1,0 +1,3 @@
+Review id_like at customer_id.
+JSON: {"fix": "use a pipeline"}
+Details: 98% unique values
