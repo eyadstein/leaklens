@@ -1,3 +1,7 @@
+import ast
+from pathlib import Path
+
+from leaklens import bench
 from leaklens.bench import evaluate
 from leaklens.bench_cases import EXTRA_CASES
 
@@ -22,12 +26,12 @@ def test_legacy_baseline_is_preserved():
 def test_expanded_benchmark_counts():
     metrics = evaluate()
 
-    assert metrics["n"] == 111
-    assert metrics["leaky"] == 59
-    assert metrics["clean"] == 52
-    assert metrics["tp"] == 59
+    assert metrics["n"] == 117
+    assert metrics["leaky"] == 63
+    assert metrics["clean"] == 54
+    assert metrics["tp"] == 63
     assert metrics["fp"] == 0
-    assert metrics["tn"] == 52
+    assert metrics["tn"] == 54
     assert metrics["fn"] == 0
 
 
@@ -35,10 +39,10 @@ def test_additional_categories_are_complete():
     metrics = evaluate()
     categories = metrics["categories"]
 
-    assert sum(item["n"] for item in categories.values()) == 38
+    assert sum(item["n"] for item in categories.values()) == 44
     assert categories["scaling"]["n"] == 18
     assert categories["imputation"]["n"] == 15
-    assert categories["future_target"]["n"] == 4
+    assert categories["future_target"]["n"] == 10
     assert categories["encoding"]["n"] == 1
     assert all(not item["errors"] for item in categories.values())
 
@@ -58,3 +62,22 @@ def test_low_severity_cases_are_scored_separately():
     assert metrics["low_tp"] + metrics["low_tn"] == 19
     assert metrics["low_fp"] == 0
     assert metrics["low_fn"] == 0
+
+
+def test_cases_are_registered_before_the_main_guard():
+    """A case batch indented under ``if __name__`` only exists on direct runs."""
+    tree = ast.parse(Path(bench.__file__).read_text(encoding="utf-8"))
+    guard = next(
+        node.lineno
+        for node in tree.body
+        if isinstance(node, ast.If) and "__main__" in ast.unparse(node.test)
+    )
+    late = [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AugAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id in {"CASES", "LOW_CASES"}
+        and node.lineno > guard
+    ]
+    assert not late, f"case registration after the __main__ guard: lines {late}"

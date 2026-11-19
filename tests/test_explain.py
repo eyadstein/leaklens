@@ -15,6 +15,20 @@ def test_explain_prints_fix(tmp_path, capsys):
     assert "fix:" in capsys.readouterr().out
 
 
+def test_explain_prints_temporal_fix(tmp_path, capsys):
+    f = tmp_path / "temporal.py"
+    f.write_text(
+        "from sklearn.model_selection import train_test_split\n"
+        "future = df['target'].shift(-1)\n"
+        "train_test_split(X, y)\n",
+        encoding="utf-8",
+    )
+    assert main(["--scan", str(f), "--explain"]) == 1
+    out = capsys.readouterr().out
+    assert advice("future_target_feature_before_split") in out
+    assert "construct lag features from past observations" in out
+
+
 def test_no_fix_without_flag(tmp_path, capsys):
     f = tmp_path / "b.py"
     f.write_text(BAD, encoding="utf-8")

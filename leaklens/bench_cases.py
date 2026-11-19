@@ -250,6 +250,48 @@ EXTRA_CASES.extend(
             "future_target",
         ),
         BenchmarkCase(
+            "target column negative shift before split",
+            _FUTURE
+            + 'future = df["target"].shift(-1)\na = train_test_split(X, y, random_state=42)\n',
+            True,
+            "future_target",
+        ),
+        BenchmarkCase(
+            "grouped negative target shift before split",
+            _FUTURE
+            + 'future = df.groupby("entity")["y"].shift(-1)\na = train_test_split(X, y, random_state=42)\n',
+            True,
+            "future_target",
+        ),
+        BenchmarkCase(
+            "grouped negative target shift with periods before split",
+            _FUTURE
+            + 'future = df.groupby("entity")["y"].shift(periods=-2)\na = train_test_split(X, y, random_state=42)\n',
+            True,
+            "future_target",
+        ),
+        BenchmarkCase(
+            "positive target shift with periods before split",
+            _FUTURE
+            + "lag = y.shift(periods=2)\na = train_test_split(X, y, random_state=42)\n",
+            False,
+            "future_target",
+        ),
+        BenchmarkCase(
+            "grouped centered target rolling before split",
+            _FUTURE
+            + 'smooth = df.groupby("entity")["y"].rolling(3, center=True).mean()\na = train_test_split(X, y, random_state=42)\n',
+            True,
+            "future_target",
+        ),
+        BenchmarkCase(
+            "grouped trailing target rolling before split",
+            _FUTURE
+            + 'smooth = df.groupby("entity")["y"].rolling(3).mean()\na = train_test_split(X, y, random_state=42)\n',
+            False,
+            "future_target",
+        ),
+        BenchmarkCase(
             "get_dummies on full data before split",
             "import pandas as pd\n"
             + _FUTURE

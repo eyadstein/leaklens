@@ -28,9 +28,10 @@ from .source import (
     _sev,
     _tnames,
 )
-from .temporal import scan_temporal
 
 FIT = {"fit", "fit_transform", "fit_resample"}
+# Column names that are target-like even when the split passes a renamed label.
+_TARGET_LIKE_COLUMNS = {"target", "targets", "label", "labels", "outcome"}
 # Splitters whose folds are random only when shuffle=True (fold order is deterministic without it).
 SHUFFLED_SPLITS = {"KFold", "StratifiedKFold", "StratifiedGroupKFold"}
 # Repeated splitters always shuffle, so a missing random_state always makes them non-reproducible.
@@ -91,6 +92,19 @@ def _strings(expr) -> set:
         for s in ast.walk(expr)
         if isinstance(s, ast.Constant) and isinstance(s.value, str)
     }
+
+
+def _selected_names(expr) -> set:
+    """Names read as columns/values, ignoring group keys and method names."""
+    out: set = set()
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Subscript):
+            out |= _strings(node.slice)
+        elif isinstance(node, ast.Attribute):
+            out.add(node.attr)
+        elif isinstance(node, ast.Name):
+            out.add(node.id)
+    return out
 
 
 def _names(expr) -> set:
@@ -227,8 +241,7 @@ def scan_source(src: str, label: str = "<src>", cells=None) -> list[Finding]:
     return merge(
         _scan_core(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
         scan_flow(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
-        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index)
-        + scan_temporal(src, label),
+        + scan_cv(src, label, cells, tree=tree, keys=keys, nodes=nodes, index=index),
     )
 
 
@@ -390,8 +403,12 @@ def _scan_core(
             if assignment.lineno >= first if first is not None else False:
                 continue
             value_names = _all_names(assignment.value)
-            value_columns = _strings(assignment.value)
-            if value_names & target_derived or value_columns & target_columns:
+            value_selected = _selected_names(assignment.value)
+            if (
+                value_names & target_derived
+                or value_selected & (target_names | target_columns)
+                or value_selected & _TARGET_LIKE_COLUMNS
+            ):
                 for target_node in assignment.targets:
                     for name in _tnames(target_node):
                         if name not in target_derived:
@@ -399,9 +416,9 @@ def _scan_core(
                             changed = True
 
     def uses_target(expr):
-        return bool(
-            (_all_names(expr) & target_derived) or (_strings(expr) & target_columns)
-        )
+        selected = _selected_names(expr)
+        labels = target_names | target_columns | _TARGET_LIKE_COLUMNS
+        return bool((_all_names(expr) & target_derived) or (selected & labels))
 
     def loc(line):
         if cells:

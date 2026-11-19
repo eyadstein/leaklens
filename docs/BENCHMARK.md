@@ -6,14 +6,14 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 | Metric | Value |
 |---|---:|
-| Cases | 111 |
-| Leaky / clean | 59 / 52 |
+| Cases | 117 |
+| Leaky / clean | 63 / 54 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 59 |
+| True positives | 63 |
 | False positives | 0 |
-| True negatives | 52 |
+| True negatives | 54 |
 | False negatives | 0 |
 
 ## Original regression baseline
@@ -34,14 +34,14 @@ The benchmark contains the original regression baseline and an expanded set of c
 
 | Metric | Value |
 |---|---:|
-| Cases | 38 |
-| Leaky / clean | 19 / 19 |
+| Cases | 44 |
+| Leaky / clean | 23 / 21 |
 | Precision | 1.00 |
 | Recall | 1.00 |
 | F1 | 1.00 |
-| True positives | 19 |
+| True positives | 23 |
 | False positives | 0 |
-| True negatives | 19 |
+| True negatives | 21 |
 | False negatives | 0 |
 
 ## Advanced detection cases (0.14.0)
@@ -63,7 +63,7 @@ The benchmark contains the original regression baseline and an expanded set of c
 | Category | Cases | Leaky | Clean | Precision | Recall | F1 |
 |---|---:|---:|---:|---:|---:|---:|
 | encoding | 1 | 1 | 0 | 1.00 | 1.00 | 1.00 |
-| future_target | 4 | 2 | 2 | 1.00 | 1.00 | 1.00 |
+| future_target | 10 | 6 | 4 | 1.00 | 1.00 | 1.00 |
 | imputation | 15 | 7 | 8 | 1.00 | 1.00 | 1.00 |
 | scaling | 18 | 9 | 9 | 1.00 | 1.00 | 1.00 |
 
