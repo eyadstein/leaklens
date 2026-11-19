@@ -736,7 +736,7 @@ Findings then appear in the repository's Security tab and as PR annotations.
 The release workflow builds the wheel and sdist, installs the wheel, and writes a CycloneDX 1.5 SBOM to `sbom/sbom.json` with `scripts/generate_sbom.py`. The SBOM is kept outside `dist/` so it cannot be picked up by the PyPI publisher. Both the Python packages and the SBOM are uploaded as workflow artifacts; the wheel and sdist are then published to PyPI.
 
 ```sh
-python scripts/generate_sbom.py              # dist/sbom.json
+python scripts/generate_sbom.py              # sbom/sbom.json
 python scripts/generate_sbom.py out/sbom.json
 ```
 

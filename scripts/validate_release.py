@@ -1,11 +1,13 @@
 """Validate a release tag and the built distributions before publishing.
 
-Two jobs:
+Three jobs:
 
 * prove that a tag is publishable - tag format, package version match, and the
   workflow ref that triggered the run;
 * prove that a built wheel and source distribution contain exactly the files
-  the tagged source says they must, byte for byte, and nothing else.
+  the tagged source says they must, byte for byte, and nothing else;
+* prove that the version declared in ``pyproject.toml`` (authoritative) is the
+  same in the runtime package, ``CITATION.cff`` and the changelog heading.
 
 Expected membership is derived from the checked-out tree and the authoritative
 packaging configuration (``pyproject.toml`` package data plus the ``MANIFEST.in``
@@ -29,6 +31,13 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib
 
 _TAG_RE = re.compile(r"v(\d+)\.(\d+)\.(\d+)")
+_VERSION_RE = re.compile(r"\d+\.\d+\.\d+(?:(?:a|b|rc)\d+|\.post\d+|\.dev\d+)?")
+_RUNTIME_VERSION_RE = re.compile(
+    r'^__version__\s*=\s*["\']([^"\']+)["\']', re.MULTILINE
+)
+_CITATION_VERSION_RE = re.compile(
+    r'^version:\s*["\']?([^"\'\s]+)["\']?\s*$', re.MULTILINE
+)
 _PACKAGE = "leaklens"
 _PACKAGE_NAME = "leaklens-ml"
 _EGG_INFO = _PACKAGE_NAME.replace("-", "_") + ".egg-info/"
@@ -46,6 +55,70 @@ def package_version(path: Path) -> str:
     version = project.get("version") if isinstance(project, dict) else None
     if not isinstance(version, str) or not version:
         raise ValueError(f"{path} has no [project].version")
+    return version
+
+
+def _checked_version(value: str, path: Path) -> str:
+    if _VERSION_RE.fullmatch(value) is None:
+        raise ValueError(f"{path} version {value!r} is not a valid X.Y.Z version")
+    return value
+
+
+def runtime_version(path: Path) -> str:
+    """Return the ``__version__`` literal from a package ``__init__.py``."""
+    match = _RUNTIME_VERSION_RE.search(path.read_text(encoding="utf-8"))
+    if match is None:
+        raise ValueError(f"{path} has no __version__ literal")
+    return match.group(1)
+
+
+def citation_version(path: Path) -> str:
+    """Return the top-level ``version`` field from a CITATION.cff file."""
+    match = _CITATION_VERSION_RE.search(path.read_text(encoding="utf-8"))
+    if match is None:
+        raise ValueError(f"{path} has no top-level version field")
+    return match.group(1)
+
+
+def changelog_heading(path: Path) -> str:
+    """Return the first ``## `` heading, the unreleased/release entry."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            return line[3:].strip()
+    raise ValueError(f"{path} has no '## ' release heading")
+
+
+def check_versions(source_root: Path) -> str:
+    """Raise unless every declared version agrees with ``pyproject.toml``.
+
+    The changelog may stay on ``Unreleased``; once a release is prepared, its
+    heading must be ``<version>`` (optionally ``[<version>]``) with an optional
+    `` - <date>`` suffix.
+    """
+    root = Path(source_root)
+    pyproject = root / "pyproject.toml"
+    version = _checked_version(package_version(pyproject), pyproject)
+    for relative, reader in (
+        ("leaklens/__init__.py", runtime_version),
+        ("CITATION.cff", citation_version),
+    ):
+        path = root / relative
+        found = _checked_version(reader(path), path)
+        if found != version:
+            raise ValueError(
+                f"{path} version {found!r} does not match "
+                f"{pyproject} version {version!r}"
+            )
+    changelog = root / "CHANGELOG.md"
+    heading = changelog_heading(changelog)
+    label = heading.split(" - ")[0].strip()
+    if label[:1] == "[" and label[-1:] == "]":
+        label = label[1:-1]
+    if label not in {"Unreleased", version}:
+        raise ValueError(
+            f"{changelog} heading {heading!r} must be 'Unreleased' or "
+            f"'{version}' (optionally ' - <date>')"
+        )
     return version
 
 
@@ -380,6 +453,11 @@ def main(argv=None) -> int:
         help="package metadata for --tag mode",
     )
     parser.add_argument(
+        "--versions",
+        action="store_true",
+        help="check pyproject, runtime, citation and changelog versions agree",
+    )
+    parser.add_argument(
         "--source-root",
         default=Path(__file__).resolve().parents[1],
         type=Path,
@@ -388,10 +466,16 @@ def main(argv=None) -> int:
     parser.add_argument("--event", default="release", help="GitHub event name")
     parser.add_argument("--ref", default="", help="GitHub ref, e.g. refs/heads/main")
     args = parser.parse_args(argv)
-    if args.wheel is None and args.sdist is None and not args.tag:
-        parser.error("--tag, --wheel or --sdist is required")
+    if args.wheel is None and args.sdist is None and not args.tag and not args.versions:
+        parser.error("--tag, --wheel, --sdist or --versions is required")
 
     try:
+        if args.versions:
+            version = check_versions(args.source_root)
+            print(
+                f"Version {version} is consistent across pyproject.toml, "
+                "leaklens/__init__.py, CITATION.cff and CHANGELOG.md"
+            )
         if args.wheel is not None:
             expected, total = _check_wheel(args.wheel, args.source_root)
             print(

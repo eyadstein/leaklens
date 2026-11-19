@@ -3,7 +3,8 @@
 Usage:
     python scripts/generate_sbom.py [OUT]
 
-The default output is ``dist/sbom.json``. The generator is standalone: it
+The default output is ``sbom/sbom.json``, deliberately outside ``dist/`` so
+the PyPI publisher can never upload it. The generator is standalone: it
 needs only the standard library (plus ``tomli`` on Python 3.10) and reads
 dependencies and extras directly from ``pyproject.toml``. It does not need
 ``cyclonedx-py``. The generated file is parsed back and checked for the
@@ -125,9 +126,23 @@ def build_sbom() -> dict:
     }
 
 
+def _inside_dist(path: Path) -> bool:
+    """True when ``path`` resolves inside the repository's ``dist/``."""
+    dist = (ROOT / "dist").resolve()
+    resolved = path.resolve()
+    return resolved == dist or dist in resolved.parents
+
+
 def main(argv=None) -> int:
     argv = sys.argv if argv is None else argv
-    out = Path(argv[1]) if len(argv) > 1 else ROOT / "dist" / "sbom.json"
+    out = Path(argv[1]) if len(argv) > 1 else ROOT / "sbom" / "sbom.json"
+    if _inside_dist(out):
+        print(
+            f"::error::SBOM output {out} must be outside dist/ "
+            "so the PyPI publisher never uploads it",
+            file=sys.stderr,
+        )
+        return 1
     bom = build_sbom()
     out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(bom, indent=2) + "\n"

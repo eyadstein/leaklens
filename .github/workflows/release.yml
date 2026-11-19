@@ -82,6 +82,8 @@ jobs:
           echo "Release $TAG is version-matched and on main."
       - name: Check out validated release tag
         run: git checkout --detach "${{ steps.release.outputs.tag }}"
+      - name: Verify version metadata is consistent
+        run: python scripts/validate_release.py --versions
       - run: pip install build
       - run: python -m build
       - name: Verify dist contains only the wheel and sdist
@@ -117,7 +119,7 @@ jobs:
           python -c "import leaklens.analysis.text, leaklens.analysis.dl, leaklens.analysis.artifacts"
       # Keep the SBOM outside dist/: the PyPI publish action uploads every file
       # in its packages directory, and a .json file there would fail twine check.
-      - run: python scripts/generate_sbom.py sbom/sbom.json
+      - run: python scripts/generate_sbom.py
       - name: Verify SBOM is outside dist
         run: |
           set -euo pipefail
