@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-Changes on `main` since the published `0.13.0` release. **The next release has
-not been published.** Draft notes are in
-[docs/releases/0.14.0.md](docs/releases/0.14.0.md); the version, date and
-publication are not yet authorised.
+## 0.14.0
+
+Changes in the prepared `0.14.0` release. **This release has not been published
+yet.** Release notes are in
+[docs/releases/0.14.0.md](docs/releases/0.14.0.md); the tag, GitHub Release and
+PyPI publication are still pending authorisation.
 
 Optional capabilities name the extra they require (`[sql]`, `[yaml]`,
 `[images]`, `[app]`, `[api]`). Diagnostic engines never

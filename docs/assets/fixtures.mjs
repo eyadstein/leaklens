@@ -4,7 +4,7 @@
 export const fixtures = {
   "meta": {
     "product": "LeakLens",
-    "version": "0.13.0",
+    "version": "0.14.0",
     "generatedBy": "scripts/build_site_fixtures.py",
     "scanner": "leaklens.scanner.scan_source",
     "dataset": "leaklens.leakage.scan / score",
