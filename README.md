@@ -288,15 +288,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: eyadstein/leaklens@v0.13.0
+      - uses: eyadstein/leaklens@v0.14.0
         with:
           path: .
 ```
 
-The step fails when the scan exits `1`: a high-severity finding, or a trust score below `fail-under` when that input is set. Diagnostic findings never fail the step. Release `v0.13.0` predates the `fail-under` input, so a workflow that sets it must use a ref that contains it:
+The step fails when the scan exits `1`: a high-severity finding, or a trust score below `fail-under` when that input is set. Diagnostic findings never fail the step. The `fail-under` input was added after `v0.13.0`, so a workflow that sets it must pin `v0.14.0` or newer:
 
 ```yaml
-      - uses: eyadstein/leaklens@main
+      - uses: eyadstein/leaklens@v0.14.0
         with:
           path: .
           fail-under: 80
@@ -397,7 +397,7 @@ To publish a trust badge, run `leaklens --scan . --badge badge.json`, commit the
 ## Benchmarks
 
 - The code scanner is checked against 117 hand-written regression cases (63 leaky, 54 clean) with 0 false positives and 0 false negatives: `python -m leaklens.bench`, results in [docs/BENCHMARK.md](docs/BENCHMARK.md).
-- The same run also scores 32 advanced detection cases that exist on `main` but are not part of a published release yet; the latest published release is 0.13.0.
+- The same run also scores 32 advanced detection cases added after the original regression baseline; they ship in the published 0.14.0 release.
 - Dataset detectors have 12 synthetic cases (`python -m leaklens.bench_data`, [docs/DATA_BENCHMARK.md](docs/DATA_BENCHMARK.md)); missingness, drift, pipeline, text, deep learning, vision, SQL and AI each have their own labeled benchmark under `docs/`.
 - A static sample of 1,725 public notebooks that split their data found that 38% fit a preprocessing step before the split or on test data ([docs/STUDY.md](docs/STUDY.md)).
 - The real-world corpus holds 60 public notebooks, but only 8 have reviewed labels; on those 8 the scanner scores precision/recall/F1 1.00 ([docs/REALWORLD.md](docs/REALWORLD.md)). That is a smoke check on a tiny, non-random sample, not a population accuracy estimate.
@@ -452,7 +452,7 @@ Pre-commit hook:
 ```yaml
 repos:
   - repo: https://github.com/eyadstein/leaklens
-    rev: v0.13.0
+    rev: v0.14.0
     hooks:
       - id: leaklens
 ```
@@ -461,9 +461,9 @@ repos:
 
 ## Documentation and roadmap
 
-The latest published release is **0.13.0**. The prepared `0.14.0` release is in
-[CHANGELOG.md](CHANGELOG.md); changes merged after preparation are listed under
-"Unreleased". Release history lives there, not in this file.
+The latest published release is **0.14.0**. Release history, and the changes
+prepared for the next version, live in [CHANGELOG.md](CHANGELOG.md), not in
+this file.
 
 Implemented: dataset, split and code detectors; missingness; model arena; API and workspace; HTML, SARIF, JSON and badge reports; baselines and suppressions; the evidence graph and investigation plans; group leakage; image clustering and declared-split audits; and the opt-in SQL, text, deep-learning, drift, pipeline and AI engines.
 

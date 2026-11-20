@@ -714,9 +714,9 @@ def markdown(m: dict) -> str:
         + metrics_table(m["legacy"])
         + "\n## Additional categorized cases\n\n"
         + metrics_table(m["additional"])
-        + "\n## Advanced detection cases (unreleased on main)\n\n"
-        + "These cases run on `main` and are not part of a published release yet. "
-        "The latest published release is 0.13.0.\n\n"
+        + "\n## Advanced detection cases\n\n"
+        + "These cases cover detection rules added after the original "
+        "regression baseline.\n\n"
         + metrics_table(m["advanced"])
         + "\n## Category breakdown\n\n"
         + "\n".join(category_rows)

@@ -83,7 +83,10 @@ def test_cases_are_registered_before_the_main_guard():
     assert not late, f"case registration after the __main__ guard: lines {late}"
 
 
-def test_markdown_labels_advanced_cases_unreleased():
+def test_markdown_labels_advanced_cases_without_a_release_version():
     text = bench.markdown(evaluate())
-    assert "## Advanced detection cases (unreleased on main)" in text
+    assert "## Advanced detection cases" in text
+    # The generated doc must not hardcode whichever version happens to be
+    # installed, or it goes stale the moment the next release ships.
     assert "0.14.0" not in text
+    assert "0.13.0" not in text

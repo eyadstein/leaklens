@@ -99,7 +99,7 @@ def build_sbom() -> dict:
     own_purl = _purl(name, version)
     return {
         "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
-        "bom-format": "CycloneDX",
+        "bomFormat": "CycloneDX",
         "specVersion": "1.5",
         "version": 1,
         "metadata": {
@@ -149,7 +149,7 @@ def main(argv=None) -> int:
     out.write_text(text, encoding="utf-8")
     # Validate: parse back as JSON and check core CycloneDX keys.
     reparsed = json.loads(out.read_text(encoding="utf-8"))
-    assert reparsed["bom-format"] == "CycloneDX"
+    assert reparsed["bomFormat"] == "CycloneDX"
     assert reparsed["specVersion"] == "1.5"
     assert reparsed["metadata"]["component"]["name"] == "leaklens-ml"
     assert all(

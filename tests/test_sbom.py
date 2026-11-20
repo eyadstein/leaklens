@@ -17,7 +17,10 @@ def test_default_output_keeps_cyclonedx_payload(tmp_path, monkeypatch):
     monkeypatch.setattr(generate_sbom, "ROOT", tmp_path)
     assert generate_sbom.main(["generate_sbom.py"]) == 0
     bom = json.loads((tmp_path / "sbom" / "sbom.json").read_text(encoding="utf-8"))
-    assert bom["bom-format"] == "CycloneDX"
+    assert bom["bomFormat"] == "CycloneDX"
+    # CycloneDX JSON uses camelCase; the XML-only hyphenated key must not return.
+    assert "bom-format" not in bom
+    assert {"bomFormat", "specVersion", "version"} <= bom.keys()
     assert bom["specVersion"] == "1.5"
     assert bom["metadata"]["component"]["name"] == "leaklens-ml"
     assert bom["components"]
