@@ -461,7 +461,9 @@ repos:
 
 ## Documentation and roadmap
 
-The published release is **0.13.0**. Changes merged on `main` but not yet released are listed under "Unreleased" in [CHANGELOG.md](CHANGELOG.md). Release history lives there, not in this file.
+The latest published release is **0.13.0**. The prepared `0.14.0` release is in
+[CHANGELOG.md](CHANGELOG.md); changes merged after preparation are listed under
+"Unreleased". Release history lives there, not in this file.
 
 Implemented: dataset, split and code detectors; missingness; model arena; API and workspace; HTML, SARIF, JSON and badge reports; baselines and suppressions; the evidence graph and investigation plans; group leakage; image clustering and declared-split audits; and the opt-in SQL, text, deep-learning, drift, pipeline and AI engines.
 

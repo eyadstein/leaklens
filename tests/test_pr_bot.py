@@ -28,10 +28,21 @@ def _sensitive(files):
     "path",
     [
         "leaklens/schemas/report-1.schema.json",
+        "leaklens/schemas/nested/deep.json",
         "leaklens/manifest.py",
+        "leaklens/scanner.py",
+        "leaklens/cli.py",
+        "leaklens/temporal.py",
+        "leaklens/sqlscan.py",
+        "leaklens/api.py",
+        "leaklens/report.py",
+        "leaklens/partition.py",
+        "leaklens/ai/learned.py",
+        "leaklens/intelligence/orchestrator.py",
+        "leaklens/analysis/text/dedup.py",
     ],
 )
-def test_contract_files_need_owner_review(path):
+def test_runtime_and_contract_files_need_owner_review(path):
     assert _sensitive([path]) == [path]
 
 
@@ -62,8 +73,14 @@ def test_existing_protections_are_preserved(path):
         "tests/test_cli.py",
         "README.md",
         "docs/CONFIGURATION.md",
-        "leaklens/scanner.py",
         "examples/demo.py",
+        "leaklens_extra/scanner.py",
+        "docs/leaklens/scanner.py",
+        "src/leaklens/scanner.py",
+        "notleaklens/scanner.py",
+        "LEAKLENS/scanner.py",
+        "leaklensx.py",
+        "leaklens.md",
     ],
 )
 def test_ordinary_project_files_still_auto_merge(path):
@@ -77,7 +94,10 @@ def test_a_mixed_change_is_sensitive():
         "leaklens/schemas/report-1.schema.json",
         "README.md",
     ]
-    assert _sensitive(files) == ["leaklens/schemas/report-1.schema.json"]
+    assert _sensitive(files) == [
+        "leaklens/cli.py",
+        "leaklens/schemas/report-1.schema.json",
+    ]
 
 
 def test_the_sensitive_check_stops_before_the_auto_merge():
