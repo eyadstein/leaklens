@@ -24,6 +24,7 @@ from leaklens.public_api import (
     _read_bounded,
     create_app,
 )
+from leaklens.report_schema import REPORT_SCHEMA_URL
 from leaklens.upload_guard import UploadRejected
 
 
@@ -121,6 +122,7 @@ def test_capabilities_describe_real_limits_and_formats(client):
     payload = response.json()
     assert payload["live"] is True
     assert payload["engine"] == "leaklens.python"
+    assert payload["schema"] == REPORT_SCHEMA_URL
     assert payload["storage"] == "none"
     assert payload["endpoints"] == ["/inspect", "/audit", "/scan"]
     assert payload["limits"]["max_rows"] == 50
@@ -315,6 +317,7 @@ def test_audit_runs_real_detectors_and_returns_a_report(client):
     assert payload["live"] is True
     assert payload["engine"] == "leaklens.python"
     assert payload["version"] == __version__
+    assert payload["$schema"] == REPORT_SCHEMA_URL
     kinds = {finding["kind"] for finding in payload["findings"]}
     assert "target_leakage" in kinds
     expected = max(
@@ -519,6 +522,7 @@ def test_scan_runs_the_real_static_scanner(client):
     assert payload["live"] is True
     assert payload["engine"] == "leaklens.scanner.scan_source"
     assert payload["version"] == __version__
+    assert payload["$schema"] == REPORT_SCHEMA_URL
     assert payload["syntax_error"] is False
     kinds = {finding["kind"] for finding in payload["findings"]}
     assert kinds

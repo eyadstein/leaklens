@@ -386,7 +386,7 @@ def splits(argv) -> int:
         p.error(str(e))
 
     stats = audit.stats
-    rep = audit.to_dict()
+    rep = {"$schema": REPORT_SCHEMA_URL, **audit.to_dict()}
     _attach_missing_evidence(rep, sections={"splits": rep})
     if a.json:
         print(json.dumps(rep, indent=2))
@@ -1249,12 +1249,27 @@ def main(argv=None) -> int:
             tr = _read_dataset(a.train)
         except ImportError as e:
             p.error(str(e))
+        # A typo used to reach a detector as a KeyError traceback and exit 1,
+        # which reads as "leakage found". Name the column and exit 2 instead.
+        for column, label in ((target, "target"), (time_col, "time")):
+            if column and column not in tr.columns:
+                print(
+                    f"leaklens: {label} column {column!r} not found in {a.train}",
+                    file=sys.stderr,
+                )
+                return 2
         fs += scan(tr, target, threshold)
         if test_path:
             try:
                 te = _read_dataset(test_path)
             except ImportError as e:
                 p.error(str(e))
+            if time_col and time_col not in te.columns:
+                print(
+                    f"leaklens: time column {time_col!r} not found in {test_path}",
+                    file=sys.stderr,
+                )
+                return 2
             exact = split_overlap(tr, te)
             fs += exact
             if not exact:

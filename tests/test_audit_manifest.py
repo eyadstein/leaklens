@@ -136,7 +136,25 @@ def test_an_unsafe_input_path_is_reported(tmp_path, manifest):
     _write(tmp_path, document)
     issues = audit_manifest.verify(path)
     assert "unsafe path: ../outside.csv" in issues
-    assert issues.count("unsafe path: ../outside.csv") == 1
+    assert len([issue for issue in issues if issue.startswith("unsafe path")]) == 1
+    # The failure names the fix: --root must contain every declared input.
+    assert any("--root" in issue for issue in issues)
+
+
+def test_an_outside_input_verifies_once_root_contains_it(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "input.csv").write_text("uid,y\n1,0\n", encoding="utf-8")
+    document = audit_manifest.build(
+        assemble.build([]), inputs=[data / "input.csv"], root=work
+    )
+    assert document["inputs"][0]["path"] == (data / "input.csv").resolve().as_posix()
+    path = _write(work, document)
+    refused = audit_manifest.verify(path, root=work)
+    assert refused and refused[0].startswith("unsafe path")
+    assert audit_manifest.verify(path, root=tmp_path) == []
 
 
 def test_unknown_keys_fail_verification(tmp_path, manifest):

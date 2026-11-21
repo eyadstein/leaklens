@@ -301,6 +301,7 @@ def _verify_inputs(entries: list[Any], root: Path) -> list[str]:
     if len(entries) > MAX_INPUTS:
         return [f"too many input entries: {len(entries)}"]
     issues: list[str] = []
+    outside_root = False
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             issues.append(f"malformed input entry #{index}")
@@ -320,6 +321,7 @@ def _verify_inputs(entries: list[Any], root: Path) -> list[str]:
             target = resolve_within(root, value)
         except PathOutsideRoot:
             issues.append(f"unsafe path: {value}")
+            outside_root = True
             continue
         except (OSError, ValueError) as exc:
             issues.append(f"cannot resolve {value}: {exc}")
@@ -352,6 +354,11 @@ def _verify_inputs(entries: list[Any], root: Path) -> list[str]:
             continue
         if actual != recorded:
             issues.append(f"modified: {value}")
+    if outside_root:
+        issues.append(
+            "a declared input is outside the verification root; pass --root "
+            "with a directory that contains every input"
+        )
     return issues
 
 

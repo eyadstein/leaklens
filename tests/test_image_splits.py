@@ -8,6 +8,7 @@ import os
 import pytest
 
 from leaklens import cli, image_splits
+from leaklens.report_schema import REPORT_SCHEMA_URL
 
 
 def _write(path, data=b"image-bytes"):
@@ -530,6 +531,7 @@ def test_cli_splits_reports_a_finding_and_exits_one(tmp_path, capsys):
 
     assert cli.main(["splits", str(tmp_path), "--json"]) == 1
     payload = json.loads(capsys.readouterr().out)
+    assert payload["$schema"] == REPORT_SCHEMA_URL
     assert payload["ok"] is True
     assert payload["format"] == "coco"
     assert payload["findings"][0]["kind"] == "image_split_overlap"

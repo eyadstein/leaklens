@@ -72,3 +72,74 @@ def test_row_limit_zero_is_safe():
     test = _train()
     assert feature_overlap(train, test, "y", max_rows=0) == []
     assert near_duplicate_overlap(train, test, "y", max_rows=0) == []
+
+
+# ---------------------------------------------------------------------------
+# Sampling disclosure (#622)
+# ---------------------------------------------------------------------------
+
+_UNDER_CAP_FEATURE = (
+    "1 test row (50.0%) share an identical feature vector with train rows "
+    "(the label column is ignored); deduplicate before splitting"
+)
+
+
+def test_feature_overlap_message_is_unchanged_below_the_cap():
+    test = pd.DataFrame({"x": [2.0, 9.0], "city": ["Lyon", "Brest"], "y": [1, 0]})
+    assert feature_overlap(_train(), test, "y")[0].detail == _UNDER_CAP_FEATURE
+
+
+def _train_of_two():
+    return pd.DataFrame({"x": [1.0, 2.0], "city": ["Paris", "Lyon"], "y": [0, 1]})
+
+
+def test_feature_overlap_says_how_many_rows_it_examined():
+    # Every test row matches, so any deterministic sample still overlaps.
+    test = pd.DataFrame(
+        {"x": [2.0, 2.0, 2.0, 2.0], "city": ["Lyon"] * 4, "y": [1, 1, 1, 1]}
+    )
+    detail = feature_overlap(_train_of_two(), test, "y", max_rows=2)[0].detail
+    assert "2 of the 2 test rows examined" in detail
+    assert "a deterministic sample of 4 test and 2 train rows" in detail
+    # The sampled share must not be presented as a share of the split.
+    assert "%" not in detail
+
+
+def test_feature_overlap_conflict_message_says_it_used_a_sample():
+    test = pd.DataFrame(
+        {"x": [2.0, 2.0, 2.0, 2.0], "city": ["Lyon"] * 4, "y": [0, 0, 0, 0]}
+    )
+    detail = feature_overlap(_train_of_two(), test, "y", max_rows=2)[0].detail
+    assert "in a 2-row sample of 4 rows" in detail
+
+
+def test_near_duplicate_message_is_unchanged_below_the_cap():
+    train = pd.DataFrame({"city": ["Paris"], "x": [1.0], "y": [0]})
+    test = pd.DataFrame({"city": ["paris "], "x": [1.0], "y": [0]})
+    detail = near_duplicate_overlap(train, test, "y")[0].detail
+    assert "1 test rows (100.0%) match a train row after" in detail
+
+
+def test_near_duplicate_reports_examined_and_declared_counts():
+    train = pd.DataFrame({"city": ["Paris", "Lyon"], "x": [1.0, 2.0], "y": [0, 1]})
+    test = pd.DataFrame({"city": ["paris "] * 4, "x": [1.0] * 4, "y": [0] * 4})
+    finding = near_duplicate_overlap(train, test, "y", max_rows=2)[0]
+    assert "2 of the 2 test rows examined match" in finding.detail
+    assert "a deterministic sample of 4 test and 2 train rows" in finding.detail
+    assert "%" not in finding.detail
+    assert (
+        finding.evidence[0].observed == "2 of 2 examined test rows matched (4 declared)"
+    )
+
+
+def test_sampling_disclosure_is_deterministic():
+    test = pd.DataFrame(
+        {"x": [2.0, 2.0, 2.0, 2.0], "city": ["Lyon"] * 4, "y": [1, 1, 1, 1]}
+    )
+    first = feature_overlap(_train_of_two(), test, "y", max_rows=2)[0]
+    second = feature_overlap(_train_of_two(), test, "y", max_rows=2)[0]
+    assert (first.kind, first.severity, first.detail) == (
+        second.kind,
+        second.severity,
+        second.detail,
+    )

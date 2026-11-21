@@ -21,11 +21,21 @@ def _source() -> str:
 
 
 def test_every_report_payload_names_the_schema() -> None:
-    """One stamp per payload: images, text, dl and the data audit."""
+    """One stamp per payload: images, text, dl, splits and the data audit."""
     stamps = re.findall(r'"\$schema":\s*REPORT_SCHEMA_URL', _source())
 
-    assert len(stamps) == 4, (
-        f"expected 4 report payloads to name the schema, found {len(stamps)}"
+    assert len(stamps) == 5, (
+        f"expected 5 report payloads to name the schema, found {len(stamps)}"
+    )
+
+
+def test_the_api_payloads_name_the_schema() -> None:
+    """The public API returns the same finding shape, so it names it too."""
+    api = CLI.with_name("public_api.py").read_text(encoding="utf-8")
+    stamps = re.findall(r'"\$schema":\s*REPORT_SCHEMA_URL', api)
+
+    assert len(stamps) == 2, (
+        f"expected /audit and /scan to name the schema, found {len(stamps)}"
     )
 
 

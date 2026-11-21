@@ -2,6 +2,7 @@
 
 Usage:
     python scripts/generate_sbom.py [OUT]
+    python scripts/generate_sbom.py --help
 
 The default output is ``sbom/sbom.json``, deliberately outside ``dist/`` so
 the PyPI publisher can never upload it. The generator is standalone: it
@@ -133,9 +134,33 @@ def _inside_dist(path: Path) -> bool:
     return resolved == dist or dist in resolved.parents
 
 
+_USAGE = """usage: generate_sbom.py [OUT]
+
+Write a CycloneDX 1.5 SBOM for leaklens-ml.
+
+positional arguments:
+  OUT         output path (default: sbom/sbom.json; must be outside dist/)
+"""
+
+
 def main(argv=None) -> int:
     argv = sys.argv if argv is None else argv
-    out = Path(argv[1]) if len(argv) > 1 else ROOT / "sbom" / "sbom.json"
+    args = list(argv[1:])
+    # An option-shaped argument is a usage error, not a filename: taking it as
+    # the output path wrote a file literally named "--help".
+    if any(arg in ("-h", "--help") for arg in args):
+        print(_USAGE, end="")
+        return 0
+    if any(arg.startswith("-") for arg in args):
+        print(_USAGE, end="", file=sys.stderr)
+        bad = next(arg for arg in args if arg.startswith("-"))
+        print(f"::error::unknown option: {bad}", file=sys.stderr)
+        return 2
+    if len(args) > 1:
+        print(_USAGE, end="", file=sys.stderr)
+        print("::error::only one output path is accepted", file=sys.stderr)
+        return 2
+    out = Path(args[0]) if args else ROOT / "sbom" / "sbom.json"
     if _inside_dist(out):
         print(
             f"::error::SBOM output {out} must be outside dist/ "

@@ -159,6 +159,32 @@ def test_cli_offset_aware_pair_without_overlap_exits_clean(tmp_path):
     assert main([str(train), "--test", str(test), "--target", "y", "--time", "t"]) == 0
 
 
+def test_cli_unknown_target_column_exits_two_without_a_traceback(tmp_path, capsys):
+    path = tmp_path / "d.csv"
+    pd.DataFrame({"x": [1, 2, 3], "y": [0, 1, 0]}).to_csv(path, index=False)
+    assert main([str(path), "--target", "nope"]) == 2
+    err = capsys.readouterr().err
+    assert "target column 'nope' not found" in err
+    assert "Traceback" not in err
+
+
+def test_cli_unknown_time_column_exits_two_in_either_file(tmp_path, capsys):
+    train = tmp_path / "train.csv"
+    test = tmp_path / "test.csv"
+    pd.DataFrame({"t": ["2024-01-01", "2024-01-02"], "y": [0, 1]}).to_csv(
+        train, index=False
+    )
+    pd.DataFrame({"t": ["2024-01-03", "2024-01-04"], "y": [0, 1]}).to_csv(
+        test, index=False
+    )
+    assert main([str(train), "--target", "y", "--time", "nope"]) == 2
+    assert "time column 'nope' not found" in capsys.readouterr().err
+
+    pd.DataFrame({"o": [1, 2], "y": [0, 1]}).to_csv(test, index=False)
+    assert main([str(train), "--test", str(test), "--target", "y", "--time", "t"]) == 2
+    assert f"not found in {test}" in capsys.readouterr().err
+
+
 def test_score_and_cli(tmp_path):
     d = _df()
     d["leak"] = d["y"] * 2.0

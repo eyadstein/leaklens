@@ -65,6 +65,7 @@ from .leakage import (
 from .missingness import audit_missingness
 from .ratelimit import SlidingWindowLimiter
 from .report import render
+from .report_schema import REPORT_SCHEMA_URL
 from .scanner import scan_source
 from .upload_guard import (
     DEFAULT_FORMATS,
@@ -653,6 +654,7 @@ def run_audit_job(
             impact = None
     sections = _scan_sections(findings)
     payload = {
+        "$schema": REPORT_SCHEMA_URL,
         "live": True,
         "engine": "leaklens.python",
         "version": __version__,
@@ -738,6 +740,7 @@ def run_code_job(
     findings = scan_source(source, name)
     sections = _scan_sections(findings)
     payload = {
+        "$schema": REPORT_SCHEMA_URL,
         "live": True,
         "engine": "leaklens.scanner.scan_source",
         "version": __version__,
@@ -975,6 +978,7 @@ def create_app(
             "service": "LeakLens live scan API",
             "version": __version__,
             "engine": "leaklens.python",
+            "schema": REPORT_SCHEMA_URL,
             "endpoints": ["/inspect", "/audit", "/scan"],
             "limits": settings.public_limits(),
             "formats": available_formats(settings.limits),

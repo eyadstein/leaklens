@@ -390,12 +390,16 @@ def group_overlap(train, test, group_col):
 
 
 def _bounded_pair(train, test, max_rows):
-    """Deterministic, bounded copies so duplicate checks stay cheap on large files."""
+    """Deterministic, bounded copies plus the declared row counts.
+
+    The third value is ``(len(train), len(test))`` before sampling, so a caller
+    can say how much of the split it actually examined.
+    """
     if max_rows <= 0:
-        return None, None
+        return None, None, None
     a = train if len(train) <= max_rows else train.sample(max_rows, random_state=0)
     b = test if len(test) <= max_rows else test.sample(max_rows, random_state=0)
-    return a.reset_index(drop=True), b.reset_index(drop=True)
+    return a.reset_index(drop=True), b.reset_index(drop=True), (len(train), len(test))
 
 
 def feature_overlap(train, test, target=None, max_rows=50_000):
@@ -406,9 +410,11 @@ def feature_overlap(train, test, target=None, max_rows=50_000):
     exactly the duplicates that inflate held-out scores (the model has seen the
     features and memorised one of the conflicting labels).
     """
-    a, b = _bounded_pair(train, test, max_rows)
+    a, b, totals = _bounded_pair(train, test, max_rows)
     if a is None or b is None or a.empty or b.empty:
         return []
+    total_train, total_test = totals
+    sampled = len(a) < total_train or len(b) < total_test
     cols = [c for c in a.columns if c in b.columns and c != target]
     if not cols:
         return []
@@ -450,25 +456,34 @@ def feature_overlap(train, test, target=None, max_rows=50_000):
     rows = "row" if n == 1 else "rows"
     if conflicts:
         cro = "row" if conflicts == 1 else "rows"
+        lead = (
+            f"{conflicts} test {cro} in a {len(b)}-row sample of {total_test} rows"
+            if sampled
+            else f"{conflicts} test {cro}"
+        )
         return [
             Finding(
                 "high",
                 "feature_overlap",
                 "*",
-                f"{conflicts} test {cro} share a feature vector with train rows but "
+                f"{lead} share a feature vector with train rows but "
                 f"carry a different label; duplicate samples with conflicting labels "
                 f"leak across the split",
             )
         ]
-    return [
-        Finding(
-            "medium",
-            "feature_overlap",
-            "*",
-            f"{n} test {rows} ({n / len(b):.1%}) share an identical feature vector with "
-            f"train rows (the label column is ignored); deduplicate before splitting",
+    if sampled:
+        detail = (
+            f"{n} of the {len(b)} test rows examined share an identical feature "
+            f"vector with train rows (a deterministic sample of {total_test} test "
+            f"and {total_train} train rows; the label column is ignored); "
+            f"deduplicate before splitting"
         )
-    ]
+    else:
+        detail = (
+            f"{n} test {rows} ({n / len(b):.1%}) share an identical feature vector with "
+            f"train rows (the label column is ignored); deduplicate before splitting"
+        )
+    return [Finding("medium", "feature_overlap", "*", detail)]
 
 
 def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_columns=64):
@@ -480,9 +495,11 @@ def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_column
     is given, because near-duplicates with different labels are the most
     damaging case.  A cheap deterministic sample keeps runtime bounded.
     """
-    a, b = _bounded_pair(train, test, max_rows)
+    a, b, totals = _bounded_pair(train, test, max_rows)
     if a is None or b is None or a.empty or b.empty:
         return []
+    total_train, total_test = totals
+    sampled = len(a) < total_train or len(b) < total_test
     cols = [c for c in a.columns if c in b.columns and c != target]
     if not cols or len(cols) > max_columns:
         return []
@@ -505,14 +522,27 @@ def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_column
     n = int(right.isin(set(left)).sum())
     if n == 0:
         return []
+    if sampled:
+        detail = (
+            f"{n} of the {len(b)} test rows examined match a train row after "
+            f"case/whitespace normalisation and rounding numbers to 4 decimals "
+            f"(a deterministic sample of {total_test} test and {total_train} train "
+            f"rows); check for near-duplicate samples before splitting"
+        )
+        observed = f"{n} of {len(b)} examined test rows matched ({total_test} declared)"
+    else:
+        detail = (
+            f"{n} test rows ({n / len(b):.1%}) match a train row after "
+            f"case/whitespace normalisation and rounding numbers to 4 decimals; "
+            f"check for near-duplicate samples before splitting"
+        )
+        observed = f"{n} of {len(b)} test rows matched"
     return [
         Finding(
             "medium",
             "near_duplicate_overlap",
             "*",
-            f"{n} test rows ({n / len(b):.1%}) match a train row after "
-            f"case/whitespace normalisation and rounding numbers to 4 decimals; "
-            f"check for near-duplicate samples before splitting",
+            detail,
             evidence=(
                 Evidence(
                     source="split",
@@ -521,7 +551,7 @@ def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_column
                         "test rows match train rows after case/whitespace and "
                         "numeric normalisation"
                     ),
-                    observed=f"{n} of {len(b)} test rows matched",
+                    observed=observed,
                     expected="0 matches after normalisation",
                 ),
             ),

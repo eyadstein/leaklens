@@ -42,7 +42,9 @@ that directory are stored relative (portable); paths outside it are stored
 absolute. Verification resolves them inside `--root` (default: the current
 directory) and refuses any entry that resolves outside it, including `..`,
 another drive, UNC and device paths, and a symlink whose target is outside the
-root.
+root. A manifest written for an input outside the directory it was written in
+therefore needs `--root` set to a directory that contains every input;
+`leaklens verify` names that fix in the failure message.
 
 ## Digest recipe
 

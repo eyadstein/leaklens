@@ -7,7 +7,9 @@ Three jobs:
 * prove that a built wheel and source distribution contain exactly the files
   the tagged source says they must, byte for byte, and nothing else;
 * prove that the version declared in ``pyproject.toml`` (authoritative) is the
-  same in the runtime package, ``CITATION.cff`` and the changelog heading.
+  same in the runtime package, ``CITATION.cff`` and the changelog heading, and
+  that ``CITATION.cff`` carries a real ``date-released`` that agrees with the
+  changelog date and with ``--release-date`` when one is supplied.
 
 Expected membership is derived from the checked-out tree and the authoritative
 packaging configuration (``pyproject.toml`` package data plus the ``MANIFEST.in``
@@ -23,6 +25,7 @@ import re
 import sys
 import tarfile
 import zipfile
+from datetime import date
 from pathlib import Path
 
 try:
@@ -38,6 +41,7 @@ _RUNTIME_VERSION_RE = re.compile(
 _CITATION_VERSION_RE = re.compile(
     r'^version:\s*["\']?([^"\'\s]+)["\']?\s*$', re.MULTILINE
 )
+_CITATION_DATE_RE = re.compile(r'^date-released:\s*["\']?(\S+)["\']?\s*$', re.MULTILINE)
 _PACKAGE = "leaklens"
 _PACKAGE_NAME = "leaklens-ml"
 _EGG_INFO = _PACKAGE_NAME.replace("-", "_") + ".egg-info/"
@@ -80,6 +84,28 @@ def citation_version(path: Path) -> str:
     return match.group(1)
 
 
+def citation_date(path: Path) -> str:
+    """Return the top-level ``date-released`` field from a CITATION.cff file."""
+    match = _CITATION_DATE_RE.search(path.read_text(encoding="utf-8"))
+    if match is None:
+        raise ValueError(f"{path} has no date-released field (required as YYYY-MM-DD)")
+    try:
+        return _iso_date(match.group(1))
+    except ValueError as exc:
+        raise ValueError(f"{path} date-released is invalid: {exc}") from exc
+
+
+def _iso_date(value: str) -> str:
+    """Validate one ``YYYY-MM-DD`` calendar date and return it unchanged."""
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        raise ValueError(f"{value!r} is not a YYYY-MM-DD date") from None
+    if parsed.isoformat() != value:
+        raise ValueError(f"{value!r} is not a YYYY-MM-DD date")
+    return value
+
+
 def changelog_heading(path: Path) -> str:
     """Return the first ``## `` heading, the unreleased/release entry."""
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -88,12 +114,13 @@ def changelog_heading(path: Path) -> str:
     raise ValueError(f"{path} has no '## ' release heading")
 
 
-def check_versions(source_root: Path) -> str:
+def check_versions(source_root: Path, *, release_date: str | None = None) -> str:
     """Raise unless every declared version agrees with ``pyproject.toml``.
 
     The changelog may stay on ``Unreleased``; once a release is prepared, its
     heading must be ``<version>`` (optionally ``[<version>]``) with an optional
-    `` - <date>`` suffix.
+    `` - <date>`` suffix. ``CITATION.cff`` must carry a real ``date-released``
+    that matches that changelog date and ``release_date`` when it is given.
     """
     root = Path(source_root)
     pyproject = root / "pyproject.toml"
@@ -119,6 +146,26 @@ def check_versions(source_root: Path) -> str:
             f"{changelog} heading {heading!r} must be 'Unreleased' or "
             f"'{version}' (optionally ' - <date>')"
         )
+    citation = root / "CITATION.cff"
+    released = citation_date(citation)
+    heading_date = heading.partition(" - ")[2].strip()
+    if heading_date:
+        try:
+            heading_date = _iso_date(heading_date)
+        except ValueError as exc:
+            raise ValueError(f"{changelog} heading date is invalid: {exc}") from exc
+        if heading_date != released:
+            raise ValueError(
+                f"{changelog} release date {heading_date!r} does not match "
+                f"{citation} date-released {released!r}"
+            )
+    if release_date is not None:
+        expected = _iso_date(release_date)
+        if expected != released:
+            raise ValueError(
+                f"release date {expected!r} does not match "
+                f"{citation} date-released {released!r}"
+            )
     return version
 
 
@@ -463,6 +510,11 @@ def main(argv=None) -> int:
         type=Path,
         help="checked-out source tree that defines the expected members",
     )
+    parser.add_argument(
+        "--release-date",
+        default=None,
+        help="release date (YYYY-MM-DD) that CITATION.cff date-released must match",
+    )
     parser.add_argument("--event", default="release", help="GitHub event name")
     parser.add_argument("--ref", default="", help="GitHub ref, e.g. refs/heads/main")
     args = parser.parse_args(argv)
@@ -471,7 +523,7 @@ def main(argv=None) -> int:
 
     try:
         if args.versions:
-            version = check_versions(args.source_root)
+            version = check_versions(args.source_root, release_date=args.release_date)
             print(
                 f"Version {version} is consistent across pyproject.toml, "
                 "leaklens/__init__.py, CITATION.cff and CHANGELOG.md"

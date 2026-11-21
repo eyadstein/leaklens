@@ -105,3 +105,86 @@ def test_the_size_cap_is_enforced_before_parsing():
 def test_the_depth_cap_rejects_an_over_deep_message():
     with pytest.raises(ArtifactParseError):
         onnx._read_fields(b"", 0, 0, depth=onnx.MAX_PROTO_DEPTH + 1)
+
+
+# ---------------------------------------------------------------------------
+# External tensor data (#630)
+# ---------------------------------------------------------------------------
+
+
+def _external_tensor(name: str, location: str, *, data_location: int = 1) -> bytes:
+    entry = _string(1, "location") + _string(2, location)
+    return (
+        _string(8, name)
+        + _field(2, 0, 1)
+        + _field(13, 2, entry)
+        + _field(14, 0, data_location)
+    )
+
+
+def _model_with(initializer: bytes) -> bytes:
+    graph = (
+        _string(2, "main_graph")
+        + _field(5, 2, initializer)
+        + _field(11, 2, _value_info("input_ids"))
+    )
+    return (
+        _string(2, "leaklens-test")
+        + _field(7, 2, graph)
+        + _field(8, 2, _field(2, 0, 17))
+    )
+
+
+def test_external_tensor_data_is_reported_without_opening_it():
+    meta = onnx.parse_onnx(_model_with(_external_tensor("weight", "weights.bin")))
+    assert meta.initializer_count == 1
+    assert meta.external_data_count == 1
+    assert meta.external_data == ("weights.bin",)
+
+
+def test_a_model_without_external_data_is_unchanged():
+    meta = onnx.parse_onnx(_model())
+    assert meta.external_data_count == 0
+    assert meta.external_data == ()
+    from leaklens.analysis.artifacts import formats
+
+    summary = formats._summary(meta)
+    assert summary == {
+        "producer": "leaklens-test",
+        "graph": "main_graph",
+        "opset": [17],
+        "inputs": ["input_ids"],
+        "outputs": ["logits"],
+        "initializer_count": 1,
+    }
+
+
+def test_the_summary_names_the_external_locations():
+    from leaklens.analysis.artifacts import formats
+
+    summary = formats._summary(
+        onnx.parse_onnx(_model_with(_external_tensor("weight", "weights.bin")))
+    )
+    assert summary["external_data_count"] == 1
+    assert summary["external_data"] == ["weights.bin"]
+
+
+def test_recorded_external_locations_are_capped():
+    tensors = b"".join(
+        _field(5, 2, _external_tensor(f"w{index}", f"shard-{index}.bin"))
+        for index in range(onnx.MAX_RECORDED_NAMES + 3)
+    )
+    graph = _string(2, "main_graph") + tensors
+    meta = onnx.parse_onnx(_string(2, "p") + _field(7, 2, graph))
+    assert meta.external_data_count == onnx.MAX_RECORDED_NAMES + 3
+    assert len(meta.external_data) == onnx.MAX_RECORDED_NAMES
+
+
+def test_a_malformed_external_entry_does_not_crash_the_parser():
+    # Field 13 with a body that is not a valid StringStringEntryProto: the tensor
+    # is still reported as external, but no location is invented.
+    broken = _string(8, "weight") + _field(13, 2, b"\x0a\x7f") + _field(14, 0, 1)
+    meta = onnx.parse_onnx(_model_with(broken))
+    assert meta.initializer_count == 1
+    assert meta.external_data_count == 1
+    assert meta.external_data == ()

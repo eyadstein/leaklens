@@ -34,6 +34,8 @@ class OnnxMeta:
     initializer_count: int
     initializers: tuple[str, ...]
     digest: str
+    external_data_count: int = 0
+    external_data: tuple[str, ...] = ()
 
 
 def _varint(data: bytes, pos: int, end: int) -> tuple[int, int]:
@@ -111,6 +113,33 @@ def _first_string(body: bytes, field: int, depth: int) -> str:
     return ""
 
 
+def _external_data(tensor: bytes) -> tuple[bool, str]:
+    """``(weights live outside the file, first declared location)``.
+
+    Only the declaration is read: the referenced shard is never opened,
+    resolved or hashed. A TensorProto that cannot be decoded is not treated as
+    external, so a malformed model stays a parse error at the caller.
+    """
+    external = False
+    location = ""
+    for number, wire, payload in _read_fields(tensor, 0, len(tensor), depth=3):
+        if number == 14 and wire == _WIRE_VARINT:  # TensorProto.data_location
+            external = external or int(payload) == 1  # 1 == EXTERNAL
+        elif number == 13 and wire == _WIRE_LENGTH:  # TensorProto.external_data
+            external = True
+            try:
+                entry = _body(payload)
+                key = _first_string(entry, 1, 4)
+                value = _first_string(entry, 2, 4)
+            except ArtifactParseError:
+                # A broken entry still proves the tensor is external; only the
+                # location string is lost.
+                continue
+            if key == "location" and not location:
+                location = value
+    return external, location
+
+
 def parse_onnx(data: bytes, *, max_bytes: int = MAX_ONNX_BYTES) -> OnnxMeta:
     """Decode the reported ModelProto fields from ``data`` within the caps."""
     if len(data) > max_bytes:
@@ -124,6 +153,8 @@ def parse_onnx(data: bytes, *, max_bytes: int = MAX_ONNX_BYTES) -> OnnxMeta:
     outputs: list[str] = []
     initializers: list[str] = []
     initializer_count = 0
+    external_data_count = 0
+    external_data: list[str] = []
     for number, wire, payload in _read_fields(data, 0, len(data), depth=0):
         if wire != _WIRE_LENGTH:
             continue
@@ -140,6 +171,16 @@ def parse_onnx(data: bytes, *, max_bytes: int = MAX_ONNX_BYTES) -> OnnxMeta:
                     initializer_count += 1
                     if len(initializers) < MAX_RECORDED_NAMES:
                         initializers.append(_first_string(_body(value), 8, 2))
+                    try:
+                        external, location = _external_data(_body(value))
+                    except ArtifactParseError:
+                        # A malformed TensorProto stays in the initializer count
+                        # without claiming anything about its storage.
+                        external, location = False, ""
+                    if external:
+                        external_data_count += 1
+                        if location and len(external_data) < MAX_RECORDED_NAMES:
+                            external_data.append(location)
                 elif inner in (11, 12):  # GraphProto.input / output
                     name = _first_string(_body(value), 1, 2)
                     if name:
@@ -157,4 +198,6 @@ def parse_onnx(data: bytes, *, max_bytes: int = MAX_ONNX_BYTES) -> OnnxMeta:
         initializer_count=initializer_count,
         initializers=tuple(initializers),
         digest=hashlib.sha256(data).hexdigest(),
+        external_data_count=external_data_count,
+        external_data=tuple(external_data),
     )

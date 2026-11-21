@@ -106,7 +106,7 @@ def _summary(meta: object) -> dict[str, object]:
             "data_bytes": meta.data_bytes,
         }
     if isinstance(meta, onnx.OnnxMeta):
-        return {
+        summary: dict[str, object] = {
             "producer": meta.producer,
             "graph": meta.graph_name,
             "opset": list(meta.opset),
@@ -114,6 +114,11 @@ def _summary(meta: object) -> dict[str, object]:
             "outputs": list(meta.outputs),
             "initializer_count": meta.initializer_count,
         }
+        if meta.external_data_count:
+            # The digest covers the .onnx bytes only, so say what is elsewhere.
+            summary["external_data_count"] = meta.external_data_count
+            summary["external_data"] = list(meta.external_data)
+        return summary
     return {}
 
 

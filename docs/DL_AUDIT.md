@@ -118,7 +118,7 @@ No artifact is deserialized. The intake (`analysis/artifacts/`) reads metadata o
 | Format | What is read | Caps |
 |---|---|---|
 | safetensors | 8-byte header length, JSON header, tensor names/dtypes/offsets, `__metadata__` | header ≤ 16 MiB, ≤ 100 000 tensors, ≤ 32 recorded names, offsets validated and non-overlapping |
-| ONNX | protobuf fields only: producer, graph name, opset imports, graph inputs/outputs, initializer count/names | file ≤ 64 MiB, ≤ 200 000 fields, nesting ≤ 16, every length checked against the buffer |
+| ONNX | protobuf fields only: producer, graph name, opset imports, graph inputs/outputs, initializer count/names, and whether tensor weights are declared external (locations recorded, never opened) | file ≤ 64 MiB, ≤ 200 000 fields, nesting ≤ 16, every length checked against the buffer |
 | JSON | top-level type, key/item count, SHA-256 | ≤ 2 MiB, depth ≤ 64, duplicate keys rejected |
 
 Pickle magic (`\x80\x02`–`\x80\x05`) is checked **before** the extension, so a
