@@ -89,3 +89,28 @@ def test_missing_optional_dependency_is_actionable(tmp_path, monkeypatch, capsys
         main([str(path), "--target", "y"])
     assert exc.value.code == 2
     assert "openpyxl" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("suffix", ["jsonl", "ndjson"])
+def test_json_lines_input_supported(tmp_path, suffix):
+    from leaklens.readers import DatasetLimitError
+
+    expected = pd.DataFrame({"feature": [1, 2], "target": [0, 1]})
+    path = tmp_path / f"data.{suffix}"
+    path.write_text(
+        expected.to_json(orient="records", lines=True) + "\n", encoding="utf-8"
+    )
+
+    assert read_dataset(path).equals(expected)
+    assert read_dataset(path, max_rows=2).equals(expected)
+    with pytest.raises(DatasetLimitError, match="too many rows"):
+        read_dataset(path, max_rows=1)
+
+
+@pytest.mark.parametrize("suffix", ["jsonl", "ndjson"])
+def test_malformed_json_lines_names_input_file(tmp_path, suffix):
+    path = tmp_path / f"broken.{suffix}"
+    path.write_text('{"feature": 1, "target": 0}\n{broken}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match=path.name):
+        read_dataset(path)
