@@ -34,7 +34,7 @@ without an owner and a validation story.
 
 | Horizon | Work | Depends on |
 |---|---|---|
-| **Near (next 2–3 phases)** | **Product intelligence:** close the target-derived-statistics gap — a `groupby(...)["target"].transform(...)` over the full frame after the split is silent today (evidence in #63). **Research and evaluation:** finish the first hand-reviewed expansion batch and enforce the development/holdout split (#653). **Ecosystem and adoption:** publish the adoption baseline and a first-run tutorial (#217). | Nothing outside the current engine; corpus work depends on reviewer time. |
+| **Near (next 2–3 phases)** | **Product intelligence:** extend post-split detection to non-target group statistics and frequency encodings (the target-derived `groupby(...)[target].transform(...)` gap is closed by `target_encode_after_split`). **Research and evaluation:** record independent second reviews for the expansion batch — the workflow and the cluster-safe development/holdout split (#653) shipped, but every current verdict still has one reviewer. **Ecosystem and adoption:** a first-run tutorial (#217) and a clean-scan example. | Nothing outside the current engine; corpus work depends on reviewer time. |
 | **Medium** | **Engineering excellence:** cross-file and cross-notebook dataflow (#51); image-code understanding for augmentation-before-split and subject-level splits (#68); one audit spanning dataset + source + pipeline. | Near-term detector work; Stage 1 precision published first. |
 | **Long** | **Engineering excellence:** remediation as a reviewable patch applied to a copy. **Ecosystem and adoption:** a reusable audited corpus (#513) and third-party detector packs. | Medium-term contracts; external contribution volume. |
 

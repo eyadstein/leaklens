@@ -145,6 +145,20 @@ for finding in findings:
         <section id="detections" data-doc-section>
           <h2>Detections</h2>
           <p>Severity is about confidence in the observed pattern. High means the code or data satisfies a confirmed leakage rule; medium means the pattern is suspicious and context-dependent; low means a reproducibility or hygiene issue that rarely changes a score on its own.</p>
+          <h3>Which audit should I run?</h3>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Artifact</th><th>Command</th><th>What you get</th></tr></thead>
+              <tbody>
+                <tr><td>CSV / Parquet / Excel dataset</td><td><code>leaklens data.csv --target label</code></td><td>Target leakage, split overlap, group and temporal checks, trust score.</td></tr>
+                <tr><td>Python or notebook source</td><td><code>leaklens --scan path/to/code</code></td><td>Pipeline-order, tuning, time and reproducibility findings with line references.</td></tr>
+                <tr><td>SQL query folder</td><td><code>leaklens --scan queries/ --sql --sql-dialect postgres</code></td><td>Target-as-feature lineage and unresolved-column diagnostics (needs <code>[sql]</code>).</td></tr>
+                <tr><td>Image train/test folders or a declared split</td><td><code>leaklens images train/ test/</code> or <code>leaklens splits dataset.yaml</code></td><td>Near-duplicate image clusters and declared train/validation overlap.</td></tr>
+                <tr><td>Text train/eval files</td><td><code>leaklens text train.txt eval.txt</code></td><td>Exact and near-duplicate text, eval fingerprints, RAG index wiring.</td></tr>
+                <tr><td>Training directory or checkpoint</td><td><code>leaklens dl run/</code></td><td>Split provenance, config and artifact findings; diagnostic only.</td></tr>
+              </tbody>
+            </table>
+          </div>
           <h3>Dataset checks</h3>
           <div class="table-wrap">
             <table class="data">
@@ -175,6 +189,7 @@ for finding in findings:
                 <tr><td><code>manual_scale_before_split</code></td><td>Manual mean/std or min/max scaling is computed before the split.</td><td>high</td></tr>
                 <tr><td><code>resample_before_split</code></td><td>SMOTE or another sampler runs before <code>train_test_split</code>.</td><td>high</td></tr>
                 <tr><td><code>target_encode_before_split</code></td><td>Target means or aggregates become a feature before the split.</td><td>high</td></tr>
+                <tr><td><code>target_encode_after_split</code></td><td>A post-split feature is built with target statistics over the frame the split divided, not a train partition.</td><td>high</td></tr>
                 <tr><td><code>feature_selection_before_split</code></td><td><code>SelectKBest</code>, <code>RFE</code>, <code>SelectFromModel</code> or similar is fitted before the split.</td><td>high</td></tr>
                 <tr><td><code>frequency_encode_before_split</code></td><td><code>value_counts</code> is mapped into a column before the split; no label involved.</td><td>low</td></tr>
                 <tr><td><code>future_target_feature_before_split</code></td><td>A future-window target statistic is used as a feature.</td><td>high</td></tr>
