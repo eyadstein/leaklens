@@ -17,6 +17,10 @@ ID_NAME = re.compile(
     r"(^|[^a-z])(id|uuid|guid|key|index|idx|row)([^a-z]|$)", re.IGNORECASE
 )
 
+# The one severity vocabulary: the report-1 enum, the score weights and the
+# exit gate all read it, so an unknown value is refused at construction.
+SEVERITY_WEIGHTS = {"high": 35, "medium": 15, "low": 5}
+
 
 @dataclass
 class Finding:
@@ -30,6 +34,8 @@ class Finding:
 
     def __post_init__(self) -> None:
         self.evidence = coerce_evidence(self.evidence)
+        if not isinstance(self.severity, str) or self.severity not in SEVERITY_WEIGHTS:
+            raise ValueError("severity must be one of high, medium or low")
         if type(self.diagnostic) is not bool:
             raise TypeError("diagnostic must be a bool")
         if self.stable_key is not None:
@@ -329,13 +335,16 @@ def scan(df, target, threshold=0.95):
 
 
 def score(findings) -> int:
-    """Trust score; opt-in diagnostics never count against it."""
-    pen = {"high": 35, "medium": 15, "low": 5}
+    """Trust score; opt-in diagnostics never count against it.
+
+    A :class:`Finding` cannot carry an unknown severity (``__post_init__``
+    refuses it), so the fallback only guards duck-typed findings from other code.
+    """
     return max(
         0,
         100
         - sum(
-            pen.get(f.severity, 0)
+            SEVERITY_WEIGHTS.get(f.severity, 0)
             for f in findings
             if not getattr(f, "diagnostic", False)
         ),

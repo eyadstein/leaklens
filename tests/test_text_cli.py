@@ -178,6 +178,50 @@ def test_embeddings_are_opt_in_and_need_a_model(tmp_path, capsys):
     assert "test-model" in json.dumps(payload)
 
 
+def test_embeddings_need_an_order_statement_when_rows_were_skipped(tmp_path, capsys):
+    train, test = _corpus(tmp_path, [BASE, "tiny"], [BASE])
+    train_vectors = tmp_path / "train.npy"
+    test_vectors = tmp_path / "test.npy"
+    np.save(train_vectors, np.array([[1.0, 0.0]], dtype=np.float32))
+    np.save(test_vectors, np.array([[1.0, 0.0]], dtype=np.float32))
+    base = [
+        "text",
+        str(train),
+        str(test),
+        "--json",
+        "--min-chars",
+        "10",
+        "--embeddings",
+        str(train_vectors),
+        str(test_vectors),
+        "--embedding-model",
+        "test-model",
+    ]
+
+    with pytest.raises(SystemExit) as refused:
+        main(base)
+    assert refused.value.code == 2
+    message = capsys.readouterr().err
+    assert "1 train and 0 test row(s) were skipped" in message
+    assert "--embeddings-order" in message
+
+    assert main([*base, "--embeddings-order", "kept"]) == 0
+    assert "text_embedding_similarity" in capsys.readouterr().out
+
+    np.save(
+        train_vectors,
+        np.array([[1.0, 0.0], [1.0, 0.0]], dtype=np.float32),
+    )
+    assert main([*base, "--embeddings-order", "source"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["skipped"] == {"train": 1, "test": 0}
+    assert any(
+        "rows=source" in evidence["observed"]
+        for finding in payload["findings"]
+        for evidence in finding["evidence"]
+    )
+
+
 def test_boilerplate_lines_are_ignored(tmp_path, capsys):
     header = "Copyright 2026 Example Corp all rights reserved"
     train, test = _corpus(tmp_path, [header + "\n" + BASE], [BASE])

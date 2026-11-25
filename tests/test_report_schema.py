@@ -78,7 +78,11 @@ def test_a_document_with_a_tally_validates() -> None:
                 "changed": 0,
                 "resolved": 0,
             },
-            "suppressions": {},
+            "suppressions": {
+                "suppressed": 0,
+                "rules": [],
+                "diagnostics": ["rule refused: reason missing"],
+            },
             "diagnostics": ["rule refused: reason missing"],
         },
         "resolved": [],
@@ -90,7 +94,22 @@ def test_a_document_with_a_tally_validates() -> None:
 def test_a_policy_annotated_finding_validates() -> None:
     finding = _finding()
     finding["status"] = "suppressed"
-    finding["suppression"] = {"reason": "known duplicate", "expires": None}
+    finding["suppression"] = {
+        "fingerprint": finding["fingerprint"],
+        "reason": "known duplicate",
+    }
+
+    _validator().validate({"trust_score": 90, "findings": [finding]})
+
+
+def test_a_suppression_with_an_expiry_validates() -> None:
+    finding = _finding()
+    finding["status"] = "suppressed"
+    finding["suppression"] = {
+        "fingerprint": finding["fingerprint"],
+        "reason": "known duplicate",
+        "expires": "2027-06-30",
+    }
 
     _validator().validate({"trust_score": 90, "findings": [finding]})
 
@@ -101,6 +120,17 @@ def test_a_diagnostic_finding_validates() -> None:
     )
 
 
+def test_remediation_advice_is_an_allowed_finding_field() -> None:
+    """The live-scan API carries ``fix``; the CLI leaves it out. Both validate."""
+    _validator().validate(
+        {
+            "trust_score": 65,
+            "findings": [{**_finding(), "fix": "Fit the scaler inside a Pipeline."}],
+        }
+    )
+    _validator().validate({"trust_score": 65, "findings": [{**_finding(), "fix": ""}]})
+
+
 @pytest.mark.parametrize(
     "doc",
     [
@@ -108,7 +138,10 @@ def test_a_diagnostic_finding_validates() -> None:
         pytest.param({"trust_score": -1, "findings": []}, id="score-below-0"),
         pytest.param({"trust_score": 100}, id="no-findings"),
         pytest.param(
-            {"trust_score": 100, "findings": [_finding(severity="critical")]},
+            {
+                "trust_score": 100,
+                "findings": [{**_finding(), "severity": "critical"}],
+            },
             id="unknown-severity",
         ),
         pytest.param(
@@ -124,8 +157,52 @@ def test_a_diagnostic_finding_validates() -> None:
             id="unknown-finding-field",
         ),
         pytest.param(
+            {"trust_score": 100, "findings": [{**_finding(), "fix": None}]},
+            id="fix-not-a-string",
+        ),
+        pytest.param(
             {"trust_score": 100, "counts": {"high": 0, "medium": 0, "low": 0}},
             id="tally-without-total",
+        ),
+        pytest.param(
+            {
+                "trust_score": 100,
+                "findings": [
+                    {
+                        **_finding(),
+                        "status": "suppressed",
+                        "suppression": {"reason": "known duplicate"},
+                    }
+                ],
+            },
+            id="suppression-without-fingerprint",
+        ),
+        pytest.param(
+            {
+                "trust_score": 100,
+                "findings": [
+                    {
+                        **_finding(),
+                        "status": "suppressed",
+                        "suppression": {"reason": "known duplicate", "expires": None},
+                    }
+                ],
+            },
+            id="suppression-expires-is-omitted-not-null",
+        ),
+        pytest.param(
+            {
+                "trust_score": 100,
+                "policy": {
+                    "suppressions": {
+                        "suppressed": 0,
+                        "rules": [],
+                        "diagnostics": [],
+                        "extra": 1,
+                    }
+                },
+            },
+            id="unknown-suppression-summary-field",
         ),
     ],
 )

@@ -498,10 +498,6 @@ def _scan_sections(findings: list[Any]):
     return sections
 
 
-def _severity_counts(findings: list[Any]) -> dict[str, int]:
-    return assemble.severity_counts(findings)
-
-
 def _form_json(raw: str | None) -> Any:
     if raw is None:
         return None

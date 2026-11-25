@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 
 import pytest
 
@@ -141,20 +142,104 @@ def test_an_unsafe_input_path_is_reported(tmp_path, manifest):
     assert any("--root" in issue for issue in issues)
 
 
-def test_an_outside_input_verifies_once_root_contains_it(tmp_path):
+def test_recorded_paths_are_posix_and_survive_a_copy(tmp_path, monkeypatch):
+    """The serialised contract is forward slashes, spaces and Unicode included."""
+    work = tmp_path / "work"
+    work.mkdir()
+    deep = tmp_path / "data" / "nested"
+    deep.mkdir(parents=True)
+    input_path = deep / "input ü.csv"
+    input_path.write_text("uid,y\n1,0\n", encoding="utf-8")
+    document = audit_manifest.build(assemble.build([]), inputs=[input_path], root=work)
+
+    assert document["root"] == ".."
+    assert document["inputs"][0]["path"] == "data/nested/input ü.csv"
+    assert "\\" not in document["root"] + document["inputs"][0]["path"]
+
+    path = _write(work, document)
+    monkeypatch.chdir(deep)
+    assert audit_manifest.verify(path) == []
+
+
+def test_an_input_beside_the_manifest_round_trips_without_a_root(tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
     data = tmp_path / "data"
     data.mkdir()
     (data / "input.csv").write_text("uid,y\n1,0\n", encoding="utf-8")
     document = audit_manifest.build(
-        assemble.build([]), inputs=[data / "input.csv"], root=work
+        assemble.build([]),
+        inputs=[data / "input.csv"],
+        root=work,
+        manifest_path=work / "audit.json",
     )
-    assert document["inputs"][0]["path"] == (data / "input.csv").resolve().as_posix()
+    assert document["root"] == ".."
+    assert document["inputs"][0]["path"] == "data/input.csv"
     path = _write(work, document)
-    refused = audit_manifest.verify(path, root=work)
-    assert refused and refused[0].startswith("unsafe path")
-    assert audit_manifest.verify(path, root=tmp_path) == []
+
+    assert audit_manifest.verify(path) == []
+    monkeypatch.chdir(data)  # any working directory
+    assert audit_manifest.verify(path) == []
+
+    copied = tmp_path / "copied"
+    shutil.copytree(work, copied / "work")
+    shutil.copytree(data, copied / "data")
+    assert audit_manifest.verify(copied / "work" / "audit.json") == []
+    (copied / "data" / "input.csv").write_text("uid,y\n2,0\n", encoding="utf-8")
+    assert audit_manifest.verify(copied / "work" / "audit.json") == [
+        "modified: data/input.csv"
+    ]
+
+
+def test_the_cli_writes_a_manifest_that_verifies_from_another_directory(
+    tmp_path, monkeypatch
+):
+    work = tmp_path / "work"
+    work.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    frame = data / "data.csv"
+    frame.write_text("a,b\n0,0\n1,1\n0,2\n1,3\n", encoding="utf-8")
+
+    monkeypatch.chdir(work)
+    assert main([str(frame), "--target", "b", "--manifest", "audit.json"]) in (0, 1)
+
+    monkeypatch.chdir(data)
+    assert main(["verify", str(work / "audit.json")]) == 0
+
+
+def test_a_version_one_manifest_keeps_the_old_working_directory_rule(
+    tmp_path, monkeypatch
+):
+    document = _document(tmp_path)
+    document["schema_version"] = 1
+    document.pop("root")
+    document["manifest_digest"] = audit_manifest.digest(
+        {
+            key: value
+            for key, value in document.items()
+            if key not in ("generated_at", "manifest_digest")
+        }
+    )
+    path = _write(tmp_path, document)
+    assert audit_manifest.verify(path) == []
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    assert "missing: input.csv" in audit_manifest.verify(path)
+
+
+def test_a_recorded_root_must_be_a_relative_directory(tmp_path, manifest):
+    path, document = manifest
+    document["root"] = str(tmp_path)
+    _write(tmp_path, document)
+    assert "manifest root must be a relative path" in audit_manifest.verify(path)
+
+    document["root"] = "../../somewhere-else"
+    _write(tmp_path, document)
+    issues = audit_manifest.verify(path)
+    assert "manifest root is outside the manifest directory's tree" in issues
 
 
 def test_unknown_keys_fail_verification(tmp_path, manifest):
@@ -215,7 +300,7 @@ def test_verification_root_can_be_given_explicitly(tmp_path, manifest):
     assert issues == ["missing: input.csv"]
 
 
-@pytest.mark.parametrize("version", [0, 2, "1", None, True])
+@pytest.mark.parametrize("version", [0, 3, "1", None, True])
 def test_unsupported_schema_versions_are_refused(tmp_path, manifest, version):
     path, document = manifest
     document["schema_version"] = version
@@ -387,7 +472,7 @@ def test_a_tool_version_change_is_reported(tmp_path, manifest):
 def test_a_duplicate_json_key_is_refused(tmp_path, manifest):
     path, document = manifest
     text = audit_manifest.dumps(document).replace(
-        '"schema_version": 1,', '"schema_version": 1,\n  "schema_version": 1,', 1
+        '"schema_version": 2,', '"schema_version": 2,\n  "schema_version": 2,', 1
     )
     path.write_text(text, encoding="utf-8")
     with pytest.raises(audit_manifest.ManifestError, match="duplicate JSON key"):

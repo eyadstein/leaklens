@@ -28,10 +28,16 @@ It describes the **shape** of a report, not whether its findings are correct:
   `evidence` and a versioned SHA-256 `fingerprint`. `diagnostic: true`, `status`
   and `suppression` appear only when they apply, and unknown keys are refused
   inside a finding so a typo in a detector is caught rather than ignored.
+  `fix` is the optional remediation text: the live-scan API (`/audit`, `/scan`)
+  always carries it (empty when the kind has no advice), the CLI does not.
 - Optional sections: `counts` (the severity tally carried by the text, `dl` and
   image reports; the data audit leaves it to the consumer), `policy` (what the
   baseline and suppressions did), `resolved` (baseline entries no longer
   produced), `field`/`documents`/`skipped` (text reports).
+- `policy.suppressions` is `{suppressed, rules, diagnostics}`, and a finding's
+  `status: "suppressed"` carries the matched rule as `fingerprint` + `reason`,
+  plus `expires` only when the rule has an expiry date. Both objects refuse
+  unknown keys, so a consumer can rely on that shape.
 
 Top-level unknown keys are **allowed**: a command that adds its own section
 (`audit`, `missingness`, `drift`, `clustering`, `dl`, `pipeline`, `ai`) is
@@ -69,9 +75,14 @@ read at all.
 
 ## Limits
 
-- The schema does not describe the manifest (`--manifest`) or the SARIF output;
-  both have their own documented formats ([AUDIT_MANIFEST.md](AUDIT_MANIFEST.md),
-  and the SARIF mapping in [DETECTORS.md](DETECTORS.md)).
+- The schema describes reports only. The audit manifest (`--manifest`), the
+  SARIF output, the baseline file, the badge JSON, `doctor --json`, the
+  workspace envelopes and the SBOM each have their own documented format
+  ([AUDIT_MANIFEST.md](AUDIT_MANIFEST.md), [BASELINES.md](BASELINES.md),
+  [WORKSPACE.md](WORKSPACE.md), and the SARIF mapping in
+  [DETECTORS.md](DETECTORS.md)). SARIF names its own `$schema`; the others
+  carry `schema`, `schemaVersion` or nothing, and are validated against their
+  own contract, not this one.
 - Evidence fields are bounded strings. A report validated against the schema
   says nothing about whether a string was bounded correctly — that is the
   detector's contract and its tests.

@@ -142,10 +142,20 @@ leaklens text chunks/train.jsonl chunks/eval.jsonl
 ## Embedding similarity (M6)
 
 `--embeddings TRAIN.npy EVAL.npy --embedding-model ID` reads two numeric `.npy`
-matrices with `allow_pickle=False`. Rows must align with the documents kept after
-`--min-chars`, in input order; the command fails with the mismatch instead of
-guessing. Cosine similarity is computed in bounded chunks (20 000 × 4096 limit,
-`--embedding-threshold`, default `0.95`).
+matrices with `allow_pickle=False`. The rows must follow one stated layout,
+because a matching row count alone cannot prove alignment:
+
+- `--embeddings-order kept` (the default when nothing was skipped): one row per
+  document kept after `--min-chars`, in input order.
+- `--embeddings-order source`: one row per source row, including the ones
+  normalisation dropped. Rows are selected through the positional document ids
+  (`train:4`), so a skipped row never shifts the match.
+
+When normalisation skipped any row the order statement is **required**: the
+command exits `2` and names both counts instead of guessing. A size mismatch is
+one readable error, not a numpy traceback. The finding's evidence records the
+declared order and the skipped counts. Cosine similarity is computed in bounded
+chunks (20 000 × 4096 limit, `--embedding-threshold`, default `0.95`).
 
 LeakLens never loads or runs an embedding model. The model identity in the report
 is the caller's declaration, and **results are not reproducible across model

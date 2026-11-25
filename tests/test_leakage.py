@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from leaklens.cli import main
-from leaklens.leakage import scan, score, split_overlap, temporal_overlap
+from leaklens.leakage import Finding, scan, score, split_overlap, temporal_overlap
 
 
 def _df(n=600, seed=0):
@@ -192,6 +192,43 @@ def test_score_and_cli(tmp_path):
     d.to_csv(f, index=False)
     assert score(scan(d, "y")) < 100
     assert main([str(f), "--target", "y"]) == 1
+
+
+@pytest.mark.parametrize("severity", ["critical", "High", "", " info", "high "])
+def test_a_finding_refuses_a_severity_outside_the_vocabulary(severity):
+    """The severity decides the score and the exit gate; it cannot be a typo."""
+    with pytest.raises(ValueError, match="high, medium or low"):
+        Finding(severity, "target_leakage", "leak", "detail")
+
+
+@pytest.mark.parametrize("severity", [None, 3, b"high", ["high"]])
+def test_a_finding_refuses_a_non_string_severity(severity):
+    with pytest.raises(ValueError, match="high, medium or low"):
+        Finding(severity, "target_leakage", "leak", "detail")
+
+
+def test_every_accepted_severity_keeps_its_weight_and_serialisation():
+    findings = [
+        Finding("high", "target_leakage", "a", "d"),
+        Finding("medium", "id_like", "b", "d"),
+        Finding("low", "parse_error", "c", "d"),
+    ]
+
+    assert score(findings) == 100 - 35 - 15 - 5
+    assert [f.to_dict()["severity"] for f in findings] == ["high", "medium", "low"]
+    assert all(len(f.fingerprint) == 64 for f in findings)
+
+
+def test_diagnostics_stay_free_at_every_severity():
+    assert score([Finding("high", "drift", "x", "d", diagnostic=True)]) == 100
+
+
+def test_score_keeps_its_defensive_default_for_foreign_findings():
+    class Foreign:
+        severity = "critical"
+        diagnostic = False
+
+    assert score([Foreign()]) == 100
 
 
 def test_single_feature_leaks_skips_uncrossvalidatable_columns(monkeypatch):

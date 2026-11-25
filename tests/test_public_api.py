@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from jsonschema import Draft202012Validator
 
 from leaklens import __version__
 from leaklens.public_api import (
@@ -24,7 +25,7 @@ from leaklens.public_api import (
     _read_bounded,
     create_app,
 )
-from leaklens.report_schema import REPORT_SCHEMA_URL
+from leaklens.report_schema import REPORT_SCHEMA_URL, report_schema
 from leaklens.upload_guard import UploadRejected
 
 
@@ -65,6 +66,13 @@ def client():
     test_client = client_for()
     yield test_client
     test_client.app.state.runner.close()
+
+
+def assert_report_schema(payload) -> None:
+    """A response that names a schema has to validate against it (#644)."""
+    validator = Draft202012Validator(report_schema())
+    errors = [error.message for error in validator.iter_errors(payload)]
+    assert errors == []
 
 
 def leaky_frame(rows: int = 40) -> pd.DataFrame:
@@ -351,6 +359,7 @@ def test_audit_runs_real_detectors_and_returns_a_report(client):
     assert finding["fix"]
     assert payload["report_html"].startswith("<!doctype html>")
     assert "LeakLens report" in payload["report_html"]
+    assert_report_schema(payload)
 
 
 def test_audit_can_return_a_clean_dataset_without_inventing_findings(client):
@@ -538,6 +547,7 @@ def test_scan_runs_the_real_static_scanner(client):
         assert finding["fix"] or finding["kind"] == "parse_error"
     assert payload["summary"]["file"] == "leaky.py"
     assert payload["summary"]["bytes"] == len(source.encode())
+    assert_report_schema(payload)
 
 
 def test_scan_reports_syntax_errors_as_findings(client):

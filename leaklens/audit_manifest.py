@@ -34,7 +34,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, keeps the verifier light
     from .assemble import Sections
 
 SCHEMA = "leaklens-audit-manifest"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+# Version 2 records the directory the input paths are relative to, so a
+# manifest written for an input outside the working directory stays verifiable
+# (and relocatable). Version 1 documents keep verifying exactly as before.
+READABLE_VERSIONS = (1, 2)
 DOMAIN = b"leaklens:audit-manifest:v1\0"
 
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
@@ -176,12 +180,23 @@ def describe_input(path: str | Path, *, root: str | Path) -> dict[str, str]:
     value = _tree_digest(source) if input_kind == "directory" else _file_digest(source)
     resolved = source.resolve()
     try:
-        # Paths under the audit root stay portable and resolve against the
+        # Paths under the recorded root stay portable and resolve against the
         # verifier's default root.
         display = resolved.relative_to(Path(root).resolve()).as_posix()
     except ValueError:
         display = resolved.as_posix()
     return {"path": display, "kind": input_kind, "digest": value}
+
+
+def _layout_root(manifest_dir: Path, inputs: Sequence[str | Path]) -> Path:
+    """Deepest directory that holds the manifest and every declared input."""
+    try:
+        common = os.path.commonpath(
+            [str(manifest_dir), *(str(Path(path).resolve()) for path in inputs)]
+        )
+    except ValueError:  # different drives: keep the manifest's own directory
+        return manifest_dir
+    return Path(common)
 
 
 def detector_catalogue() -> list[dict[str, Any]]:
@@ -232,9 +247,16 @@ def build(
     options: dict[str, Any] | None = None,
     gate: dict[str, Any] | None = None,
     root: str | Path,
+    manifest_path: str | Path | None = None,
     version: str | None = None,
 ) -> dict[str, Any]:
-    """Build one manifest from the shared payload sections."""
+    """Build one manifest from the shared payload sections.
+
+    ``root`` is the analysis root; ``manifest_path`` is where the document will
+    be written (defaults to ``root``). Paths are stored relative to the deepest
+    directory that holds both, so the document can be verified from anywhere
+    after the tree is copied.
+    """
     result = {
         "trust_score": int(sections.trust_score),
         "counts": dict(sections.counts),
@@ -243,13 +265,25 @@ def build(
         "resolved": list(sections.resolved),
         "gate": dict(gate or {}),
     }
+    manifest_dir = (
+        Path(root).resolve()
+        if manifest_path is None
+        else Path(manifest_path).resolve().parent
+    )
+    layout = _layout_root(manifest_dir, inputs)
+    try:
+        recorded_root = Path(os.path.relpath(layout, manifest_dir)).as_posix()
+    except ValueError:  # different drives: absolute input paths, as in version 1
+        recorded_root = "."
+        layout = manifest_dir
     document: dict[str, Any] = {
         "schema": SCHEMA,
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "leaklens", "version": version or __version__},
         "generated_at": _now(),
+        "root": recorded_root,
         "inputs": sorted(
-            (describe_input(path, root=root) for path in inputs),
+            (describe_input(path, root=layout) for path in inputs),
             key=lambda entry: (entry["path"], entry["kind"]),
         ),
         "options": dict(options or {}),
@@ -377,12 +411,43 @@ def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
+def _recorded_root(value: Any, base: Path) -> tuple[Path, list[str]]:
+    """Resolve the version-2 ``root`` relative to the manifest's directory."""
+    if not isinstance(value, str) or not value.strip():
+        return base, ["manifest root is missing or not a string"]
+    text = value.strip()
+    if "\x00" in text:
+        return base, ["manifest root contains a NUL byte"]
+    candidate = Path(text)
+    if candidate.is_absolute() or candidate.drive or candidate.anchor:
+        return base, ["manifest root must be a relative path"]
+    try:
+        resolved = Path(os.path.realpath(os.path.join(str(base), text)))
+    except (OSError, ValueError) as exc:
+        return base, [f"cannot resolve manifest root: {exc}"]
+    # The recorded root may climb out of the manifest's directory - that is how
+    # an input beside it stays relative - but only along the same path chain, so
+    # a foreign drive, UNC anchor or unrelated tree is refused without any
+    # network resolution.
+    if not (resolved.is_relative_to(base) or base.is_relative_to(resolved)):
+        return base, ["manifest root is outside the manifest directory's tree"]
+    if not resolved.is_dir():
+        return base, [f"manifest root is not a directory: {text}"]
+    return resolved, []
+
+
 def verify(path: str | Path, *, root: str | Path | None = None) -> list[str]:
     """Recompute the manifest and input digests; return human-readable issues.
 
     Raises :class:`ManifestError` when the file cannot be read, is not JSON, or
     declares a schema this verifier does not understand. A returned issue means
     the manifest is readable but does not verify.
+
+    Version 2 manifests record the directory their input paths are relative to
+    and are resolved against the manifest's own directory (or ``root``), so they
+    verify from any working directory and after the tree is copied. Version 1
+    manifests keep the old rule: paths resolve against ``root`` or the working
+    directory.
     """
     manifest_path = Path(path)
     try:
@@ -417,16 +482,21 @@ def verify(path: str | Path, *, root: str | Path | None = None) -> list[str]:
     version = document.get("schema_version")
     if isinstance(version, bool) or not isinstance(version, int):
         raise ManifestError(f"unsupported manifest schema_version: {version!r}")
-    if version != SCHEMA_VERSION:
+    if version not in READABLE_VERSIONS:
         raise ManifestError(
             f"unsupported manifest schema_version: "
-            f"{version!r} (this verifier reads {SCHEMA_VERSION})"
+            f"{version!r} (this verifier reads "
+            f"{', '.join(str(item) for item in READABLE_VERSIONS)})"
         )
     if not isinstance(document.get("result"), dict):
         raise ManifestError("manifest has no result object")
     if not isinstance(document.get("inputs"), list):
         raise ManifestError("manifest inputs must be a list")
-    root_dir = Path(root) if root is not None else Path.cwd()
+    # Version 2 defaults to the manifest's own directory, so verification does
+    # not depend on the caller's working directory. Version 1 keeps reading
+    # paths against the working directory (or --root), exactly as in 0.14.0.
+    base = manifest_path.resolve().parent if version >= 2 else Path.cwd()
+    root_dir = Path(root).resolve() if root is not None else base
     try:
         root_dir = root_dir.resolve()
     except (OSError, ValueError) as exc:
@@ -434,10 +504,16 @@ def verify(path: str | Path, *, root: str | Path | None = None) -> list[str]:
     if not root_dir.is_dir():
         raise ManifestError(f"verification root is not a directory: {root_dir}")
 
-    issues: list[str] = [
-        f"unknown key: {key}" for key in sorted(set(document) - _TOP_LEVEL)
-    ]
-    issues.extend(f"missing field: {key}" for key in sorted(_TOP_LEVEL - set(document)))
+    issues: list[str] = []
+    layout_root = root_dir
+    if version >= 2:
+        layout_root, root_issues = _recorded_root(document.get("root"), root_dir)
+        issues.extend(root_issues)
+    allowed = set(_TOP_LEVEL)
+    if version >= 2:
+        allowed.add("root")
+    issues.extend(f"unknown key: {key}" for key in sorted(set(document) - allowed))
+    issues.extend(f"missing field: {key}" for key in sorted(allowed - set(document)))
     issues.extend(_verify_digests(document))
-    issues.extend(_verify_inputs(document["inputs"], root_dir))
+    issues.extend(_verify_inputs(document["inputs"], layout_root))
     return issues

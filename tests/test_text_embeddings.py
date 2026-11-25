@@ -92,3 +92,59 @@ def test_zero_vectors_do_not_crash_or_match():
     test = _docs([BASE], "test")
     zeros = np.zeros((1, 2), dtype=np.float32)
     assert embedding_findings(train, test, zeros, zeros, model="m") == []
+
+
+def test_source_order_selects_the_row_the_document_came_from():
+    """A skipped row must not shift which vector describes which document."""
+    train = _docs([BASE, "tiny", OTHER], "train")  # "tiny" is too short
+    assert [document.id for document in train] == ["train:0", "train:2"]
+    test = _docs([OTHER], "test")
+    horizontal, vertical = [1.0, 0.0], [0.0, 1.0]
+    train_vectors = np.array([horizontal, horizontal, vertical], dtype=np.float32)
+    test_vectors = np.array([vertical], dtype=np.float32)
+
+    findings = embedding_findings(
+        train,
+        test,
+        train_vectors,
+        test_vectors,
+        model="m",
+        order="source",
+        skipped=(1, 0),
+    )
+
+    assert len(findings) == 1
+    summary, example = findings[0].evidence[0], findings[0].evidence[1]
+    assert "rows=source" in summary.observed
+    assert "skipped_train=1 skipped_test=0" in summary.observed
+    # Row 2 is the document that came from source row 2; kept order would
+    # have compared rows 0 and 1, both of which point at the first document.
+    assert f"train_digest={train[1].digest}" in example.observed
+
+
+def test_source_order_requires_one_row_per_source_row():
+    train = _docs([BASE, "tiny", OTHER], "train")
+    test = _docs([OTHER], "test")
+    two = np.zeros((2, 2), dtype=np.float32)
+    one = np.zeros((1, 2), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="one row per source row"):
+        embedding_findings(
+            train, test, two, one, model="m", order="source", skipped=(1, 0)
+        )
+
+
+def test_an_unknown_order_and_non_positional_ids_are_refused():
+    from leaklens.analysis.text.normalize import Document
+
+    train = _docs([BASE], "train")
+    test = _docs([OTHER], "test")
+    one = np.zeros((1, 2), dtype=np.float32)
+    with pytest.raises(ValueError, match="order"):
+        embedding_findings(train, test, one, one, model="m", order="raw")
+
+    custom = Document("custom", "train", "x", "0" * 16, 1)
+    with pytest.raises(ValueError, match="positional document ids"):
+        embedding_findings(
+            [custom], test, one, one, model="m", order="source", skipped=(0, 0)
+        )

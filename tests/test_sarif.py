@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from leaklens.cli import main
 from leaklens.leakage import Finding
@@ -123,7 +124,16 @@ def test_sarif_handles_empty_and_unusual_findings():
     assert empty["runs"][0]["tool"]["driver"]["rules"] == []
     assert empty["runs"][0]["results"] == []
 
-    odd = Finding("unexpected", "third_party_kind", "", "")
+    # A third-party finding object can carry a severity Finding refuses; SARIF
+    # must still render it instead of raising.
+    odd = SimpleNamespace(
+        severity="unexpected",
+        kind="third_party_kind",
+        column="",
+        detail="",
+        evidence=[],
+        fingerprint="0" * 64,
+    )
     result = to_sarif([odd])["runs"][0]["results"][0]
     assert result["ruleId"] == "third_party_kind"
     assert result["level"] == "note"

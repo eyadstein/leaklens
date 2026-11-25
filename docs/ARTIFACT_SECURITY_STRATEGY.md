@@ -270,8 +270,9 @@ is a legitimate audit result.
 
 ## 5. Reproducible releases
 
-Existing: version in two places (kept in sync), `scripts/generate_sbom.py`,
-`scripts/validate_release.py`, release workflow publishing to PyPI, digest guards on benchmark
+Existing: version in two places (kept in sync), `scripts/generate_sbom.py` (declared
+dependencies plus the installed-metadata dependency graph, marked `complete` or
+`declared-only`), `scripts/validate_release.py`, release workflow publishing to PyPI, digest guards on benchmark
 corpora, deterministic detectors.
 
 Planned, in order:

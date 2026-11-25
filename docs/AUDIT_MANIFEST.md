@@ -27,9 +27,10 @@ code are identical to today.
 
 | Key | Content |
 |---|---|
-| `schema`, `schema_version` | `leaklens-audit-manifest`, `1`. The verifier refuses any other version. |
+| `schema`, `schema_version` | `leaklens-audit-manifest`, `2`. The verifier also reads version `1` documents. |
 | `tool` | LeakLens name and version that wrote the manifest. |
 | `generated_at` | UTC timestamp. **Excluded from the digest** so two identical runs match. |
+| `root` | The directory the input paths are relative to, itself relative to the manifest's directory (`.`, `..`, `../data`). Version 2 only. |
 | `inputs` | Declared files/directories with `kind` and a `sha256:` digest. |
 | `options` | Result-affecting options: target, group, time, threshold, SQL/drift/pipeline/AI flags and the opt-in failure flags. Output paths are not recorded. |
 | `detectors` | The shipped detector catalogue: kind, surface, severity, scored flag, introducing release, required extra. |
@@ -37,14 +38,30 @@ code are identical to today.
 | `section_digests` | One digest per section above, so a mismatch names the changed section. |
 | `manifest_digest` | Digest of the whole document, excluding `generated_at` and itself. |
 
-Inputs are resolved against the current directory when written. Paths inside
-that directory are stored relative (portable); paths outside it are stored
-absolute. Verification resolves them inside `--root` (default: the current
-directory) and refuses any entry that resolves outside it, including `..`,
-another drive, UNC and device paths, and a symlink whose target is outside the
-root. A manifest written for an input outside the directory it was written in
-therefore needs `--root` set to a directory that contains every input;
-`leaklens verify` names that fix in the failure message.
+Input paths are stored relative to the deepest directory that holds both the
+manifest and every declared input, so a manifest written for an input in a
+sibling directory describes it as `data/input.csv` instead of an absolute path.
+`leaklens verify` resolves `root` against the manifest's own directory (or
+`--root` when given) and then resolves every input inside that directory, so
+the document verifies from any working directory and after the tree is copied
+to another location. Each entry must still stay inside the recorded root: `..`,
+another drive, UNC/device paths and a symlink whose target is outside the root
+are refused. `root` must be a relative path on the same path chain as the
+manifest directory, so a document cannot point verification at an unrelated
+tree or trigger network resolution.
+
+Paths are serialised with forward slashes only (`as_posix()`), spaces and
+non-ASCII characters included, so the JSON is byte-identical whether it was
+written on Windows or POSIX and a copied tree keeps verifying. Verification
+still applies the host platform's path rules when it resolves those strings,
+which is exactly why a drive letter, UNC anchor or absolute `root` is refused
+instead of reinterpreted.
+
+A version 1 manifest (written by 0.14.0) has no `root`: its entries resolve
+against `--root`, or the current directory when that is absent, exactly as
+before. An input recorded as an absolute path therefore still needs `--root`
+set to a directory that contains it, and `leaklens verify` names that fix in the
+failure message.
 
 ## Digest recipe
 
@@ -77,9 +94,10 @@ regular files or directories: a FIFO, socket or device fails with
 `not a regular file`/`not a directory` and is never opened.
 
 At schema version 1 every key is known, so an unknown key is a failure, not a
-warning. A newer writer must bump `schema_version`; this verifier then refuses
-the file explicitly instead of guessing. `generated_at` is deliberately outside
-the digest, so a changed timestamp is not an integrity failure.
+warning. Version 2 adds exactly one key, `root`. A newer writer must bump
+`schema_version`; this verifier then refuses the file explicitly instead of
+guessing. `generated_at` is deliberately outside the digest, so a changed
+timestamp is not an integrity failure.
 
 Verification reads bytes only. It never imports, unpickles, deserializes or
 executes the audited project, and it imports no third-party module.

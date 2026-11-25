@@ -495,6 +495,15 @@ def text(argv) -> int:
         default=0.95,
         help="cosine threshold for --embeddings (default 0.95)",
     )
+    p.add_argument(
+        "--embeddings-order",
+        choices=("kept", "source"),
+        help=(
+            "what the .npy rows follow: 'kept' (only the normalised documents, "
+            "the default) or 'source' (every source row, skipped ones included); "
+            "required for --embeddings when rows were skipped"
+        ),
+    )
     p.add_argument("--json", action="store_true")
     p.add_argument(
         "--fail-on-findings",
@@ -601,6 +610,14 @@ def text(argv) -> int:
         extra["rag"] = {"hits": len(hits)}
 
     if a.embeddings:
+        order = a.embeddings_order or "kept"
+        if a.embeddings_order is None and (train_skipped or test_skipped):
+            p.error(
+                f"--embeddings needs --embeddings-order because {train_skipped} "
+                f"train and {test_skipped} test row(s) were skipped: pass 'kept' "
+                "when the rows cover only the kept documents or 'source' when "
+                "they cover every source row"
+            )
         try:
             train_vectors = load_vectors(a.embeddings[0])
             test_vectors = load_vectors(a.embeddings[1])
@@ -613,6 +630,8 @@ def text(argv) -> int:
                     model=a.embedding_model,
                     threshold=a.embedding_threshold,
                     field=field,
+                    order=order,
+                    skipped=(train_skipped, test_skipped),
                 )
             )
         except (OSError, ValueError) as exc:
@@ -1641,6 +1660,7 @@ def main(argv=None) -> int:
                     "fail_on_new": fail_on_new,
                 },
                 root=Path.cwd(),
+                manifest_path=manifest_path,
             )
             with open(manifest_path, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(audit_manifest.dumps(document))
