@@ -13,7 +13,7 @@
 
 **Find data leakage before it inflates your metrics.** LeakLens audits the three places leakage hides — datasets, train/test splits and the code that builds the model — with optional engines for SQL, images, text, deep learning and pipeline metadata. It then reports what is left after the leak is removed. Detection is deterministic, local and CPU-first: the scanner parses code without executing it, and no dataset row leaves your machine.
 
-[Documentation](https://eyadstein.github.io/leaklens/docs.html) · [Website and demo](https://eyadstein.github.io/leaklens/) · [Changelog](CHANGELOG.md) · [Issues](https://github.com/eyadstein/leaklens/issues)
+[Documentation](https://eyadstein.github.io/leaklens/docs.html) · [Website and demo](https://eyadstein.github.io/leaklens/) · [Changelog](CHANGELOG.md) · [Support](SUPPORT.md) · [Issues](https://github.com/eyadstein/leaklens/issues)
 
 ## Contents
 

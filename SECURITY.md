@@ -1,7 +1,8 @@
 # Security policy
 
-## Supported versions
+For usage questions and bug reports, see [SUPPORT.md](SUPPORT.md).
 
+## Supported versions
 | Version | Supported |
 | --- | --- |
 | Latest on PyPI (`leaklens-ml`) | ✅ Security fixes |
