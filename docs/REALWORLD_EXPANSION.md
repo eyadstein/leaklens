@@ -226,6 +226,14 @@ reviewer can work one side without seeing the other. Any number computed from th
 expansion corpus today is still a *development* measurement: the holdout side has
 not been run and its first results are a release-time event, not a claim.
 
+The split was introduced on 2026-11-26, after the first 26 decisions were
+recorded. Sides are label-blind, but history is not retroactively clean: 18 of
+those decisions fall on development and 8 on holdout, and the reviewers did not
+know a side existed. Treat the first holdout run as contaminated for those 8
+cases; a pristine holdout needs repositories collected and reviewed after this
+rule existed. No Phase 20L detector was tuned on a reviewed expansion sample;
+workflow verification opened one holdout dossier after the detector was written.
+
 ## Label-leakage guard
 
 Collection and review metadata must never become detector input. Two guards:
