@@ -251,7 +251,7 @@ python -m pip install "leaklens-ml[parquet,images]"
 
 | Command | Purpose |
 |---|---|
-| `leaklens FILE --target COL` | audit a dataset (CSV/JSON built in) |
+| `leaklens FILE --target COL` | audit a dataset (CSV/JSON/JSONL built in) |
 | `leaklens --scan PATH...` | statically scan `.py`/`.ipynb` files or folders |
 | `leaklens splits DATASET` | audit declared COCO, YOLO or VOC split files |
 | `leaklens images TRAIN TEST` | find near-duplicate images across splits |
@@ -347,7 +347,7 @@ Optional engine sections (`[missingness]`, `[sql]`, `[drift]`, `[graph]`) tune t
 
 ## Built-in vs optional
 
-The base install covers CSV/JSON datasets, code scanning, split checks and missingness. Everything else is opt-in and never required for the basic workflow.
+The base install covers CSV/JSON/JSONL datasets, code scanning, split checks and missingness. Everything else is opt-in and never required for the basic workflow.
 
 | Capability | Entry point | Needs | Gate behavior |
 |---|---|---|---|

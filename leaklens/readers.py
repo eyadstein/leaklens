@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import importlib.util
 import io
+import os
 import zipfile
 
 import pandas as pd
@@ -16,6 +17,8 @@ class DatasetLimitError(ValueError):
 _FORMATS = {
     ".csv": (pd.read_csv, None, None),
     ".json": (pd.read_json, None, None),
+    ".jsonl": (pd.read_json, None, None),
+    ".ndjson": (pd.read_json, None, None),
     ".parquet": (pd.read_parquet, "pyarrow", "parquet"),
     ".feather": (pd.read_feather, "pyarrow", "feather"),
     ".xlsx": (pd.read_excel, "openpyxl", "excel"),
@@ -179,8 +182,22 @@ def read_dataset(source, name=None, max_rows=None):
         raise ImportError(
             f'{ext} input needs {module}: pip install "leaklens-ml[{extra}]"'
         )
-    display_name = name or (str(source) if isinstance(source, str) else "upload")
+    display_name = name or (
+        os.fspath(source)
+        if isinstance(source, (str, os.PathLike))
+        else getattr(source, "name", "upload") or "upload"
+    )
     _check_stream_zip_and_gzip(source, display_name)
+    if ext in {".jsonl", ".ndjson"}:
+        try:
+            if max_rows is None:
+                return reader(source, lines=True)
+            df = reader(source, lines=True, nrows=max_rows + 1)
+        except ValueError as exc:
+            raise ValueError(f"malformed JSON Lines input: {display_name}") from exc
+        if max_rows is not None and len(df) > max_rows:
+            raise DatasetLimitError(f"too many rows (> {max_rows:,}): {display_name}")
+        return df
     if max_rows is None:
         return reader(source)
     effective = ext if ext in _FORMATS else ".csv"
@@ -200,9 +217,9 @@ def read_dataset(source, name=None, max_rows=None):
 
 def _check_stream_zip_and_gzip(source, name: str) -> None:
     """Run ZIP/gzip container checks without loading the whole archive twice."""
-    if isinstance(source, str):
+    if isinstance(source, (str, os.PathLike)):
         try:
-            with open(source, "rb") as fh:
+            with open(os.fspath(source), "rb") as fh:
                 prefix = fh.read(2)
                 fh.seek(0)
                 if prefix[:2] == b"PK":
