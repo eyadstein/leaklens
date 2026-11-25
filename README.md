@@ -469,6 +469,8 @@ Implemented: dataset, split and code detectors; missingness; model arena; API an
 
 Planned work and open design questions are tracked in [ROADMAP.md](ROADMAP.md), the longer-term [AI/ML expansion roadmap](docs/AI_ML_EXPANSION_ROADMAP.md) and [Issues](https://github.com/eyadstein/leaklens/issues). Proposed items there are not commitments. The full documentation index is the [docs site](https://eyadstein.github.io/leaklens/docs.html).
 
+Adoption is measured, not assumed: the baseline and growth strategy are in [docs/ADOPTION.md](docs/ADOPTION.md), and the real-world corpus method is in [docs/REALWORLD_EXPANSION.md](docs/REALWORLD_EXPANSION.md).
+
 ## License
 
 MIT licensed; see [LICENSE](LICENSE). Citation metadata is in [CITATION.cff](CITATION.cff).

@@ -59,6 +59,30 @@ Each manifest row carries:
 | `findings` | Static scanner output, kept as *candidate signal only* |
 | `review` | Current review record; starts as `{"state": "not_reviewed"}` |
 
+### Record contract
+
+A candidate is only usable as evidence when each of these can be answered from
+committed files. This is the contract every future case must satisfy; "gap" means
+the field is not stored yet and the case cannot be promoted until it is.
+
+| Contract field | Where it lives | Status |
+|---|---|---|
+| Stable case id | `id` (`rwx_` + 12 hex, derived from provenance and content, never from list order) | present |
+| Source repository or publication | `repo`, `repo_url`, `source_id` | present |
+| Original URL and retrieval date | `file_url`, `collected_at` | present |
+| Commit or revision | `commit_sha` (required for GitHub rows) | present |
+| Licence and permitted usage | `license_spdx`, `license_status`, `redistributable` | present |
+| Leakage taxonomy and manifestation | decision `mechanism` + dossier `mechanism`; taxonomy is the detector-kind vocabulary in `docs/DETECTORS.md` | partial: no free-text "manifestation" field |
+| Human review status and rationale | `reviews.jsonl` decision: `state`, `rationale`, `evidence_refs`, `reviewer` | present |
+| Confidence and ambiguity | decision `confidence` (0–1, optional) plus `potential` / `uncertain` for ambiguity | present |
+| Expected detector behaviour | not stored; asserted in the regression test that cites the case id | gap |
+| Regression test linkage | the test docstring names the candidate id and expected kind | convention, not a field |
+| Privacy and redistribution restrictions | `license_status`, excerpt guard (permissive only), notebook bytes never committed | present |
+
+When a case is promoted to a regression test, the test asserts what the detector
+must do (fire kind `X`, or stay silent) and cites the candidate id, so the
+expected behaviour is versioned with the code rather than restated in prose.
+
 ## Licensing
 
 `license_status()` maps an SPDX id to one of three states:
@@ -73,6 +97,25 @@ Repository-level licence is the only signal available at scale, and it can be
 wrong for vendored or third-party files. Because bytes never enter Git, a wrong
 licence cannot cause a redistribution problem; it only marks a sample
 `redistributable: false`, which is the conservative default.
+
+### Source intake and licensing findings
+
+External sources are cited for taxonomy and evidence, not bulk-copied. Status was
+verified on 2026-11-25; `sources.json` remains the machine-readable registry and
+records rejected channels with the reason.
+
+| Source | Verified status | Reuse decision |
+|---|---|---|
+| Sasse et al., "Overview of leakage scenarios in supervised machine learning", *Journal of Big Data* 12:135 (2025-05-29), DOI `10.1186/s40537-025-01193-8` | Peer-reviewed; CC BY 4.0 | Cite the taxonomy. Do not copy its examples into the corpus. |
+| Kapoor & Narayanan, "Leakage and the reproducibility crisis in machine-learning-based science", *Patterns* (2023), DOI `10.1016/j.patter.2023.100804` | Peer-reviewed; CC BY 4.0; companion collection reports 41 review papers across 30 fields affecting 648 papers and publishes an 8-type taxonomy and model info sheets | Use the taxonomy and info-sheet fields as a cross-check. Do not re-host the collection. |
+| "Understanding How Data Leakage Manifests in Real-World Machine Learning Notebooks", SSRN preprint `10.2139/ssrn.6388954` (2026) | **Preprint**, not peer-reviewed; abstract reports "over 600" notebook/model pairs — the exact count and any dataset availability were not verified | Cite only. Ingest nothing; do not repeat a specific corpus size as fact. |
+| DistilKaggle notebook corpus (Zenodo 10317389) | Record metadata CC BY 4.0; upstream Kaggle notebook terms may still apply | Code-only candidates with references; no notebook redistribution. |
+| Hugging Face `jupyter-agent/kaggle-notebooks-edu-v0`, `bigcomputer/meta-kaggle-notebook`, `lvwerra/jupyter-notebooks-edu-*` | No licence tag on the dataset card | **Rejected.** No permission to reuse. |
+| Kaggle public API and public notebooks | Terms restrict scraping and redistribution; per-kernel licence often unspecified | **Rejected** as an acquisition channel. |
+| UCI and documented research datasets | Licence is per dataset and often requires attribution | Not a notebook source; a dataset may be used only with its own recorded licence. |
+
+The rule that follows: a source enters the pipeline only when reuse permission is
+recorded, and a corpus row may carry a reference even when it may not carry bytes.
 
 ## Deduplication
 
@@ -118,11 +161,54 @@ regenerated from the authored analysis, never hand-edited, and every dossier
 carries `decision: null`. See [`REVIEW_GUIDE.md`](REVIEW_GUIDE.md) for what a
 reviewer does with one.
 
+The pack is a snapshot **as built**, not a live status. Twenty-six of its thirty
+candidates now have decisions in `reviews.jsonl`; the dossiers keep
+`decision: null` on purpose, so `show <id>` (which now applies the decision log)
+and `stats.json` are the current state. A new pack is built only after an authored
+analysis exists for the next selection.
+
 `queue()` builds the review queue: unreviewed, non-duplicate, review-eligible
 rows, ordered by (scanner signal, workflow richness, source, repo, path) with at
 most `per_repo_cap` samples per repository, so breadth beats volume. **The queue
 never assigns a review state** — that is what keeps predictions out of the
 ground truth.
+
+### Four-verdict protocol
+
+Every candidate ends in exactly one of four human verdicts. The names below are
+the review states above; "positive"/"negative" describe the *finding*, not the
+code's quality.
+
+| Verdict | State | Scored | Meaning | Minimum evidence |
+|---|---|---|---|---|
+| Confirmed positive | `confirmed_leakage` | yes | Information crosses the intended evaluation boundary and changes a reported result. | A rationale naming the mechanism and at least one code reference. |
+| Confirmed negative | `legitimate` | yes | The apparent signal is a false positive, or the workflow is sound despite matching a heuristic. | A rationale explaining why the boundary holds (for example, `fit` on the train partition only) and a code reference. |
+| Potential | `potential` | no | The pattern is present, but the reviewer cannot establish whether information crosses the boundary. | Rationale naming what is missing. |
+| Uncertain | `uncertain` | no | Insufficient or ambiguous evidence; the sample needs a different reviewer or more context. | Rationale naming the blocker. |
+
+Review steps: open the dossier, fetch the source at the recorded commit, trace
+the workflow (ingest → preprocess → split → fit → evaluate), cite `cell N:L`
+references, then record the verdict. A **published precision or recall claim
+requires a second reviewer** who did not author the verdict; until then the label
+is evidence, not a benchmark number.
+
+### Development and holdout splits
+
+Real-world labels are only useful if the detector was not tuned on them. The
+separation rule is policy, and the first enforcement is tracked as work, not
+claimed as shipped:
+
+- **Unit of separation is the repository**, not the file, because near-duplicates
+  mostly share a repository. All samples from one repository go to the same side.
+- **Assignment is deterministic and label-blind**: a stable hash of `repo` names
+  the side. No reviewer chooses a side after seeing a verdict.
+- **Holdout samples are never inspected while writing a detector.** They are run
+  at release or benchmark time and their results are reported once.
+- **No cluster may straddle the boundary.** If a `near_cluster` or duplicate group
+  contains both sides, the group moves to development and the holdout loses it.
+
+Until this is enforced in code, any number computed from the expansion corpus is a
+development measurement and must be labelled as one.
 
 ## Label-leakage guard
 
@@ -135,18 +221,24 @@ Collection and review metadata must never become detector input. Two guards:
 
 ## State of the corpus
 
-As of 2026-11-15 (`realworld_expansion/stats.json` is authoritative):
+As of 2026-11-25 (`realworld_expansion/stats.json` is authoritative):
 
 | Metric | Value |
 |---|---|
 | Candidates | 1,147 |
 | Unique samples | 1,052 |
+| Duplicates / near-duplicates | 95 / 63 |
 | GitHub repositories | 730 |
 | Kaggle kernels | 119 |
 | Licences | permissive 541, copyleft 38, unknown 568 |
-| Review queue | 300 (276 distinct repositories) |
-| Reviewed / labelled | 0 — nothing has been human-reviewed yet |
+| Review queue | 300 (275 distinct repositories) |
+| Human decisions recorded | 26 — 15 `confirmed_leakage`, 7 `legitimate`, 1 `potential`, 3 `uncertain` |
+| Scored labels | 22 (only the 15 positives and 7 negatives) |
 | Overlap with the frozen `realworld/` corpus | 8 samples, flagged and excluded from the queue |
+
+The 26 decisions come from one reviewer and are evidence, not a published
+benchmark. The frozen `realworld/` corpus remains at 60 cases with 8 definitive
+labels; the expansion corpus is a separate, still-growing pool.
 
 ## Limitations
 

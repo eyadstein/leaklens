@@ -2,6 +2,63 @@
 
 Goal: the most trusted open-source tool for finding data leakage in ML datasets and code. Each phase has an exit criterion so we know when it is really done. Tasks live in [Issues](https://github.com/eyadstein/leaklens/issues).
 
+## Strategy: three stages, four programs
+
+This roadmap is a sequence, not a feature list. It widens what LeakLens can prove
+without weakening how it proves it. The product identity and its refusals are in
+[FUTURE_VISION.md](docs/FUTURE_VISION.md); this section is the public commitment.
+
+### Three stages
+
+| Stage | What LeakLens is | Exit criterion | Status |
+|---|---|---|---|
+| **1. Specialized leakage detector** | An offline, deterministic audit of evaluation integrity for tabular data and Python/notebook source, plus optional engines for SQL, images, text, deep learning and pipeline metadata. | A reviewer can run one command in CI, get evidence-backed findings with stable fingerprints, and read a published real-world precision estimate together with a documented false-negative list. | **Current work.** |
+| **2. ML data and pipeline auditing platform** | The same evidence standard across ingestion, preprocessing, splitting, training, evaluation and inference, for teams rather than a single reviewer. | Every new engine reuses the finding vocabulary, scoring path and evidence contract; one audit can cover more than one artifact without a second result shape. | Direction only. A capability enters only with Stage 1 evidence. |
+| **3. Trusted ecosystem for ML auditing** | Published methods, a curated human-reviewed corpus, adapters to the tools teams already run, and detector packs contributed by others. | Outside contributors ship detectors that pass the same benchmark and review gates as the core, and the published corpus is reused outside the project. | Ambition, not a commitment. |
+
+A stage is entered when its exit criterion is met, not when it is announced.
+
+### Four permanent programs
+
+| Program | Owns | Never |
+|---|---|---|
+| **Product intelligence** | Which leakage manifestations are real, which detectors are missing, and which gap is worth closing. | Guess demand, or copy a competitor's feature list. |
+| **Engineering excellence** | Contracts, portability, supply chain, release discipline. | Ship an engine that breaks determinism or the default offline path. |
+| **Ecosystem and adoption** | First-run experience, documentation, integrations, contribution paths, measurable reach. | Fabricate users or adoption numbers, or spam communities. |
+| **Research and evaluation** | Corpora, labels, benchmarks and published limits. | Promote a prediction or a hypothesis to ground truth. |
+
+Every item below names the program it serves, so a capability cannot arrive
+without an owner and a validation story.
+
+### Near, medium and long term
+
+| Horizon | Work | Depends on |
+|---|---|---|
+| **Near (next 2–3 phases)** | **Product intelligence:** close the target-derived-statistics gap — a `groupby(...)["target"].transform(...)` over the full frame after the split is silent today (evidence in #63). **Research and evaluation:** finish the first hand-reviewed expansion batch and enforce the development/holdout split (#653). **Ecosystem and adoption:** publish the adoption baseline and a first-run tutorial (#217). | Nothing outside the current engine; corpus work depends on reviewer time. |
+| **Medium** | **Engineering excellence:** cross-file and cross-notebook dataflow (#51); image-code understanding for augmentation-before-split and subject-level splits (#68); one audit spanning dataset + source + pipeline. | Near-term detector work; Stage 1 precision published first. |
+| **Long** | **Engineering excellence:** remediation as a reviewable patch applied to a copy. **Ecosystem and adoption:** a reusable audited corpus (#513) and third-party detector packs. | Medium-term contracts; external contribution volume. |
+
+### Measurable success criteria
+
+Targets, not current results. Each is falsifiable from committed artifacts.
+
+| Program | Criterion |
+|---|---|
+| Product intelligence | Every new detector cites a documented real-world manifestation and ships with at least one labeled case; the known-misses list is published and updated when a miss is found. |
+| Engineering excellence | CI green on Python 3.10–3.12, self-scan clean, release gate validated against an **annotated** tag, and no optional dependency in the default path. |
+| Research and evaluation | Every scored label has a rationale, a code reference and a named reviewer; no score is reported as real-world precision until a reviewer other than the label's author has checked the sample. |
+| Ecosystem and adoption | `pip install` → first finding is documented in a five-minute quick start and re-run in CI; download and traffic trends are reported as trend signals, never as user counts. |
+
+### What LeakLens will not become
+
+An experiment tracker, a training framework or model server, a general SAST or
+secrets scanner, a distributed profiler, a compliance certifier, a leaderboard,
+a service you must run, or an LLM wrapper. Each refusal has a reason in
+[FUTURE_VISION.md §7](docs/FUTURE_VISION.md#7-product-boundaries-what-leaklens-will-not-become).
+
+The phases below are the execution record for Stage 1. They are kept because each
+one has an exit criterion, not because the numbering is the strategy.
+
 The longer-term architecture sequence uses a **separate numbering scheme** that continues
 [docs/AI_ROADMAP.md](docs/AI_ROADMAP.md) (Phase 12 onward), not the phases below. It is planned in
 [docs/AI_ML_EXPANSION_ROADMAP.md](docs/AI_ML_EXPANSION_ROADMAP.md), with the design in
