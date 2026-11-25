@@ -150,6 +150,36 @@ def _derives_from_full(expr, full_set: set) -> bool:
     return False
 
 
+def _frame_preserving_expr(expr) -> bool:
+    """True when the expression keeps every row of its base frame.
+
+    ``df.copy()``/``df.rename(...)`` and column selections keep the row set a
+    split divided, so a statistic over them still sees held-out labels.
+    ``df.sample()``/``df.head()``/``df.iloc[:n]`` and ``df.dropna()`` filter
+    rows, so their provenance is ambiguous and they are deliberately excluded.
+    """
+    if isinstance(expr, ast.Name):
+        return True
+    if isinstance(expr, ast.Subscript):
+        return _is_column_selection_or_full_slice(expr)
+    if not (isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute)):
+        return False
+    method = expr.func.attr
+    if method in {"copy", "rename", "astype", "reset_index", "assign"}:
+        return True
+    if method == "drop":
+        return any(
+            kw.arg == "columns"
+            or (
+                kw.arg == "axis"
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value in (1, "columns")
+            )
+            for kw in expr.keywords
+        )
+    return False
+
+
 def _unrelated_to_split(names: set, full: set, bound: set) -> bool:
     """True when every receiver is a locally bound frame no split divides.
 
@@ -914,6 +944,206 @@ def _scan_core(
                         loc(c.lineno),
                         f"{ast.unparse(c)} encodes category frequency using every row before "
                         f"the split at {loc(first)}; held-out rows help set the values",
+                        stable_key=keys[id(c)],
+                    )
+                )
+
+    # Post-split target statistics. A statistic read from the frame the split
+    # divided still saw the held-out labels, so turning it into a feature after
+    # the split leaks exactly like the pre-split case. Statistics read from a
+    # train/test partition are legitimate and stay silent. Only the visible
+    # frame aliases and pandas idempotent operations are followed.
+    if first is not None and tts:
+        split_inputs: set = set()
+        partitions: set = set()
+        for s in tts:
+            for a in s.args:
+                split_inputs |= _all_names(a)
+            for kw in s.keywords:
+                if kw.arg in ("X", "y"):
+                    split_inputs |= _all_names(kw.value)
+        for a in assigns:
+            if _is_tts(a.value):
+                for t in a.targets:
+                    partitions |= _tnames(t)
+
+        def frame_aliases(seed: set, *, sources: bool) -> set:
+            out = set(seed)
+            changed = True
+            while changed:
+                changed = False
+                for a in assigns:
+                    if _is_tts(a.value) or not _frame_preserving_expr(a.value):
+                        continue
+                    names = _all_names(a.value) - module_aliases
+                    targets = (
+                        set().union(*(_tnames(t) for t in a.targets))
+                        if a.targets
+                        else set()
+                    )
+                    if not targets:
+                        continue
+                    if names & out:
+                        for nm in targets - out:
+                            out.add(nm)
+                            changed = True
+                    if sources and targets & out:
+                        for nm in names - out:
+                            out.add(nm)
+                            changed = True
+            return out
+
+        full_frames = frame_aliases(split_inputs, sources=True)
+        partitions = frame_aliases(partitions, sources=False)
+
+        # calls whose result lands in a column, including df.assign(col=...);
+        # map/merge/join only need their result to be assigned somewhere.
+        column_writes = set()
+        assigned_calls = set()
+        for a in assigns:
+            assigned_calls |= {
+                id(n) for n in ast.walk(a.value) if isinstance(n, ast.Call)
+            }
+            exprs = []
+            if a.targets and isinstance(a.targets[0], ast.Subscript):
+                exprs.append(a.value)
+            exprs += [
+                kw.value
+                for n in ast.walk(a.value)
+                if isinstance(n, ast.Call) and _name(n) == "assign"
+                for kw in n.keywords
+            ]
+            for e in exprs:
+                column_writes |= {id(n) for n in ast.walk(e) if isinstance(n, ast.Call)}
+
+        # target-derived aggregates of a full frame, whichever side of the split.
+        # One level of groupby-object alias is followed: g = df.groupby("c")["t"].
+        AGG = STATS | {"agg", "sum", "count", "size", "nunique"}
+        groupby_objs: dict[str, bool] = {}
+        for a in assigns:
+            if _is_tts(a.value):
+                continue
+            v = a.value.value if isinstance(a.value, ast.Subscript) else a.value
+            if (
+                isinstance(v, ast.Call)
+                and _name(v) == "groupby"
+                and (_all_names(v.func.value) & full_frames)
+            ):
+                target_ish = uses_target(a.value)
+                for t in a.targets:
+                    for nm in _tnames(t):
+                        groupby_objs[nm] = target_ish
+        target_stats = set()
+        for a in assigns:
+            if _is_tts(a.value):
+                continue
+            names = _all_names(a.value)
+            if not (names & (full_frames | set(groupby_objs))):
+                continue
+            if not (uses_target(a.value) or any(groupby_objs.get(nm) for nm in names)):
+                continue
+            calls_in = [n for n in ast.walk(a.value) if isinstance(n, ast.Call)]
+            if not any(
+                isinstance(n.func, ast.Attribute) and n.func.attr in AGG
+                for n in calls_in
+            ):
+                continue
+            target_stats |= set().union(*(_tnames(t) for t in a.targets))
+        changed = True
+        while changed:
+            changed = False
+            for a in assigns:
+                if not (isinstance(a.value, ast.Name) and a.value.id in target_stats):
+                    continue
+                for t in a.targets:
+                    for nm in _tnames(t):
+                        if nm not in target_stats:
+                            target_stats.add(nm)
+                            changed = True
+
+        for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
+            if c.lineno < first or not isinstance(c.func, ast.Attribute):
+                continue
+            method = c.func.attr
+            sel, base = None, None
+            if method == "transform" and id(c) in column_writes:
+                if (
+                    isinstance(c.func.value, ast.Subscript)
+                    and isinstance(c.func.value.value, ast.Call)
+                    and _name(c.func.value.value) == "groupby"
+                ):
+                    sel, base = c.func.value.slice, c.func.value.value
+                elif (
+                    isinstance(c.func.value, ast.Call)
+                    and _name(c.func.value) == "groupby"
+                ):
+                    base = c.func.value
+                alias = isinstance(c.func.value, ast.Name) and groupby_objs.get(
+                    c.func.value.id
+                )
+                if base is not None:
+                    if not (_all_names(base.func.value) & full_frames):
+                        continue
+                    used = (
+                        (_all_names(sel) | _strings(sel)) if sel is not None else set()
+                    )
+                    group_keys = set()
+                    for a in base.args:
+                        group_keys |= _all_names(a) | _strings(a)
+                    is_target = bool(
+                        uses_target(c) or used & target or group_keys & target
+                    )
+                elif alias:
+                    is_target = True
+                else:
+                    continue
+                if is_target:
+                    out.append(
+                        Finding(
+                            "high",
+                            "target_encode_after_split",
+                            loc(c.lineno),
+                            f"{ast.unparse(c)} builds a target-derived feature from "
+                            f"every row after the split at {loc(first)}; statistics "
+                            "over the full frame include the held-out labels",
+                            stable_key=keys[id(c)],
+                        )
+                    )
+            elif method in ("map", "merge", "join") and id(c) in assigned_calls:
+                if not (_all_names(c.func.value) & partitions):
+                    continue
+                exprs = [
+                    e
+                    for e in list(c.args)
+                    + [
+                        kw.value
+                        for kw in c.keywords
+                        if kw.arg not in ("on", "how", "suffixes", "validate", "copy")
+                    ]
+                    if not (isinstance(e, ast.Constant) and isinstance(e.value, str))
+                ]
+                names = set().union(*(_all_names(e) for e in exprs)) if exprs else set()
+                inline = any(
+                    uses_target(e)
+                    and any(
+                        isinstance(n, ast.Call)
+                        and isinstance(n.func, ast.Attribute)
+                        and n.func.attr in AGG
+                        for n in ast.walk(e)
+                    )
+                    and (_all_names(e) & full_frames)
+                    for e in exprs
+                )
+                if not (names & target_stats or inline):
+                    continue
+                out.append(
+                    Finding(
+                        "high",
+                        "target_encode_after_split",
+                        loc(c.lineno),
+                        f"{ast.unparse(c)} maps a target-derived statistic computed on "
+                        f"the full frame into records after the split at {loc(first)}; "
+                        "the held-out labels shape the encoding",
                         stable_key=keys[id(c)],
                     )
                 )

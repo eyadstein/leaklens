@@ -370,6 +370,17 @@ DETECTORS: tuple[Detector, ...] = (
         "TargetEncoder fitted before split",
     ),
     _entry(
+        "target_encode_after_split",
+        "code",
+        "high",
+        "target_encode_after_split",
+        no_bench_reason=(
+            "Post-split target statistics carry their own semantics (full frame vs "
+            "train partition) and are covered by tests/test_encoding_advanced.py; "
+            "adding a case would change the frozen scanner benchmark metrics."
+        ),
+    ),
+    _entry(
         "feature_selection_before_split",
         "code",
         "high",
