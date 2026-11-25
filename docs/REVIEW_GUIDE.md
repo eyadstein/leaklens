@@ -68,6 +68,46 @@ Rules the command enforces, so you cannot accidentally fabricate evidence:
 If you record the wrong state, do not edit the log by hand: record again. The
 last decision for a candidate wins, and the whole history stays visible.
 
+## Independent review and adjudication
+
+A dossier is not blind: it shows the scanner's signal and the AI's mechanism and
+argument, so a first read is anchored by both. Independence therefore needs a
+second reviewer who does not see them:
+
+```sh
+# second reviewer: hide the signal, the hypothesis and prior decisions
+python scripts/collect_expansion.py show --id rwx_11f261a63388 --blind
+
+# record that pass; the distinct reviewer id is what makes it independent
+python scripts/collect_expansion.py review \
+  --id rwx_11f261a63388 --state legitimate \
+  --rationale "the scaler at cell 21 is fitted on X_train only" \
+  --ref "cell 21:1-3" --reviewer reviewer-b --blind
+```
+
+`--role` defaults to `first_pass`. Record `--role adjudication` only to resolve
+a disagreement; the adjudication is appended last so it supersedes the first
+pass, while the log keeps both. `--blind` is an attestation, not something the
+tool can enforce.
+
+`show` prints the **audit status** computed from the log:
+
+| Status | Meaning |
+|---|---|
+| `not_reviewed` | No decisive decision recorded. |
+| `uncertain` | Every recorded decision is `potential`/`uncertain`. |
+| `single_reviewed` | One reviewer recorded a decisive verdict (or one reviewer repeated it). |
+| `double_reviewed` | Two distinct reviewer ids agree and at least one pass was blind. |
+| `double_reviewed_unblinded` | Two distinct ids agree, but neither pass was blind — independent identity, not independent information. |
+| `disputed` | Two distinct reviewer ids recorded different decisive states. |
+| `adjudicated` | A later `--role adjudication` decision resolved the candidate. |
+
+Only `double_reviewed` supports a claim of independent validation, and only for
+the candidates that actually have one. `adjudicated` means a later decision
+resolved a disagreement; it counts as independent only when the history shows
+two independent reviews before it. A single reviewer — however thorough — is one
+review, not two.
+
 ## Judging the common shapes
 
 Ask what the held-out rows could have contributed to, not whether the call

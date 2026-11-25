@@ -645,14 +645,17 @@ def finalize() -> dict:
         record["overlaps_frozen"] = record["sha256"] in frozen
     corpus.deduplicate(records)
     corpus.write_manifest(MANIFEST, records)
-    reviewed = corpus.apply_decisions(records, corpus.load_decisions(REVIEWS))
+    decisions = corpus.load_decisions(REVIEWS)
+    reviewed = corpus.apply_decisions(records, decisions)
     queue_ids = corpus.queue(reviewed)
+    sides = corpus.split_roles(reviewed)
     by_id = {record["id"]: record for record in reviewed}
     EXPANSION.mkdir(parents=True, exist_ok=True)
     with QUEUE.open("w", encoding="utf-8", newline="\n") as handle:
         for ident in queue_ids:
-            handle.write(json.dumps(by_id[ident], sort_keys=True) + "\n")
-    stats = corpus.summarize(reviewed, queue_ids)
+            entry = dict(by_id[ident], split=sides[ident]["side"])
+            handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    stats = corpus.summarize(reviewed, queue_ids, decisions)
     STATS.write_text(
         json.dumps(stats, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -715,6 +718,9 @@ def command_review(args) -> int:
         "reviewer": args.reviewer,
         "decided_at": now(),
         "source": "human",
+        "role": args.role,
+        "materials": "blind" if args.blind else "full",
+        "corpus_revision": corpus.content_sha256(MANIFEST.read_bytes())[:16],
     }
     errors = corpus.validate_decision(decision)
     if errors:
@@ -779,16 +785,24 @@ def command_show(args) -> int:
         log(f"{args.id} is not in {BATCH.name}")
         return 2
     dossier = dossiers[args.id]
+    rows = reviewed_records()
     rec = next(
-        (row for row in reviewed_records() if row["id"] == args.id),
+        (row for row in rows if row["id"] == args.id),
         {
             "sha256": dossier["provenance"]["sha256"],
             "file_type": dossier["provenance"]["path"].rsplit(".", 1)[-1],
         },
     )
+    split = corpus.split_roles(rows).get(args.id) if rec.get("id") else None
+    side = split["side"] if split else "unassigned"
+    if args.side and side != args.side:
+        log(f"{args.id} is on the {side} side, not {args.side}")
+        return 2
     provenance = dossier["provenance"]
-    print(f"{args.id}  [{dossier['scanner']['signal']} scanner signal]")
+    label = "" if args.blind else f"  [{dossier['scanner']['signal']} scanner signal]"
+    print(f"{args.id}{label}")
     print(f"  source    {provenance['source_id']}")
+    print(f"  side      {side} ({split['reason'] if split else 'not in manifest'})")
     print(f"  repo      {provenance['repo']} @ {provenance['commit_sha'] or 'HEAD'}")
     print(f"  path      {provenance['path']}")
     print(f"  url       {provenance['file_url']}")
@@ -799,13 +813,14 @@ def command_show(args) -> int:
     )
     print(f"  sha256    {provenance['sha256']}")
     print(f"  workflow  {dossier['workflow']['summary']}")
-    print(
-        f"  mechanism {dossier['mechanism']} "
-        f"(hypothesis confidence {dossier['hypothesis']['confidence']})"
-    )
-    print("\n  why it may apply")
-    for line in _wrap(dossier["why_it_may_apply"]):
-        print(f"    {line}")
+    if not args.blind:
+        print(
+            f"  mechanism {dossier['mechanism']} "
+            f"(hypothesis confidence {dossier['hypothesis']['confidence']})"
+        )
+        print("\n  why it may apply")
+        for line in _wrap(dossier["why_it_may_apply"]):
+            print(f"    {line}")
     print("\n  evidence against")
     for item in dossier["evidence_against"]:
         for index, line in enumerate(_wrap(item)):
@@ -823,20 +838,41 @@ def command_show(args) -> int:
             continue
         for number, line in enumerate(lines, 1):
             print(f"      | {line[:160]}")
+    decisions = corpus.load_decisions(REVIEWS)
+    history = [
+        decision for decision in decisions if decision.get("candidate_id") == args.id
+    ]
+    if history and not args.blind:
+        print("\n  review history")
+        for decision in history:
+            print(
+                f"    {decision.get('decided_at')} {decision.get('reviewer')} "
+                f"{decision.get('role', 'first_pass')} "
+                f"({decision.get('materials', 'full')}) -> {decision.get('state')}"
+            )
+    status = corpus.review_status(decisions).get(args.id, "not_reviewed")
+    print(f"\n  audit status: {status}")
     review = rec.get("review") or {}
     if review.get("state", "not_reviewed") == "not_reviewed":
-        print("\n  decision: none recorded")
+        print("  decision: none recorded")
         print(
             f"  record one with: python scripts/collect_expansion.py review --id {args.id} "
             "--state <state> --rationale '<why>' --ref '<cell N:L>' --reviewer <name>"
         )
+    elif args.blind:
+        print("  decision: withheld until your independent verdict is recorded")
     else:
         print(
-            f"\n  decision: {review['state']} by {review.get('reviewer')} "
+            f"  decision: {review['state']} by {review.get('reviewer')} "
             f"on {review.get('decided_at')}"
         )
         for line in _wrap(review.get("explanation") or ""):
             print(f"    {line}")
+    if not history and not args.blind:
+        print(
+            "  a second, independent reviewer should use --blind and a distinct "
+            "--reviewer id; record --role adjudication only to resolve a disagreement"
+        )
     return 0
 
 
@@ -1113,6 +1149,17 @@ def main(argv=None) -> int:
     review.add_argument("--mechanism", default=None, choices=corpus.MECHANISMS)
     review.add_argument("--confidence", type=float, default=None)
     review.add_argument("--reviewer", required=True, help="your attribution")
+    review.add_argument(
+        "--role",
+        choices=corpus.REVIEW_ROLES,
+        default="first_pass",
+        help="first_pass decides; adjudication resolves a disagreement",
+    )
+    review.add_argument(
+        "--blind",
+        action="store_true",
+        help="attest you decided without the scanner signal or the AI hypothesis",
+    )
     review.set_defaults(func=command_review)
 
     batch = sub.add_parser("batch", help="build review dossiers from the analysis file")
@@ -1123,6 +1170,17 @@ def main(argv=None) -> int:
     show.add_argument("--id", required=True)
     show.add_argument(
         "--context", type=int, default=0, help="extra lines around each ref"
+    )
+    show.add_argument(
+        "--blind",
+        action="store_true",
+        help="hide the scanner signal, the AI hypothesis and prior decisions",
+    )
+    show.add_argument(
+        "--side",
+        choices=("development", "holdout"),
+        default=None,
+        help="refuse the dossier unless it is on this side",
     )
     show.set_defaults(func=command_show)
 

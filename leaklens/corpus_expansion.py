@@ -40,6 +40,22 @@ REVIEW_STATES = (
 )
 # Only hand-reviewed, sufficiently supported labels may ever be scored.
 SCORED_STATES = ("confirmed_leakage", "legitimate")
+# A first pass decides a candidate; an adjudication resolves a disagreement and
+# supersedes the first pass because the decision log is read last-wins.
+REVIEW_ROLES = ("first_pass", "adjudication")
+# ``blind`` attests that the reviewer did not see the scanner signal or the AI
+# hypothesis before deciding. Independence of identity is not independence of
+# information; the status view keeps the two apart.
+REVIEW_MATERIALS = ("full", "blind")
+REVIEW_STATUSES = (
+    "not_reviewed",
+    "uncertain",
+    "single_reviewed",
+    "double_reviewed",
+    "double_reviewed_unblinded",
+    "disputed",
+    "adjudicated",
+)
 
 REDISTRIBUTABLE_SPDX = frozenset(
     {
@@ -227,13 +243,19 @@ def _priority(rec) -> tuple:
     return (0 if signal else 1, -richness, rec["source_id"], rec["repo"], rec["path"])
 
 
-def queue(records, limit: int = 300, per_repo_cap: int = 2) -> list[str]:
+def queue(
+    records, limit: int = 300, per_repo_cap: int = 2, side: str | None = None
+) -> list[str]:
     """Deterministic, diversified review queue of *unreviewed* unique samples.
 
     Diversity beats volume: at most ``per_repo_cap`` samples per repository, one
     repository before a second pass. Never assigns a review state, so no
-    prediction or heuristic can enter the ground truth.
+    prediction or heuristic can enter the ground truth. ``side`` restricts the
+    queue to one development/holdout side, so a reviewer working development
+    never opens a holdout sample.
     """
+    records = list(records)
+    sides = split_roles(records) if side else {}
     eligible = [
         rec
         for rec in records
@@ -241,6 +263,7 @@ def queue(records, limit: int = 300, per_repo_cap: int = 2) -> list[str]:
         and rec.get("eligible_for_review")
         and not rec.get("overlaps_frozen")
         and rec["review"]["state"] == "not_reviewed"
+        and (not side or sides[rec["id"]]["side"] == side)
     ]
     chosen: list[str] = []
     per_repo: Counter = Counter()
@@ -255,6 +278,63 @@ def queue(records, limit: int = 300, per_repo_cap: int = 2) -> list[str]:
 
 
 # --- review workflow --------------------------------------------------------
+
+
+def split_role(record) -> str:
+    """Stable development/holdout side for one record, from its repository.
+
+    The hash is seeded with a domain string and reads only ``repo``: the label,
+    review state and collection order cannot influence it, and two runs over
+    the same manifest agree.
+    """
+    repo = str(record.get("repo") or "")
+    digest = hashlib.sha256(("leaklens-side\x1f" + repo).encode("utf-8")).digest()
+    return "holdout" if digest[0] & 1 else "development"
+
+
+def split_roles(records) -> dict[str, dict]:
+    """Side per record id, with copies and near-duplicates kept together.
+
+    A cluster is ``development`` if *any* member repository hashes to
+    development, so a straddling cluster always loses its holdout side and a
+    newly collected copy can only move a cluster towards development, never
+    promote an existing development sample into holdout.
+    """
+    records = list(records)
+    base = {rec["id"]: split_role(rec) for rec in records}
+    parent = {ident: ident for ident in base}
+
+    def find(ident: str) -> str:
+        while parent[ident] != ident:
+            parent[ident] = parent[parent[ident]]
+            ident = parent[ident]
+        return ident
+
+    for rec in records:
+        for field in ("duplicate_of", "code_duplicate_of", "near_of"):
+            other = rec.get(field)
+            if other in parent:
+                left, right = find(rec["id"]), find(other)
+                if left != right:
+                    parent[right] = left
+
+    groups: dict[str, list[str]] = {}
+    for ident in base:
+        groups.setdefault(find(ident), []).append(ident)
+    sides: dict[str, dict] = {}
+    for members in groups.values():
+        development = any(base[member] == "development" for member in members)
+        reason = (
+            "repo-hash"
+            if len({base[member] for member in members}) == 1
+            else "cluster-straddle"
+        )
+        for member in members:
+            sides[member] = {
+                "side": "development" if development else "holdout",
+                "reason": reason,
+            }
+    return sides
 
 
 def _now() -> str:
@@ -662,6 +742,15 @@ def validate_decision(decision: dict) -> list[str]:
             or not 0 <= value <= 1
         ):
             errors.append(f"{ident}: confidence must be between 0 and 1")
+    if decision.get("role", "first_pass") not in REVIEW_ROLES:
+        errors.append(f"{ident}: invalid review role {decision.get('role')!r}")
+    if decision.get("materials", "full") not in REVIEW_MATERIALS:
+        errors.append(
+            f"{ident}: invalid review materials {decision.get('materials')!r}"
+        )
+    revision = decision.get("corpus_revision")
+    if revision is not None and not re.fullmatch(r"[0-9a-f]{16}", str(revision)):
+        errors.append(f"{ident}: corpus_revision must be 16 hex characters")
     return errors
 
 
@@ -697,6 +786,43 @@ def apply_decisions(records, decisions) -> list[dict]:
 def scored_records(records, decisions) -> list[dict]:
     """The only records allowed into a scored set: human, definitive verdicts."""
     return [rec for rec in apply_decisions(records, decisions) if rec.get("scored")]
+
+
+def review_status(decisions) -> dict[str, str]:
+    """Audit status of each candidate, computed from every recorded decision.
+
+    ``double_reviewed`` needs two distinct reviewer ids that agree *and* a
+    blind pass, because a second reviewer who saw the first verdict or the
+    scanner signal is not independent information. A second identity that
+    agreed with the same evidence is reported as ``double_reviewed_unblinded``.
+    An adjudication supersedes the first pass; the log stays append-only.
+    """
+    grouped: dict[str, list[dict]] = {}
+    for decision in decisions:
+        grouped.setdefault(str(decision.get("candidate_id") or ""), []).append(decision)
+    status = {}
+    for ident, entries in grouped.items():
+        if any(entry.get("role") == "adjudication" for entry in entries):
+            status[ident] = "adjudicated"
+            continue
+        scored = [
+            entry
+            for entry in entries
+            if entry.get("state") in SCORED_STATES
+            and str(entry.get("reviewer") or "").strip()
+        ]
+        reviewers = {str(entry["reviewer"]).strip().casefold() for entry in scored}
+        if not scored:
+            status[ident] = "uncertain"
+        elif len(reviewers) == 1:
+            status[ident] = "single_reviewed"
+        elif len({entry.get("state") for entry in scored}) > 1:
+            status[ident] = "disputed"
+        elif any(entry.get("materials") == "blind" for entry in scored):
+            status[ident] = "double_reviewed"
+        else:
+            status[ident] = "double_reviewed_unblinded"
+    return status
 
 
 # --- validation -------------------------------------------------------------
@@ -750,17 +876,26 @@ def write_manifest(path, records) -> None:
             handle.write(json.dumps(rec, sort_keys=True) + "\n")
 
 
-def summarize(records, queue_ids=None) -> dict:
+def summarize(records, queue_ids=None, decisions=()) -> dict:
     """Counts for the report: samples, repositories, licences, review progress."""
     records = list(records)
     licenses = Counter(license_status(rec.get("license_spdx")) for rec in records)
     reviews = Counter(rec["review"]["state"] for rec in records)
     unique = [rec for rec in records if not rec["duplicate_of"]]
+    known = {rec["id"] for rec in records}
+    status = review_status(decisions)
+    audit = Counter(state for ident, state in status.items() if ident in known)
+    audit["not_reviewed"] = sum(1 for rec in unique if rec["id"] not in status)
+    sides = split_roles(records)
+    split_counts = Counter(sides[rec["id"]]["side"] for rec in unique)
     return {
         "candidates": len(records),
         "unique_samples": len(unique),
         "duplicates": len(records) - len(unique),
         "near_duplicates": sum(1 for rec in records if rec.get("near_of")),
+        "splits": {
+            side: split_counts.get(side, 0) for side in ("development", "holdout")
+        },
         "repositories": len({rec["repo"] for rec in records}),
         # a Kaggle kernel is an independent author's notebook, not a repository
         "github_repositories": len(
@@ -789,6 +924,7 @@ def summarize(records, queue_ids=None) -> dict:
         "bytes": sum(int(rec.get("bytes") or 0) for rec in unique),
         "queue_size": len(queue_ids) if queue_ids is not None else 0,
         "reviews": {state: reviews.get(state, 0) for state in REVIEW_STATES},
+        "review_status": {state: audit.get(state, 0) for state in REVIEW_STATUSES},
         "confirmed_labels": reviews.get("confirmed_leakage", 0),
         "scored_labels": sum(reviews.get(state, 0) for state in SCORED_STATES),
     }

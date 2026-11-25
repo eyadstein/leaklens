@@ -22,6 +22,8 @@ from leaklens.corpus_expansion import (
     redistributable,
     review,
     sketch,
+    split_role,
+    split_roles,
     summarize,
     validate,
     write_manifest,
@@ -406,6 +408,91 @@ def test_summary_never_reports_unreviewed_as_confirmed():
     s = summarize(recs)
     assert s["reviews"]["confirmed_leakage"] == 0
     assert s["reviews"]["not_reviewed"] == 3
+
+
+# --- development / holdout separation --------------------------------------
+
+
+def _repo_on_side(side, prefix="o"):
+    for number in range(200):
+        repo = f"{prefix}/side{number}"
+        if split_role({"repo": repo}) == side:
+            return repo
+    raise AssertionError(f"no repository hashed to {side}")
+
+
+def _side_records():
+    return [
+        _record(
+            "github_search",
+            repo=f"o/r{i // 2}",
+            path=f"n{i}.ipynb",
+            sha=f"{i:016d}",
+            code_sha256=f"{i:016d}",
+        )
+        for i in range(8)
+    ]
+
+
+def test_split_role_is_stable_and_reads_only_the_repository():
+    rec = _record("github_search", repo="o/a")
+    assert split_role(rec) == split_role(rec)
+    assert split_role(rec) == split_role({"repo": "o/a", "id": "other"})
+    assert split_role({"repo": ""}) in ("development", "holdout")
+    first = split_roles(_side_records())
+    second = split_roles(_side_records())
+    assert first == second
+    for rec in _side_records():
+        assert first[rec["id"]]["side"] == split_role(rec)
+        assert first[rec["id"]]["reason"] == "repo-hash"
+
+
+@pytest.mark.parametrize("field", ["duplicate_of", "code_duplicate_of", "near_of"])
+def test_duplicate_and_near_duplicate_pairs_stay_on_one_side(field):
+    development = _repo_on_side("development")
+    holdout = _repo_on_side("holdout")
+    first = _record("github_search", repo=development, sha="a" * 16)
+    second = _record("github_search", repo=holdout, path="b.ipynb", sha="b" * 16)
+    second[field] = first["id"]
+    sides = split_roles([first, second])
+    # the two repositories hash to opposite sides, so the link is what binds them
+    assert split_role(first) != split_role(second)
+    assert sides[first["id"]] == sides[second["id"]]
+    assert sides[first["id"]] == {"side": "development", "reason": "cluster-straddle"}
+
+
+def test_adding_an_unrelated_repository_never_flips_an_existing_side():
+    recs = _side_records()
+    before = split_roles(recs)
+    added = _record("github_search", repo="o/new", path="new.ipynb", sha="f" * 16)
+    after = split_roles([*recs, added])
+    for rec in recs:
+        assert after[rec["id"]] == before[rec["id"]]
+    assert after[added["id"]]["side"] == split_role(added)
+
+
+def test_stats_split_counts_sum_to_unique_samples():
+    recs = _side_records()
+    recs[0]["duplicate_of"] = recs[1]["id"]
+    summary = summarize(recs)
+    assert summary["unique_samples"] == len(recs) - 1
+    assert sum(summary["splits"].values()) == summary["unique_samples"]
+
+
+def test_queue_can_be_restricted_to_one_side():
+    development = _repo_on_side("development")
+    holdout = _repo_on_side("holdout")
+    recs = [
+        _record("github_search", repo=development),
+        _record("github_search", repo=holdout, path="b.ipynb", sha="b" * 16),
+    ]
+    sides = split_roles(recs)
+    assert {sides[rec["id"]]["side"] for rec in recs} == {"development", "holdout"}
+    for side in ("development", "holdout"):
+        chosen = queue(recs, limit=50, side=side)
+        assert len(chosen) == 1
+        assert sides[chosen[0]]["side"] == side
+        assert chosen == queue(recs, limit=50, side=side)
 
 
 # --- label-leakage guard ---------------------------------------------------

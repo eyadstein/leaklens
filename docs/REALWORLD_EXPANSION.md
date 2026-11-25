@@ -154,6 +154,16 @@ rewritten. The manifest is history; the decision log is the audit trail, and
 `review()` (a pure function) still returns a new record rather than mutating a
 candidate.
 
+Independence is computed from the log, not asserted: `review_status()` reports
+`single_reviewed`, `double_reviewed` (two distinct reviewer ids that agree and a
+blind pass), `double_reviewed_unblinded` (two ids, no blind pass),
+`disputed`, `adjudicated` or `uncertain`. Each decision records its `role`
+(`first_pass`/`adjudication`), `materials` (`full`/`blind`) and the
+`corpus_revision` (first 16 hex of the manifest digest) it was decided against.
+The log is append-only, so a disagreement stays visible after an adjudication.
+As of this writing every recorded decision has one reviewer, so no candidate is
+independently validated and the corpus cannot support a precision claim.
+
 The first batch is `realworld_expansion/review_batch_01.jsonl` plus
 `review_batch_01.analysis.json` and the human-readable
 `REVIEW_BATCH_01.md`. Building it (`batch`) is deterministic: dossiers are
@@ -195,8 +205,7 @@ is evidence, not a benchmark number.
 ### Development and holdout splits
 
 Real-world labels are only useful if the detector was not tuned on them. The
-separation rule is policy, and the first enforcement is tracked as work, not
-claimed as shipped:
+separation rule is enforced by `corpus_expansion.split_roles()`:
 
 - **Unit of separation is the repository**, not the file, because near-duplicates
   mostly share a repository. All samples from one repository go to the same side.
@@ -204,11 +213,18 @@ claimed as shipped:
   the side. No reviewer chooses a side after seeing a verdict.
 - **Holdout samples are never inspected while writing a detector.** They are run
   at release or benchmark time and their results are reported once.
-- **No cluster may straddle the boundary.** If a `near_cluster` or duplicate group
-  contains both sides, the group moves to development and the holdout loses it.
+- **No cluster may straddle the boundary.** A copy or near-duplicate group
+  (`duplicate_of`, `code_duplicate_of`, `near_of`) is wholly on one side; if any
+  member hashes to development, the whole group moves to development and loses
+  its holdout side. A newly collected copy can therefore only move a group toward
+  development, never promote a development sample into holdout.
 
-Until this is enforced in code, any number computed from the expansion corpus is a
-development measurement and must be labelled as one.
+`finalize` writes the side into every `review_queue.jsonl` record and counts both
+sides in `stats.json` (`development + holdout == unique_samples`). `show` prints
+the side and `--side development` refuses to open a holdout dossier, so a
+reviewer can work one side without seeing the other. Any number computed from the
+expansion corpus today is still a *development* measurement: the holdout side has
+not been run and its first results are a release-time event, not a claim.
 
 ## Label-leakage guard
 
@@ -232,6 +248,7 @@ As of 2026-11-25 (`realworld_expansion/stats.json` is authoritative):
 | Kaggle kernels | 119 |
 | Licences | permissive 541, copyleft 38, unknown 568 |
 | Review queue | 300 (275 distinct repositories) |
+| Development / holdout | 571 / 481 unique samples (repository-hash, cluster-safe) |
 | Human decisions recorded | 26 — 15 `confirmed_leakage`, 7 `legitimate`, 1 `potential`, 3 `uncertain` |
 | Scored labels | 22 (only the 15 positives and 7 negatives) |
 | Overlap with the frozen `realworld/` corpus | 8 samples, flagged and excluded from the queue |

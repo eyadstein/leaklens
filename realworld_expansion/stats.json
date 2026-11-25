@@ -20,6 +20,15 @@
   "queue_size": 300,
   "redistributable": 541,
   "repositories": 849,
+  "review_status": {
+    "adjudicated": 0,
+    "disputed": 0,
+    "double_reviewed": 0,
+    "double_reviewed_unblinded": 0,
+    "not_reviewed": 1026,
+    "single_reviewed": 22,
+    "uncertain": 4
+  },
   "reviews": {
     "confirmed_leakage": 15,
     "legitimate": 7,
@@ -32,6 +41,10 @@
     "github_repos": 262,
     "github_search": 766,
     "kaggle_distilkaggle": 119
+  },
+  "splits": {
+    "development": 571,
+    "holdout": 481
   },
   "unique_repositories": 776,
   "unique_samples": 1052,

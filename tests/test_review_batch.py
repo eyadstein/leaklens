@@ -8,8 +8,10 @@ scored ground truth.
 """
 
 import hashlib
+import importlib.util
 import json
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -25,9 +27,11 @@ from leaklens.corpus_expansion import (
     load_decisions,
     load_manifest,
     redistributable,
+    review_status,
     scored_records,
     select_batch,
     signal_bucket,
+    summarize,
     validate_decision,
     validate_dossier,
 )
@@ -245,6 +249,133 @@ def test_a_definitive_verdict_needs_a_rationale_and_a_reference():
 def test_a_fabricated_timestamp_is_rejected():
     errors = validate_decision(_decision(decided_at="just now"))
     assert any("timestamp" in error for error in errors)
+
+
+# --- independent review and adjudication ------------------------------------
+
+
+def test_roles_materials_and_revision_are_validated():
+    assert validate_decision(_decision(role="adjudication")) == []
+    assert validate_decision(_decision(materials="blind")) == []
+    assert any(
+        "role" in error for error in validate_decision(_decision(role="second_pass"))
+    )
+    assert any(
+        "materials" in error
+        for error in validate_decision(_decision(materials="partial"))
+    )
+    assert any(
+        "corpus_revision" in error
+        for error in validate_decision(_decision(corpus_revision="not-a-revision"))
+    )
+    assert validate_decision(_decision(corpus_revision="0123456789abcdef")) == []
+
+
+def test_a_single_review_is_single_reviewed():
+    status = review_status([_decision()])
+    assert status["rwx_cf8cb6a83808"] == "single_reviewed"
+
+
+def test_two_distinct_blind_reviewers_that_agree_are_double_reviewed():
+    status = review_status(
+        [
+            _decision(reviewer="eyad", materials="full"),
+            _decision(reviewer="reviewer-b", materials="blind"),
+        ]
+    )
+    assert status["rwx_cf8cb6a83808"] == "double_reviewed"
+
+
+def test_two_reviewers_with_the_same_materials_are_not_independent():
+    status = review_status(
+        [
+            _decision(reviewer="eyad"),
+            _decision(reviewer="reviewer-b"),
+        ]
+    )
+    assert status["rwx_cf8cb6a83808"] == "double_reviewed_unblinded"
+
+
+def test_disagreement_is_disputed_until_adjudicated():
+    decisions = [
+        _decision(reviewer="eyad", materials="blind"),
+        _decision(reviewer="reviewer-b", materials="blind", state="confirmed_leakage"),
+    ]
+    assert review_status(decisions)["rwx_cf8cb6a83808"] == "disputed"
+    decisions.append(
+        _decision(
+            reviewer="reviewer-c",
+            materials="blind",
+            role="adjudication",
+            state="legitimate",
+        )
+    )
+    assert review_status(decisions)["rwx_cf8cb6a83808"] == "adjudicated"
+
+
+def test_the_same_reviewer_recording_twice_is_not_double_review():
+    decisions = [
+        _decision(reviewer="eyad", state="potential"),
+        _decision(reviewer="Eyad", state="legitimate"),
+    ]
+    status = review_status(decisions)["rwx_cf8cb6a83808"]
+    assert status == "single_reviewed"
+
+
+def test_indefinite_decisions_remain_uncertain():
+    decisions = [_decision(state="potential"), _decision(state="uncertain")]
+    assert review_status(decisions)["rwx_cf8cb6a83808"] == "uncertain"
+
+
+def test_summary_counts_the_audit_status_of_the_clean_corpus(manifest):
+    records = [manifest["rwx_cf8cb6a83808"]]
+    decisions = [_decision()]
+    stats = summarize(records, [], decisions)
+    assert stats["review_status"]["single_reviewed"] == 1
+    assert stats["review_status"]["double_reviewed"] == 0
+    assert stats["review_status"]["not_reviewed"] == 0
+
+
+def test_the_committed_corpus_does_not_claim_independence():
+    decisions = load_decisions(EXPANSION / "reviews.jsonl")
+    reviewers = {decision["reviewer"] for decision in decisions}
+    status = review_status(decisions)
+    if len(reviewers) == 1:
+        assert set(status.values()) <= {"single_reviewed", "uncertain"}
+        assert "double_reviewed" not in status.values()
+        assert "adjudicated" not in status.values()
+
+
+def _collect_script():
+    path = ROOT / "scripts" / "collect_expansion.py"
+    spec = importlib.util.spec_from_file_location("collect_expansion_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_blind_show_does_not_leak_the_recorded_verdict(capsys):
+    """A second reviewer must not see the first verdict while reviewing."""
+    script = _collect_script()
+    ids = [row["candidate_id"] for row in load_manifest(BATCH)]
+    records = {
+        rec["id"]: rec
+        for rec in apply_decisions(
+            load_manifest(EXPANSION / "manifest.jsonl"),
+            load_decisions(EXPANSION / "reviews.jsonl"),
+        )
+    }
+    ident = next(i for i in ids if records[i]["review"]["state"] != "not_reviewed")
+    state = records[ident]["review"]["state"]
+
+    script.command_show(SimpleNamespace(id=ident, context=0, blind=True, side=None))
+    blind = capsys.readouterr().out
+    assert f"decision: {state} by" not in blind
+    assert "withheld until your independent verdict" in blind
+
+    script.command_show(SimpleNamespace(id=ident, context=0, blind=False, side=None))
+    full = capsys.readouterr().out
+    assert f"decision: {state} by" in full
 
 
 # --- the manifest is history ----------------------------------------------
