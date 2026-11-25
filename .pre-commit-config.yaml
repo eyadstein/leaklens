@@ -8,5 +8,6 @@ repos:
         # realworld/notebooks is a corpus of third-party notebooks kept
         # verbatim as fixtures; the expansion manifest and review queue record
         # third-party paths and repository names verbatim, so both are skipped
-        # too. Everything else is spell-checked.
-        args: ["--skip=realworld/*,*manifest.jsonl,*review_queue.jsonl", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used,nd"]
+        # too. Everything else is spell-checked. DOIs are exempt because a
+        # real one can contain a word codespell misreads (10.1016/j.patter...).
+        args: ["--skip=realworld/*,*manifest.jsonl,*review_queue.jsonl", "--ignore-words-list=te,strat,fpr,FPR,unparseable,disjointness,Disjointness,re-used,nd", "--ignore-regex=10\\.[0-9]{4,9}/\\S+"]
