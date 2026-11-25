@@ -32,6 +32,20 @@ def test_hard_paraphrase_miss_is_published():
     assert any("hard paraphrase" in miss for miss in metrics["misses"])
 
 
+def test_hard_paraphrase_is_outside_the_lexical_threshold():
+    """The published miss is a threshold boundary, not a broken label."""
+    from leaklens.near_duplicate import DEFAULT_THRESHOLD
+
+    def shingles(text):
+        words = text.split()
+        return {tuple(words[i : i + 5]) for i in range(len(words) - 4)}
+
+    base, hard = shingles(bench_text.BASE), shingles(bench_text.HARD)
+    score = len(base & hard) / len(base | hard)
+    assert round(score, 4) == 0.2188
+    assert score < DEFAULT_THRESHOLD == 0.8
+
+
 def test_markdown_reports_metrics_misses_and_limits():
     text = bench_text.markdown(bench_text.evaluate(measure_runtime=False))
     assert "Text benchmark" in text
