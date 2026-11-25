@@ -289,3 +289,34 @@ def test_markdown_documents_every_candidate(dossiers):
         assert f"`{row['candidate_id']}`" in markdown
     assert markdown.count("**Decision.** none recorded") == len(dossiers)
     assert "AI hypothesis (unverified" in markdown
+
+
+# --- generated views apply the decision log -------------------------------
+
+
+def test_review_queue_excludes_decided_candidates():
+    """A reviewed sample must never be queued for review again."""
+    decided = {
+        decision["candidate_id"]
+        for decision in load_decisions(EXPANSION / "reviews.jsonl")
+    }
+    queue = load_manifest(EXPANSION / "review_queue.jsonl")
+    assert queue
+    assert {row["id"] for row in queue}.isdisjoint(decided)
+    assert {row["review"]["state"] for row in queue} == {"not_reviewed"}
+
+
+def test_stats_count_the_recorded_decisions(manifest):
+    """stats.json is generated: it must agree with the decision log, not 0."""
+    decisions = load_decisions(EXPANSION / "reviews.jsonl")
+    records = list(manifest.values())
+    assert {decision["candidate_id"] for decision in decisions} <= set(manifest)
+    decided = apply_decisions(records, decisions)
+    stats = json.loads((EXPANSION / "stats.json").read_text(encoding="utf-8"))
+    assert stats["scored_labels"] == len(scored_records(records, decisions))
+    assert stats["confirmed_labels"] == sum(
+        1 for rec in decided if rec["review"]["state"] == "confirmed_leakage"
+    )
+    assert stats["reviews"]["not_reviewed"] == sum(
+        1 for rec in decided if rec["review"]["state"] == "not_reviewed"
+    )

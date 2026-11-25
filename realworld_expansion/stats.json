@@ -1,7 +1,7 @@
 {
   "bytes": 89624224,
   "candidates": 1147,
-  "confirmed_labels": 0,
+  "confirmed_labels": 15,
   "duplicates": 95,
   "eligible_for_review": 931,
   "file_types": {
@@ -21,13 +21,13 @@
   "redistributable": 541,
   "repositories": 849,
   "reviews": {
-    "confirmed_leakage": 0,
-    "legitimate": 0,
-    "not_reviewed": 1147,
-    "potential": 0,
-    "uncertain": 0
+    "confirmed_leakage": 15,
+    "legitimate": 7,
+    "not_reviewed": 1121,
+    "potential": 1,
+    "uncertain": 3
   },
-  "scored_labels": 0,
+  "scored_labels": 22,
   "sources": {
     "github_repos": 262,
     "github_search": 766,

@@ -604,6 +604,16 @@ def load_records() -> list[dict]:
     return corpus.load_manifest(MANIFEST) if MANIFEST.exists() else []
 
 
+def reviewed_records() -> list[dict]:
+    """Manifest records with the decision log applied, read-only.
+
+    The manifest stays a history of what was acquired; ``reviews.jsonl`` is the
+    audit trail. Anything that shows or counts review progress has to read the
+    merged view, or a decided candidate looks unreviewed forever.
+    """
+    return corpus.apply_decisions(load_records(), corpus.load_decisions(REVIEWS))
+
+
 def save_state(state: dict) -> None:
     EXPANSION.mkdir(parents=True, exist_ok=True)
     STATE.write_text(
@@ -635,15 +645,18 @@ def finalize() -> dict:
         record["overlaps_frozen"] = record["sha256"] in frozen
     corpus.deduplicate(records)
     corpus.write_manifest(MANIFEST, records)
-    queue_ids = corpus.queue(records)
-    by_id = {record["id"]: record for record in records}
+    reviewed = corpus.apply_decisions(records, corpus.load_decisions(REVIEWS))
+    queue_ids = corpus.queue(reviewed)
+    by_id = {record["id"]: record for record in reviewed}
     EXPANSION.mkdir(parents=True, exist_ok=True)
     with QUEUE.open("w", encoding="utf-8", newline="\n") as handle:
         for ident in queue_ids:
             handle.write(json.dumps(by_id[ident], sort_keys=True) + "\n")
-    stats = corpus.summarize(records, queue_ids)
+    stats = corpus.summarize(reviewed, queue_ids)
     STATS.write_text(
-        json.dumps(stats, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(stats, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
     return stats
 
@@ -767,7 +780,7 @@ def command_show(args) -> int:
         return 2
     dossier = dossiers[args.id]
     rec = next(
-        (row for row in load_records() if row["id"] == args.id),
+        (row for row in reviewed_records() if row["id"] == args.id),
         {
             "sha256": dossier["provenance"]["sha256"],
             "file_type": dossier["provenance"]["path"].rsplit(".", 1)[-1],
@@ -810,12 +823,20 @@ def command_show(args) -> int:
             continue
         for number, line in enumerate(lines, 1):
             print(f"      | {line[:160]}")
-    if dossier["decision"] is None:
+    review = rec.get("review") or {}
+    if review.get("state", "not_reviewed") == "not_reviewed":
         print("\n  decision: none recorded")
         print(
             f"  record one with: python scripts/collect_expansion.py review --id {args.id} "
             "--state <state> --rationale '<why>' --ref '<cell N:L>' --reviewer <name>"
         )
+    else:
+        print(
+            f"\n  decision: {review['state']} by {review.get('reviewer')} "
+            f"on {review.get('decided_at')}"
+        )
+        for line in _wrap(review.get("explanation") or ""):
+            print(f"    {line}")
     return 0
 
 
