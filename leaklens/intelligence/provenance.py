@@ -20,9 +20,8 @@ from leaklens.manifest import surface_for
 from .confidence import assess_cluster_confidence
 from .context import AnalysisContext, build_context
 from .impact import DatasetImpact
-from .schemas import Evidence, EvidenceCluster, EvidenceLink
+from .schemas import SEVERITY_RANK, Evidence, EvidenceCluster, EvidenceLink
 
-_SEVERITY_RANK = {"high": 0, "medium": 1, "low": 2}
 _MAX_LINKS = 400
 _SLUG = re.compile(r"[^a-z0-9]+")
 _FEATURE_SURFACES = frozenset({"dataset", "split"})
@@ -234,9 +233,9 @@ def anchor_for(finding: Finding) -> tuple[str, str]:
 
 
 def _max_severity(severities: Iterable[str]) -> str:
-    return min(
+    return max(
         severities,
-        key=lambda value: _SEVERITY_RANK.get(value, len(_SEVERITY_RANK)),
+        key=lambda value: SEVERITY_RANK.get(value, -1),
         default="low",
     )
 
@@ -409,7 +408,7 @@ def build_evidence_graph(
 
     clusters.sort(
         key=lambda item: (
-            _SEVERITY_RANK.get(item.priority, len(_SEVERITY_RANK)),
+            -SEVERITY_RANK.get(item.priority, -1),
             -item.confidence.score,
             item.anchor,
             item.cluster_id,

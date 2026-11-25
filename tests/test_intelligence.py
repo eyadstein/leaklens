@@ -11,6 +11,8 @@ from leaklens.intelligence import (
 from leaklens.intelligence.confidence import assess_confidence as _ac
 from leaklens.intelligence.context import AnalysisContext
 from leaklens.intelligence.context import build_context as _bc
+from leaklens.intelligence.provenance import _max_severity
+from leaklens.intelligence.schemas import SEVERITY_RANK
 from leaklens.leakage import Finding
 
 
@@ -243,6 +245,15 @@ def test_analyze_findings_classifies_phase10_kinds(kind, severity, category, tit
     assert rec.related_finding_kinds == (kind,)
     assert rec.priority == severity
     assert rec.actions and rec.validation_steps
+
+
+def test_one_severity_order_is_shared_and_unknown_ranks_lowest():
+    ordered = [
+        name for name, _rank in sorted(SEVERITY_RANK.items(), key=lambda kv: -kv[1])
+    ]
+    assert ordered == ["critical", "high", "medium", "low", "info"]
+    assert _max_severity(["low", "medium", "high"]) == "high"
+    assert _max_severity(["low", "not_a_severity"]) == "low"
 
 
 def test_analyze_findings_never_unclassifies_a_phase10_kind():

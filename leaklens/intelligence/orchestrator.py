@@ -5,13 +5,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 
-from leaklens.leakage import Finding
+from leaklens.leakage import SEVERITY_WEIGHTS, Finding
 
 from .confidence import assess_confidence
 from .context import AnalysisContext, build_context
 from .impact import DatasetImpact
 from .provenance import EvidenceGraph, build_evidence_graph
 from .schemas import (
+    SEVERITY_RANK,
     ConfidenceAssessment,
     Evidence,
     EvidenceCluster,
@@ -365,9 +366,7 @@ def _recommendation_for(kind: str, severity: str) -> Recommendation:
     else:
         title, description, actions, validation = template
 
-    priority = (
-        severity if severity in {"critical", "high", "medium", "low"} else "medium"
-    )
+    priority = severity if severity in SEVERITY_WEIGHTS else "medium"
 
     return Recommendation(
         title=title,
@@ -418,12 +417,9 @@ def analyze_findings(
 
         severity = max(
             (item.metadata for item in related),
-            key=lambda metadata: {
-                "critical": 4,
-                "high": 3,
-                "medium": 2,
-                "low": 1,
-            }.get(dict(metadata).get("severity", ""), 0),
+            key=lambda metadata: SEVERITY_RANK.get(
+                dict(metadata).get("severity", ""), -1
+            ),
             default=(),
         )
         recommendations.append(

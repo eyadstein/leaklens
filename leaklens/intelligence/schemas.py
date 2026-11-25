@@ -8,6 +8,10 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 _VALID_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info"})
+# One ordering for every ranking site (orchestrator, provenance). Higher is
+# more severe; a value outside the vocabulary ranks below "info" so an unknown
+# string can never outrank a known severity.
+SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
 _VALID_CONFIDENCE_LEVELS = frozenset(
     {"very_high", "high", "moderate", "low", "very_low"}
 )
