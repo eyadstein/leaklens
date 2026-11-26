@@ -124,6 +124,31 @@ resolved a disagreement; it counts as independent only when the history shows
 two independent reviews before it. A single reviewer — however thorough — is one
 review, not two.
 
+### Second-reviewer handoff
+
+As of 2026-11-26 the log holds 26 decisions from one reviewer (`Eyad Ahmed`),
+giving 22 `single_reviewed` and 4 `uncertain` and **zero** independent
+validation. To hand this to a second person, send only:
+
+- `realworld_expansion/review_batch_01.blind.md` — 30 cases with provenance,
+  licence, cited refs and source text for permissive licences;
+- `realworld_expansion/review_batch_01.blind.jsonl` — the same cases, machine
+  readable, decision empty;
+- the recording commands printed in that pack, and this guide's state table,
+  rationale template and "Judging the common shapes" section.
+
+Do **not** send the full dossiers, `reviews.jsonl`, a `show` output without
+`--blind`, or the first reviewer's rationale before the second verdict is
+recorded. Rebuild the pack with `python scripts/collect_expansion.py blind-pack`
+and check it still matches the committed one before sending.
+
+The blind material still reveals, by design: the split side and its reason, the
+cited line numbers, and that the batch was selected by signal bucket. It never
+reveals the first verdict, its rationale, the scanner severity/kind, the
+mechanism or the hypothesis. A distinct `--reviewer` id plus `--blind` is what
+the audit trail records; the tool cannot verify a human identity, so the
+handoff is also a trust boundary.
+
 ## Judging the common shapes
 
 Ask what the held-out rows could have contributed to, not whether the call

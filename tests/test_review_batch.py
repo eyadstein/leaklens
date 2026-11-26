@@ -527,3 +527,26 @@ def test_stats_count_the_recorded_decisions(manifest):
     assert stats["reviews"]["not_reviewed"] == sum(
         1 for rec in decided if rec["review"]["state"] == "not_reviewed"
     )
+
+
+def test_blind_show_suggests_recording_the_decision_as_blind(capsys):
+    """The printed command must carry the provenance the reviewer actually used."""
+    script = _collect_script()
+    ids = [row["candidate_id"] for row in load_manifest(BATCH)]
+    records = {
+        rec["id"]: rec
+        for rec in apply_decisions(
+            load_manifest(EXPANSION / "manifest.jsonl"),
+            load_decisions(EXPANSION / "reviews.jsonl"),
+        )
+    }
+    ident = next(i for i in ids if records[i]["review"]["state"] == "not_reviewed")
+
+    script.command_show(SimpleNamespace(id=ident, context=0, blind=True, side=None))
+    blind = capsys.readouterr().out.split("record one with:")[1].splitlines()[0]
+    assert "review --id" in blind
+    assert "--blind" in blind
+
+    script.command_show(SimpleNamespace(id=ident, context=0, blind=False, side=None))
+    full = capsys.readouterr().out.split("record one with:")[1].splitlines()[0]
+    assert "--blind" not in full

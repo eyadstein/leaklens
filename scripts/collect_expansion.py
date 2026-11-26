@@ -916,9 +916,12 @@ def command_show(args) -> int:
     review = rec.get("review") or {}
     if review.get("state", "not_reviewed") == "not_reviewed":
         print("  decision: none recorded")
+        # A blind reading must be recorded as blind, or the audit trail reports a
+        # second pass as unblinded even though the reviewer used --blind.
+        blind_flag = "--blind " if args.blind else ""
         print(
             f"  record one with: python scripts/collect_expansion.py review --id {args.id} "
-            "--state <state> --rationale '<why>' --ref '<cell N:L>' --reviewer <name>"
+            f"{blind_flag}--state <state> --rationale '<why>' --ref '<cell N:L>' --reviewer <name>"
         )
     elif args.blind:
         print("  decision: withheld until your independent verdict is recorded")
