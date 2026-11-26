@@ -372,6 +372,9 @@ def test_blind_show_does_not_leak_the_recorded_verdict(capsys):
     blind = capsys.readouterr().out
     assert f"decision: {state} by" not in blind
     assert "withheld until your independent verdict" in blind
+    # Derived review state is a disclosure path too: it tells a second reviewer
+    # that a verdict exists (and whether it was disputed or adjudicated).
+    assert "audit status" not in blind
 
     script.command_show(SimpleNamespace(id=ident, context=0, blind=False, side=None))
     full = capsys.readouterr().out

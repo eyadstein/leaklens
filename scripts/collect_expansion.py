@@ -851,7 +851,8 @@ def command_show(args) -> int:
                 f"({decision.get('materials', 'full')}) -> {decision.get('state')}"
             )
     status = corpus.review_status(decisions).get(args.id, "not_reviewed")
-    print(f"\n  audit status: {status}")
+    if not args.blind:
+        print(f"\n  audit status: {status}")
     review = rec.get("review") or {}
     if review.get("state", "not_reviewed") == "not_reviewed":
         print("  decision: none recorded")

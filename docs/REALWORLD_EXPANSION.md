@@ -157,12 +157,18 @@ candidate.
 Independence is computed from the log, not asserted: `review_status()` reports
 `single_reviewed`, `double_reviewed` (two distinct reviewer ids that agree and a
 blind pass), `double_reviewed_unblinded` (two ids, no blind pass),
-`disputed`, `adjudicated` or `uncertain`. Each decision records its `role`
+`disputed`, `adjudicated` or `uncertain`. New decisions record their `role`
 (`first_pass`/`adjudication`), `materials` (`full`/`blind`) and the
-`corpus_revision` (first 16 hex of the manifest digest) it was decided against.
-The log is append-only, so a disagreement stays visible after an adjudication.
-As of this writing every recorded decision has one reviewer, so no candidate is
-independently validated and the corpus cannot support a precision claim.
+`corpus_revision` (first 16 hex of the manifest digest) they were decided
+against. The 26 decisions recorded before those fields existed carry none of
+them, so they cannot be tied to a precise corpus revision; the append-only log
+keeps them as historical evidence instead of rewriting them. A disagreement
+stays visible after an adjudication. As of this writing every recorded decision
+has one reviewer, so no candidate is independently validated and the corpus
+cannot support a precision claim.
+`show --blind` withholds the scanner signal, the AI mechanism, review history,
+the recorded decision and the derived audit status, so a second reviewer cannot
+learn from the first pass before recording a verdict.
 
 The first batch is `realworld_expansion/review_batch_01.jsonl` plus
 `review_batch_01.analysis.json` and the human-readable
@@ -233,6 +239,40 @@ know a side existed. Treat the first holdout run as contaminated for those 8
 cases; a pristine holdout needs repositories collected and reviewed after this
 rule existed. No Phase 20L detector was tuned on a reviewed expansion sample;
 workflow verification opened one holdout dossier after the detector was written.
+
+### Locked evaluation protocol (not yet run)
+
+No pristine holdout exists today, so the protocol below is the requirement for
+the first locked evaluation, not a description of a completed one.
+
+1. **Freeze the case set.** Commit a manifest of candidate ids, repository,
+   source revision and content digest. After the freeze, a new sample cannot
+   enter the set without a recorded inclusion decision and a new revision.
+2. **Freeze the split.** The development/holdout assignment is the repository
+   hash plus the cluster rule above; record the resulting side per id in the
+   manifest. A later collection may move a cluster to development, so the frozen
+   manifest must be the one evaluated.
+3. **Freeze the detector.** Record the LeakLens commit and version. A detector
+   change after the freeze starts a new evaluation revision; it cannot be scored
+   against the old one.
+4. **Label independently.** Every scored case needs two distinct reviewers, at
+   least one blind pass (`show --blind`), preserved rationales and an
+   adjudication that does not overwrite either verdict. A single-reviewer label
+   is evidence, not a metric.
+5. **Apply exclusions explicitly.** Duplicates, byte-identical frozen overlaps
+   and repository-level overlaps are reported and excluded, never dropped
+   silently. Unknown or non-redistributable licences stay in the corpus as
+   metadata but out of any redistributed case pack.
+6. **Report counts, not just ratios.** Publish the number of scored positives,
+   negatives, disputed and excluded cases with every precision/recall figure, and
+   state that the sample is not a random census. No confidence interval is
+   claimed from a handful of cases.
+
+Reproduce the inputs with `python scripts/collect_expansion.py finalize`, then
+`stats`; open a holdout dossier only with
+`python scripts/collect_expansion.py show --id <id> --blind --side holdout`.
+The first holdout result is a release-time event, not a number to tune against.
+
 
 ## Label-leakage guard
 
