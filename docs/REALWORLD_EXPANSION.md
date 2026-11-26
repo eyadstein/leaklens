@@ -305,18 +305,18 @@ Collection and review metadata must never become detector input. Two guards:
 
 ## State of the corpus
 
-As of 2026-11-25 (`realworld_expansion/stats.json` is authoritative):
+As of 2026-11-26 (`realworld_expansion/stats.json` is authoritative):
 
 | Metric | Value |
 |---|---|
 | Candidates | 1,147 |
-| Unique samples | 1,052 |
-| Duplicates / near-duplicates | 95 / 63 |
+| Unique samples | 1,051 |
+| Duplicates / near-duplicates | 96 / 64 |
 | GitHub repositories | 730 |
 | Kaggle kernels | 119 |
 | Licences | permissive 541, copyleft 38, unknown 568 |
 | Review queue | 300 (275 distinct repositories) |
-| Development / holdout | 571 / 481 unique samples (repository-hash, cluster-safe) |
+| Development / holdout | 571 / 480 unique samples (repository-hash, cluster-safe) |
 | Human decisions recorded | 26 — 15 `confirmed_leakage`, 7 `legitimate`, 1 `potential`, 3 `uncertain` |
 | Scored labels | 22 (only the 15 positives and 7 negatives) |
 | Overlap with the frozen `realworld/` corpus | 8 samples, flagged and excluded from the queue |
