@@ -305,7 +305,7 @@ The step fails when the scan exits `1`: a high-severity finding, or a trust scor
           fail-under: 80
 ```
 
-`baseline` and `fail-on-new` are unreleased, so a workflow that sets them must use `@main` until the next tag. Record the baseline once from a reviewed run (`leaklens --scan . --write-baseline --baseline leaklens-baseline.json`), commit it, and let CI fail only on findings that appear after it. A baseline labels findings; it does not suppress an active high-severity finding — use a documented [suppression](docs/BASELINES.md#suppressions) for an accepted one.
+`baseline` and `fail-on-new` are unreleased, so a workflow that sets them must use `@main` until the next tag. Record the baseline once from a reviewed run (`leaklens --scan . --write-baseline --baseline leaklens-baseline.json`), commit it, and let CI fail only on findings that appear after it. `--write-baseline` still applies the normal gate, so it exits `1` when it records a high-severity finding — the file is written, and that exit is expected. A baseline labels findings; it does not suppress an active high-severity finding — use a documented [suppression](docs/BASELINES.md#suppressions) for an accepted one.
 
 ```yaml
       - uses: eyadstein/leaklens@main
@@ -315,14 +315,25 @@ The step fails when the scan exits `1`: a high-severity finding, or a trust scor
           fail-on-new: true
 ```
 
-`sarif` writes the same SARIF 2.1.0 report as `--sarif` and leaves the exit contract unchanged, so a code-scanning upload can run after the step. It is unreleased too, so pin `@main` until the next tag:
+`sarif` writes the same SARIF 2.1.0 report as `--sarif` and leaves the exit contract unchanged, so a code-scanning upload can run after the step. It is unreleased too, so pin `@main` until the next tag. The uploading job needs `security-events: write`; fork pull requests receive a read-only token, so this example uploads on `push` only:
 
 ```yaml
+name: leakage
+on: [push, pull_request]
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  leaklens:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
       - uses: eyadstein/leaklens@main
         with:
           path: .
           sarif: leaklens.sarif
-      - if: always()
+      # Fork PRs cannot write security events; upload where the token can.
+      - if: always() && github.event_name == 'push'
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: leaklens.sarif

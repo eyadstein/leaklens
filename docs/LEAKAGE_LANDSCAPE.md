@@ -125,7 +125,30 @@ measurable.
 | Dashboards and monitoring | **Do not build** | Evidently/whylogs own it; LeakLens is an audit. |
 | Shared leakage benchmark | **Build with others, not alone** | Only independent labels make it useful; a self-authored corpus is what we already have. |
 
-## 7. Open questions
+## 7. Capability selection for this phase (Phase 20P)
+
+The candidate gaps were weighed against what the code and tests actually show,
+not against how many detectors exist. Current state: 65 deterministic finding
+kinds (`docs/DETECTORS.md`); the authored 22-case matrix still has 0 failures;
+the scanner floods least on single-call preprocessing order and most on
+multi-stage flow, which is why the ordering detectors keep growing.
+
+| Candidate gap | Evidence checked | Decision |
+|---|---|---|
+| Structured evidence for data findings | Six `Finding()` calls in `leakage.py` — `id_like`, `categorical_target_leakage`, `group_missing`, `group_leakage_risk` and both `feature_overlap` branches — serialised `"evidence": []`, so they could not join the evidence graph or SARIF properties (#621). | **Build.** Done: every data finding now carries a bounded `Evidence` record (source, kind, observed, expected). |
+| Cross-file and notebook lineage | `flow.py`/scanner already follow assignments within a file and across executed cells; a cross-file claim would need import resolution the scanner does not do. | **Defer.** The blind spot is real but a sound version needs a module graph, which is a project, not a detector. |
+| Multi-stage pipeline information flow | `pipeline_unfitted_step`, `pipeline_unpinned_dependency` and the post-split rules cover the visible order; no failing realistic case was found beyond them. | **Defer.** Adding a rule here costs false positives on legitimate `Pipeline` use. |
+| Evaluation-contamination detection | Text engine is hash-only against caller-supplied eval fingerprints; it already reports contamination when given the evidence. Detecting it from a notebook alone needs the eval corpus. | **Do not build.** It would require shipping or fetching data, which the offline default forbids. |
+| Split-aware transformations | `group_stat_after_split` and `frequency_encode_after_split` closed this (#656). | **Done.** |
+| Measured effect of a detected leak | Already selected in §6 as the ecosystem gap; still unbuilt and still the largest single value item. | **Next phase.** |
+| Indirect leakage through a feature-generation function | The scanner resolves calls inside a file but not through a helper module; same blocker as cross-file lineage. | **Defer.** |
+
+Chosen work this phase: **evidence completeness**, because it is testable, needs
+no new dependency, and turns six previously opaque findings into machine-readable
+ones. The next capability with a clear contract is the measured
+"re-run without the leaked column/step" effect in §6, not another syntactic rule.
+
+## 8. Open questions
 
 - Does LeakLens reproduce the ASE'22 tool's findings on the same notebooks, and
   where do the two disagree? A cross-tool comparison on a shared, licensed set is

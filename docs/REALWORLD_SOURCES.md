@@ -112,3 +112,23 @@ evidence" mistake in a new form.
 **Result: still no new corpus entry.** The blockers are unchanged from §2: the
 only external labelled code corpus found has no licence, and the newly found
 material is either unlicensed or the wrong artefact type.
+
+## 7. Phase 20P pass (2026-11-26)
+
+Three GitHub repository searches and two Hugging Face dataset searches were run;
+the aim was a *licensed, labelled* ML-pipeline corpus, not another tool.
+
+| Query / channel | What came back | Decision |
+|---|---|---|
+| GitHub `jupyter notebook data leakage` / `leakage detection machine learning` / `feature engineering leakage notebook`, sorted by update, 10 hits each | Student/portfolio notebooks, leakage-avoidance projects and curated lists. Licences were mostly absent; the permissive hits that appeared were generic ML dashboards or reading lists, not labelled leaky pipelines. | **No corpus entry.** No provenance, no label set, no reproducibility contract. |
+| Hugging Face `data leakage`, 15 hits | `aemreozturk/water_leakage_voice_data` (CC-BY-4.0) and `Nord0911/dvd-leakage-models-data`; both are physical/audio or model-artefact data, not notebooks. | **No corpus entry.** Wrong modality and no pipeline code. |
+| Hugging Face `contamination`, 15 hits | MMLU/reward-bench contamination reports and LLM evaluation artefacts. | **No corpus entry.** LLM benchmark contamination, not split/preprocessing order; no notebook provenance. |
+
+A public repository with an MIT licence is not a labelled corpus, and a leak of
+water, sound or a prompt is not the leakage family LeakLens detects. Nothing was
+downloaded or added; no public URL was treated as a redistribution licence.
+
+**Result: still no new corpus entry.** The blocker is unchanged from §2: the only
+external labelled code corpus found (ASE'22 evaluation materials) has no licence,
+and every newly found candidate is either unlicensed, the wrong artefact type or
+the wrong leakage family.

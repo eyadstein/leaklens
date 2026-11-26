@@ -306,14 +306,44 @@ python scripts/collect_expansion.py verify-freeze --label 2026-11-26
 `freeze` writes `realworld_expansion/freezes/<label>.json`: one entry per
 candidate (`id`, `repo`, `path`, `sha256`, `side`, `reason`), the detector
 version/commit and a digest over that case list. It records **no review state
-and no label**, so it cannot leak an answer. `verify-freeze` recomputes the sides
-from the current manifest and exits 1 on any missing case, changed bytes, moved
-side or newly added record — the drift a later collection would otherwise hide.
+and no label**, so it cannot leak an answer. The label is a plain name
+(`2026-11-26`, `dev_2.1`); separators and a leading dot are refused so a
+snapshot cannot be written outside `freezes/`. An existing label is never
+overwritten, and a manifest with duplicate ids is refused rather than frozen
+ambiguously.
+
+`verify-freeze` recomputes the sides from the current manifest and exits 1 on:
+
+- a missing case, a newly added record, or changed `repo`/`path`/`sha256`;
+- a moved side, or a changed side *reason* (the cluster structure moved even if
+  the side did not);
+- a digest that does not match the case list;
+- a malformed snapshot (not an object, no case list, a non-object case, a
+  missing/non-string field, an unknown side, or a duplicated id).
+
+A malformed or unreadable snapshot is reported, never a traceback; an invalid
+label or unreadable file exits 2, drift exits 1, and a matching snapshot exits 0.
+
+**What the freeze is and is not.** It is a reproducible record of *which cases
+were evaluated and on which side*. It is **not** a frozen ground-truth
+evaluation, because it does not freeze labels, reviewer independence, the #655
+overlap policy or the evaluation procedure:
+
+| Frozen by this tool | Not frozen |
+|---|---|
+| candidate ids, repository, path and content digest | review state or verdict per case |
+| development/holdout side and the reason for it | reviewer identity, independence or agreement |
+| detector version/commit and the split rule | the repository-overlap exclusion policy |
+| one digest over the case list | the procedure that turns decisions into a score |
 
 A matching freeze means "the evaluated bytes and their sides have not moved". It
 does **not** mean the holdout is pristine: labelling, the #655 repository-overlap
-decision and the pre-split decisions are still open, and `freezes/2026-11-26.json`
-therefore captures today's case set, not an independently validated one.
+decision ([docs/HOLDOUT_POLICY.md](HOLDOUT_POLICY.md)) and the pre-split
+decisions are still open, and `freezes/2026-11-26.json` therefore captures
+today's case set, not an independently validated one. The evaluation boundary is
+established only when a committed freeze is accompanied by frozen labels,
+recorded exclusions and two independent reviews; until then, quote no precision
+number from it.
 
 
 ## Label-leakage guard

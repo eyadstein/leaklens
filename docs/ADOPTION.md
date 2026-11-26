@@ -111,7 +111,9 @@ The GitHub Action and pre-commit hook exist. The Action now carries `path`,
 `fail-under`, `baseline`, `fail-on-new` and `sarif`, so the documented adoption
 path — record the findings you have reviewed, then fail only on new ones — is
 reachable from CI without a hand-written `run:` step, and a code-scanning upload
-can follow the scan. The README shows the copy-paste workflow; the `baseline`,
+can follow the scan. The README shows the copy-paste workflow, including the
+`security-events: write` permission the upload needs and the fact that
+`--write-baseline` exits `1` when it records a high finding. The `baseline`,
 `fail-on-new` and `sarif` inputs are unreleased, so they need `@main` until the
 next tag. One integration that works beats five adapters that are announced.
 

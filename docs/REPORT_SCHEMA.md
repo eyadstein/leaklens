@@ -64,6 +64,27 @@ suppression objects under the same name, so a report written by 0.14.0 and
 validated today can be checked against a stricter document that also calls
 itself `report-1`.
 
+**What actually depends on the identifier.** `leaklens/report_schema.py` owns
+`REPORT_SCHEMA_URL` and `SCHEMA_PATH`; the CLI `--json` writer, the API
+responses and every report emitter stamp `$schema` from that constant. The
+packaged `leaklens/schemas/report-1.schema.json` is printed by `leaklens schema`,
+so an offline consumer never fetches. `tests/test_report_schema.py` pins
+`$id == REPORT_SCHEMA_URL`; `tests/_meta/test_report_schema_emitters.py` pins
+every emitter to the same constant. The SARIF and audit-manifest formats have
+their own identities and do not depend on this URL.
+
+**What "identity" should mean.** A schema identifier should resolve to the
+document a report was written against. It should not derive from a hash of the
+whole file, because then a typo fix in `description` would look like a contract
+break; nor from field ordering, because JSON objects are unordered and a
+consumer must not care. The contract is the set of required/optional
+properties, their types, formats and constraints, allOf/anyOf structure and enum
+membership. Changing only `title`, `description`, `$comment` or `examples` is
+compatible; adding an optional property is compatible; removing a property,
+retyping one, making an optional one required, or tightening a constraint is
+incompatible; anything that changes validation outcomes for an existing valid
+report is at least uncertain and must be called out.
+
 Options, none chosen yet:
 
 1. **Version-addressed URL** (`.../v0.14.0/leaklens/schemas/...`), stamped by
@@ -75,12 +96,22 @@ Options, none chosen yet:
 3. **Hosted immutable copy** (release asset or object store with a digest).
    Strongest guarantee; gives an offline-only contract an external dependency.
 
-Recommendation: option 2 if `report-1` may mean "the document as of 0.14.x";
-option 1 if it must mean one frozen document forever. Either is a documented
-compatibility decision; changing the constant without deciding is the failure
-mode. No schema, payload or emitter behaviour has been changed while this is
-open, and the two contract tests (`tests/test_report_schema.py`,
-`tests/_meta/test_report_schema_emitters.py`) still pin the current URL.
+**Recommendation:** option 2 if `report-1` may mean "the document as of 0.14.x";
+option 1 if it must mean one frozen document forever. Option 2 is the smaller
+honest change: the additive `fix` field and the tightened suppression objects
+already happened under `report-1`, so a resolution table records the history
+instead of pretending it did not. Option 1 is better only if the owner wants one
+identity to mean one byte-for-byte document forever, in which case every release
+must publish its own addressed copy.
+
+**Migration cost either way:** one constant, one resolution rule, and the two
+contract tests that currently pin the URL. Changing the constant without deciding
+is the failure mode. No schema, payload or emitter behaviour has been changed
+while this is open; both tests still pin the current URL. **Compatibility
+classification for the owner:** not making the decision is safe for existing
+consumers (nothing moves), but every new report continues to name a document
+that can change without notice.
+
 
 ## Validating a report
 
