@@ -880,6 +880,78 @@ def write_manifest(path, records) -> None:
             handle.write(json.dumps(rec, sort_keys=True) + "\n")
 
 
+FREEZE_SCHEMA = "leaklens-corpus-freeze-1"
+
+
+def freeze(records, detector) -> dict:
+    """A content-addressed snapshot of the case set and the split it is on.
+
+    This freezes *what was evaluated and on which side*, not a label set and not
+    a pristine holdout: review decisions are excluded, so a freeze cannot leak
+    an answer into the pack. Adding, removing or moving a case after this point
+    is drift that :func:`verify_freeze` reports.
+    """
+    records = list(records)
+    sides = split_roles(records)
+    cases = [
+        {
+            "id": rec["id"],
+            "repo": rec["repo"],
+            "path": rec["path"],
+            "sha256": rec["sha256"],
+            "side": sides[rec["id"]]["side"],
+            "reason": sides[rec["id"]]["reason"],
+        }
+        for rec in sorted(records, key=lambda rec: rec["id"])
+    ]
+    payload = json.dumps(cases, sort_keys=True, separators=(",", ":"))
+    return {
+        "schema": FREEZE_SCHEMA,
+        "detector": detector,
+        "frozen_at": _now(),
+        "cases": cases,
+        # digest covers only the case list: re-freezing an unchanged corpus keeps
+        # the same identity even though the timestamp moves
+        "digest": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+    }
+
+
+def verify_freeze(records, frozen) -> list[str]:
+    """Drift between a freeze and the current manifest; empty means unchanged.
+
+    Labels are not consulted: a freeze that still matches says the evaluated
+    bytes and sides are stable, nothing about whether they are correct.
+    """
+    if frozen.get("schema") != FREEZE_SCHEMA:
+        return [f"unexpected freeze schema {frozen.get('schema')!r}"]
+    cases = frozen.get("cases") or []
+    payload = json.dumps(cases, sort_keys=True, separators=(",", ":"))
+    problems = (
+        []
+        if hashlib.sha256(payload.encode("utf-8")).hexdigest() == frozen.get("digest")
+        else ["the digest does not match the frozen cases"]
+    )
+    current = {rec["id"]: rec for rec in records}
+    sides = split_roles(records)
+    for case in cases:
+        ident = case["id"]
+        rec = current.get(ident)
+        if rec is None:
+            problems.append(f"{ident}: missing from the manifest")
+            continue
+        for field in ("repo", "path", "sha256"):
+            if rec.get(field) != case.get(field):
+                problems.append(f"{ident}: {field} changed")
+        if sides[ident]["side"] != case.get("side"):
+            problems.append(
+                f"{ident}: side moved {case.get('side')} -> {sides[ident]['side']}"
+            )
+    added = len(set(current) - {case["id"] for case in cases})
+    if added:
+        problems.append(f"{added} record(s) are not in the freeze")
+    return problems
+
+
 def summarize(records, queue_ids=None, decisions=()) -> dict:
     """Counts for the report: samples, repositories, licences, review progress."""
     records = list(records)

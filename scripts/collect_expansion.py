@@ -43,6 +43,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from leaklens import __version__  # noqa: E402
 from leaklens import corpus_expansion as corpus  # noqa: E402
 from leaklens.scanner import scan_file  # noqa: E402
 
@@ -53,6 +54,7 @@ QUEUE = EXPANSION / "review_queue.jsonl"
 REVIEWS = EXPANSION / "reviews.jsonl"
 STATE = EXPANSION / "collection_state.json"
 STATS = EXPANSION / "stats.json"
+FREEZES = EXPANSION / "freezes"
 # A review batch is three files with one stem: authored analysis, machine-readable
 # dossiers, and the document a human actually reads.
 BATCH_STEM = EXPANSION / "review_batch_01"
@@ -695,6 +697,57 @@ def command_finalize(_args) -> int:
     return 0
 
 
+def detector_stamp() -> dict:
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.strip()
+    return {
+        "version": __version__,
+        "commit": head,
+        "split_rule": "repo-hash+cluster",
+    }
+
+
+def command_freeze(args) -> int:
+    path = FREEZES / f"{args.label}.json"
+    if path.exists():
+        log(
+            f"freeze {args.label} already exists: a freeze is immutable, pick a new label"
+        )
+        return 2
+    frozen = corpus.freeze(load_records(), detector_stamp())
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(frozen, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    print(f"{len(frozen['cases'])} cases, digest {frozen['digest']} -> {path}")
+    print(
+        "labels are not frozen: this attests the case set and its sides, not a verdict"
+    )
+    return 0
+
+
+def command_verify_freeze(args) -> int:
+    path = FREEZES / f"{args.label}.json"
+    try:
+        frozen = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log(f"cannot read freeze {args.label}: {exc}")
+        return 2
+    problems = corpus.verify_freeze(load_records(), frozen)
+    if problems:
+        for problem in problems:
+            log(problem)
+        return 1
+    print(
+        f"freeze {args.label}: {len(frozen['cases'])} cases unchanged, "
+        f"digest {frozen['digest']}"
+    )
+    return 0
+
+
 def command_review(args) -> int:
     """Record one decision. Appends to reviews.jsonl only: the manifest is history."""
     records = load_records()
@@ -1275,6 +1328,18 @@ def main(argv=None) -> int:
     ):
         part = sub.add_parser(name, help=help_text)
         part.set_defaults(func=func)
+
+    freeze = sub.add_parser(
+        "freeze", help="write an immutable case-set + split snapshot (no labels)"
+    )
+    freeze.add_argument("--label", required=True, help="freeze name, e.g. 2026-11-26")
+    freeze.set_defaults(func=command_freeze)
+
+    verify = sub.add_parser(
+        "verify-freeze", help="report drift from a frozen case-set + split snapshot"
+    )
+    verify.add_argument("--label", required=True)
+    verify.set_defaults(func=command_verify_freeze)
 
     review = sub.add_parser("review", help="record one human decision (append-only)")
     review.add_argument("--id", required=True)

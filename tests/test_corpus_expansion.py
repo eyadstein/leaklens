@@ -20,6 +20,7 @@ from leaklens.corpus_expansion import (
     code_text,
     content_sha256,
     deduplicate,
+    freeze,
     license_status,
     load_manifest,
     queue,
@@ -30,6 +31,7 @@ from leaklens.corpus_expansion import (
     split_roles,
     summarize,
     validate,
+    verify_freeze,
     write_manifest,
 )
 
@@ -577,3 +579,47 @@ def test_detectors_never_import_collection_metadata():
         if "corpus_expansion" in text or "realworld_expansion" in text:
             offenders.append(str(path))
     assert offenders == []
+
+
+# --- frozen case-set snapshots ---------------------------------------------
+
+
+def _freeze_corpus():
+    return [
+        _record("s1", repo=_repo_on_side("development", "freeze-dev"), sha="1" * 64),
+        _record("s2", repo=_repo_on_side("holdout", "freeze-hold"), sha="2" * 64),
+    ]
+
+
+def test_freeze_is_deterministic_and_records_no_verdict():
+    records = _freeze_corpus()
+    stamp = {"version": "0.14.0", "commit": "abc", "split_rule": "repo-hash+cluster"}
+    first = freeze(records, stamp)
+    second = freeze(list(reversed(records)), dict(stamp, version="9.9.9"))
+    assert first["digest"] == second["digest"]
+    assert first["cases"] == second["cases"]
+    assert set(first["cases"][0]) == {"id", "repo", "path", "sha256", "side", "reason"}
+    assert verify_freeze(records, first) == []
+
+
+def test_verify_freeze_reports_added_removed_changed_and_moved_cases():
+    records = _freeze_corpus()
+    frozen = freeze(records, {"version": "0.14.0", "commit": "abc"})
+    assert verify_freeze(records, frozen) == []
+
+    missing = verify_freeze(records[1:], frozen)
+    assert any("missing from the manifest" in problem for problem in missing)
+
+    extra = verify_freeze([*records, _record("s3", repo="new/repo")], frozen)
+    assert any("not in the freeze" in problem for problem in extra)
+
+    moved = [dict(rec) for rec in records]
+    moved[0]["repo"] = moved[1]["repo"]
+    drift = verify_freeze(moved, frozen)
+    assert "side moved development -> holdout" in " ".join(drift)
+
+    tampered = json.loads(json.dumps(frozen))
+    tampered["cases"][0]["sha256"] = "f" * 64
+    assert "the digest does not match the frozen cases" in verify_freeze(
+        records, tampered
+    )

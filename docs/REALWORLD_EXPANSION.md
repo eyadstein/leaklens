@@ -25,6 +25,7 @@ bytes and their published results.
 | `realworld_expansion/review_queue.jsonl` | The prioritised review queue, exported from the manifest |
 | `realworld_expansion/reviews.jsonl` | Append-only audit log of recorded human decisions (created by the first recorded review; absent until then) |
 | `realworld_expansion/stats.json` | Machine-readable counts used by the report |
+| `realworld_expansion/freezes/<label>.json` | Immutable case-set + split snapshot written by `freeze`; no labels (see "Frozen case-set snapshots") |
 | `realworld_expansion/collection_state.json` | Resume cursors (search pages, Kaggle blocks) |
 | `tests/test_corpus_expansion.py` | Synthetic-fixture tests for all of the above; no network |
 
@@ -292,6 +293,27 @@ Reproduce the inputs with `python scripts/collect_expansion.py finalize`, then
 `stats`; open a holdout dossier only with
 `python scripts/collect_expansion.py show --id <id> --blind --side holdout`.
 The first holdout result is a release-time event, not a number to tune against.
+
+### Frozen case-set snapshots
+
+Requirements 1 and 2 now have a tool, not a completed evaluation:
+
+```sh
+python scripts/collect_expansion.py freeze --label 2026-11-26
+python scripts/collect_expansion.py verify-freeze --label 2026-11-26
+```
+
+`freeze` writes `realworld_expansion/freezes/<label>.json`: one entry per
+candidate (`id`, `repo`, `path`, `sha256`, `side`, `reason`), the detector
+version/commit and a digest over that case list. It records **no review state
+and no label**, so it cannot leak an answer. `verify-freeze` recomputes the sides
+from the current manifest and exits 1 on any missing case, changed bytes, moved
+side or newly added record — the drift a later collection would otherwise hide.
+
+A matching freeze means "the evaluated bytes and their sides have not moved". It
+does **not** mean the holdout is pristine: labelling, the #655 repository-overlap
+decision and the pre-split decisions are still open, and `freezes/2026-11-26.json`
+therefore captures today's case set, not an independently validated one.
 
 
 ## Label-leakage guard
