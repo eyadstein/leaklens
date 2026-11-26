@@ -279,6 +279,8 @@ The Action installs the CLI and runs `leaklens --scan` on a file or folder. It d
 |---|---|---|---|
 | `path` | optional | `.` | file or folder to scan |
 | `fail-under` | optional | unset | minimum trust score (0-100); when set, the step also fails on a score below it |
+| `baseline` | optional | unset | baseline file to compare against; findings are labelled `new`/`unchanged`/`changed`/`resolved` |
+| `fail-on-new` | optional | unset | fail when a non-diagnostic finding is new relative to `baseline` |
 
 ```yaml
 name: leakage
@@ -300,6 +302,16 @@ The step fails when the scan exits `1`: a high-severity finding, or a trust scor
         with:
           path: .
           fail-under: 80
+```
+
+`baseline` and `fail-on-new` are unreleased, so a workflow that sets them must use `@main` until the next tag. Record the baseline once from a reviewed run (`leaklens --scan . --write-baseline --baseline leaklens-baseline.json`), commit it, and let CI fail only on findings that appear after it. A baseline labels findings; it does not suppress an active high-severity finding — use a documented [suppression](docs/BASELINES.md#suppressions) for an accepted one.
+
+```yaml
+      - uses: eyadstein/leaklens@main
+        with:
+          path: .
+          baseline: leaklens-baseline.json
+          fail-on-new: true
 ```
 
 Pin a tag or a full commit SHA for reproducible CI. `@main` tracks the default branch and therefore unreleased changes.

@@ -10,6 +10,12 @@ inputs:
   fail-under:
     description: Optional minimum trust score (0-100); fail when the scan scores below it
     required: false
+  baseline:
+    description: Optional path to a LeakLens baseline file; findings are labelled new/unchanged/changed/resolved
+    required: false
+  fail-on-new:
+    description: Optional; fail when a finding is new relative to the baseline (requires baseline)
+    required: false
 runs:
   using: composite
   steps:
@@ -23,8 +29,16 @@ runs:
         if [[ -n "$LEAKLENS_FAIL_UNDER" ]]; then
           args+=(--fail-under "$LEAKLENS_FAIL_UNDER")
         fi
+        if [[ -n "$LEAKLENS_BASELINE" ]]; then
+          args+=(--baseline "$LEAKLENS_BASELINE")
+        fi
+        if [[ "$LEAKLENS_FAIL_ON_NEW" == "true" ]]; then
+          args+=(--fail-on-new)
+        fi
         leaklens --scan "$INPUT_PATH" "${args[@]}"
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
         LEAKLENS_FAIL_UNDER: ${{ inputs.fail-under }}
+        LEAKLENS_BASELINE: ${{ inputs.baseline }}
+        LEAKLENS_FAIL_ON_NEW: ${{ inputs.fail-on-new }}

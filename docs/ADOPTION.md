@@ -107,9 +107,12 @@ the evidence, the human verdict and the corrected pipeline. Redact where needed.
 
 ### 3. Meet teams where they already run
 
-The GitHub Action and pre-commit hook exist; the missing piece is a copy-paste
-workflow for a typical `scikit-learn` CI plus a note on `--fail-under` and
-baselines. One integration that works beats five adapters that are announced.
+The GitHub Action and pre-commit hook exist. The Action now carries `path`,
+`fail-under`, `baseline` and `fail-on-new`, so the documented adoption path —
+record the findings you have reviewed, then fail only on new ones — is reachable
+from CI without a hand-written `run:` step. The README shows the copy-paste
+workflow; the baseline inputs are unreleased, so they need `@main` until the next
+tag. One integration that works beats five adapters that are announced.
 
 - **Signal:** an external repository uses the Action and links back.
 - **Falsified if:** no external usage appears after the docs and a single
