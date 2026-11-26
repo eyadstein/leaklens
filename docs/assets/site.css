@@ -1993,6 +1993,49 @@ pre code {
   font-size: 0.8rem;
 }
 
+.finding-evidence {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(4, 9, 15, 0.55);
+}
+
+.finding-evidence strong {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.finding-evidence ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.finding-evidence li {
+  display: grid;
+  gap: 3px;
+}
+
+.evidence-desc {
+  color: var(--muted);
+}
+
+.evidence-meta {
+  color: var(--faint);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .demo-side-panel {
   border: 1px solid var(--line);
   border-radius: 12px;

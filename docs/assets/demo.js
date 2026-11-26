@@ -297,6 +297,32 @@ if (root) {
             : fixture.group === "code"
               ? String(finding.column || "file").split(":")[0]
               : finding.column || "table";
+        const evidence = Array.isArray(finding.evidence) ? finding.evidence : [];
+        const evidenceBlock = evidence.length
+          ? el(
+              "div",
+              { class: "finding-evidence", role: "group", "aria-label": "Evidence records" },
+              el("strong", {
+                text: `Evidence · ${evidence.length} record${evidence.length === 1 ? "" : "s"}`,
+              }),
+              el(
+                "ul",
+                {},
+                ...evidence.map((record) => {
+                  const facts = [`${record.source}/${record.kind}`];
+                  if (record.location) facts.push(`location ${record.location}`);
+                  if (record.observed) facts.push(`observed ${record.observed}`);
+                  if (record.expected) facts.push(`expected ${record.expected}`);
+                  return el(
+                    "li",
+                    {},
+                    el("span", { class: "evidence-desc", text: record.description }),
+                    el("span", { class: "evidence-meta", text: facts.join(" · ") })
+                  );
+                })
+              )
+            )
+          : null;
         const item = el(
           "details",
           { class: `finding ${finding.severity}` },
@@ -314,6 +340,7 @@ if (root) {
             "div",
             { class: "finding-body" },
             el("p", { text: finding.detail }),
+            evidenceBlock,
             finding.fix
               ? el("div", { class: "fix" }, el("strong", { text: "Fix: " }), finding.fix)
               : null
@@ -410,6 +437,7 @@ if (root) {
     const meta = fixtureMeta(fixture);
     const rows = [];
     if (meta.target) rows.push(["target", meta.target]);
+    if (meta.groupColumn) rows.push(["group column", meta.groupColumn]);
     if (meta.rows) rows.push(["rows", String(meta.rows)]);
     if (meta.columns.length) rows.push(["columns", String(meta.columns.length)]);
     if (meta.check) rows.push(["check", meta.check]);

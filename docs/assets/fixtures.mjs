@@ -10,6 +10,7 @@ export const fixtures = {
     "dataset": "leaklens.leakage.scan / score",
     "duplicateChecks": "leaklens.leakage.split_overlap / feature_overlap / near_duplicate_overlap",
     "prerecorded": true,
+    "sourceNote": "Fixtures are regenerated from the source tree that builds this site. Version 0.14.0 is the published PyPI release; the structured evidence records shown on data and split findings were added on main after that release.",
     "note": "Every finding on the demo page is real output from the Python scanners, generated at build time. The browser never executes LeakLens; run the CLI for a live audit."
   },
   "code": [
@@ -29,7 +30,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:18",
           "detail": "SelectKBest.fit_transform() runs before the split at advanced_leaks.py:26",
           "fix": "Fit feature selectors (SelectKBest, RFE, SelectFromModel...) inside a Pipeline on the training split only; the label must not choose features using held-out rows.",
-          "line": 18
+          "line": 18,
+          "evidence": []
         },
         {
           "severity": "low",
@@ -37,7 +39,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:26",
           "detail": "train_test_split() without stratify: if the target is categorical, an unstratified split can skew the class ratio between train and test; pass stratify=<labels>. For a regression target, ignore this.",
           "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
-          "line": 26
+          "line": 26,
+          "evidence": []
         },
         {
           "severity": "high",
@@ -45,7 +48,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:16",
           "detail": "df['city'].map(city_target_mean) turns a target-derived statistic into a feature before the split at advanced_leaks.py:26; held-out labels shape the encoding",
           "fix": "Compute the target encoding from the training fold only (sklearn.preprocessing.TargetEncoder in a Pipeline, or out-of-fold encoding) so held-out rows never help build it.",
-          "line": 16
+          "line": 16,
+          "evidence": []
         },
         {
           "severity": "medium",
@@ -53,7 +57,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:26",
           "detail": "train_test_split() shuffles data that was sorted by a time column; use shuffle=False or a time-based split so future rows cannot land in the training set",
           "fix": "Split time-ordered data chronologically (shuffle=False, or a time-based split) so future rows never enter the training set.",
-          "line": 26
+          "line": 26,
+          "evidence": []
         },
         {
           "severity": "medium",
@@ -61,7 +66,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:22",
           "detail": "GridSearchCV() tunes or cross-validates on the full dataset before the split at advanced_leaks.py:26; the held-out rows help choose the model/hyperparameters. Split first, then tune on X_train.",
           "fix": "Split first, then tune on X_train with cross-validation. Tuning before the split lets held-out rows influence the chosen model or hyperparameters.",
-          "line": 22
+          "line": 22,
+          "evidence": []
         },
         {
           "severity": "high",
@@ -69,7 +75,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:29",
           "detail": "GridSearchCV.fit() uses test data for hyperparameter tuning; the test set must only be used once for final evaluation. Tune on training data with cross-validation instead.",
           "fix": "Tune hyperparameters on training data with cross-validation (GridSearchCV with cv=5 on X_train). Use the test set once, only for final evaluation of the selected model.",
-          "line": 29
+          "line": 29,
+          "evidence": []
         },
         {
           "severity": "medium",
@@ -77,7 +84,8 @@ export const fixtures = {
           "column": "advanced_leaks.py:33",
           "detail": "GroupKFold.split() is called without groups=; the same entity can appear in a training and a validation fold. Pass the entity column (groups=...) or use GroupKFold correctly.",
           "fix": "Pass the entity column to group-aware splitting: GroupKFold(...).split(X, y, groups=entity_ids) or cross_val_score(..., groups=entity_ids).",
-          "line": 33
+          "line": 33,
+          "evidence": []
         }
       ],
       "counts": {
@@ -253,7 +261,8 @@ export const fixtures = {
           "column": "bad_pipeline.py:6",
           "detail": "StandardScaler.fit_transform() output feeds the split at bad_pipeline.py:9, so the split rows already shaped it",
           "fix": "Split first, then fit on the training part only. Wrap the steps in sklearn.pipeline.Pipeline and fit/cross-validate the pipeline.",
-          "line": 6
+          "line": 6,
+          "evidence": []
         },
         {
           "severity": "high",
@@ -261,7 +270,8 @@ export const fixtures = {
           "column": "bad_pipeline.py:8",
           "detail": "SMOTE.fit_resample() output feeds the split at bad_pipeline.py:9, so the split rows already shaped it",
           "fix": "Resample only the training fold: imblearn.pipeline.Pipeline([('smote', SMOTE()), ('clf', model)]).",
-          "line": 8
+          "line": 8,
+          "evidence": []
         },
         {
           "severity": "low",
@@ -269,7 +279,8 @@ export const fixtures = {
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without random_state: a different split on every run, so results are not reproducible",
           "fix": "Record the run's randomness and determinism settings: a seed wherever randomness enters (seed=<int> in PyTorch/Lightning, seed_everything, set_random_seed, or random_state=<int> in scikit-learn/XGBoost/LightGBM), deterministic-algorithm flags (torch.use_deterministic_algorithms, enable_op_determinism) when mixed precision or distributed training is used, and the precision/topology itself (precision, strategy, devices) in the pipeline metadata so the same run can be compared.",
-          "line": 9
+          "line": 9,
+          "evidence": []
         },
         {
           "severity": "low",
@@ -277,7 +288,8 @@ export const fixtures = {
           "column": "bad_pipeline.py:9",
           "detail": "train_test_split() without stratify: if the target is categorical, an unstratified split can skew the class ratio between train and test; pass stratify=<labels>. For a regression target, ignore this.",
           "fix": "Pass stratify=<labels> to train_test_split for classification targets so the train and test splits keep the overall class ratio; without it, an imbalanced target can land mostly in one split and distort the evaluation.",
-          "line": 9
+          "line": 9,
+          "evidence": []
         }
       ],
       "counts": {
@@ -441,6 +453,7 @@ export const fixtures = {
       "title": "Leaky transaction table",
       "description": "A copied target column and a unique identifier inflate the trust score to 50/100. This is the shape of most '99% accuracy' demos.",
       "target": "is_fraud",
+      "groupColumn": null,
       "rows": 600,
       "columns": [
         "txn_id",
@@ -515,7 +528,17 @@ export const fixtures = {
           "column": "chargeback_flag",
           "detail": "alone predicts target (roc_auc=1.000)",
           "fix": "Drop the column or confirm it is known at prediction time; on its own it predicts the target.",
-          "line": null
+          "line": null,
+          "evidence": [
+            {
+              "source": "data",
+              "kind": "statistic",
+              "description": "one feature predicts the target at or above the leakage threshold",
+              "location": "chargeback_flag",
+              "observed": "roc_auc=1.000",
+              "expected": "roc_auc < 0.950"
+            }
+          ]
         },
         {
           "severity": "medium",
@@ -523,7 +546,17 @@ export const fixtures = {
           "column": "txn_id",
           "detail": "100.0% unique values; one value per row",
           "fix": "Drop identifier columns; they let models memorize rows instead of learning patterns.",
-          "line": null
+          "line": null,
+          "evidence": [
+            {
+              "source": "data",
+              "kind": "statistic",
+              "description": "a column has a distinct value for nearly every row and an identifier-like role",
+              "location": "txn_id",
+              "observed": "100.0% unique values",
+              "expected": "below 98% unique values for a feature"
+            }
+          ]
         }
       ],
       "counts": {
@@ -541,6 +574,7 @@ export const fixtures = {
       "title": "Same table, leaks removed",
       "description": "Drop the copied target and the identifier: the audit is clean and the trust score reaches 100/100.",
       "target": "is_fraud",
+      "groupColumn": null,
       "rows": 600,
       "columns": [
         "amount",
@@ -602,6 +636,88 @@ export const fixtures = {
       },
       "clean": true,
       "trustScore": 100
+    },
+    {
+      "id": "grouped_customers",
+      "group": "dataset",
+      "name": "grouped_customers.csv",
+      "title": "Repeated entities across a random split",
+      "description": "Every customer has several rows. A random split can place one customer on both sides, so the audit asks for an entity-aware split.",
+      "target": "is_fraud",
+      "groupColumn": "customer_id",
+      "rows": 600,
+      "columns": [
+        "customer_id",
+        "amount",
+        "tenure_days",
+        "is_fraud"
+      ],
+      "preview": [
+        {
+          "customer_id": "c000",
+          "amount": 9.01,
+          "tenure_days": 1910,
+          "is_fraud": 0
+        },
+        {
+          "customer_id": "c000",
+          "amount": 5.34,
+          "tenure_days": 978,
+          "is_fraud": 1
+        },
+        {
+          "customer_id": "c000",
+          "amount": 15.67,
+          "tenure_days": 360,
+          "is_fraud": 1
+        },
+        {
+          "customer_id": "c000",
+          "amount": 30.58,
+          "tenure_days": 206,
+          "is_fraud": 1
+        },
+        {
+          "customer_id": "c000",
+          "amount": 62.56,
+          "tenure_days": 506,
+          "is_fraud": 1
+        },
+        {
+          "customer_id": "c001",
+          "amount": 22.41,
+          "tenure_days": 1027,
+          "is_fraud": 0
+        }
+      ],
+      "command": "leaklens grouped_customers.csv --target is_fraud --group customer_id",
+      "findings": [
+        {
+          "severity": "medium",
+          "kind": "group_leakage_risk",
+          "column": "customer_id",
+          "detail": "100% of rows share a customer_id with other rows; a random split leaks entities, split by group",
+          "fix": "Split by entity with GroupShuffleSplit or GroupKFold instead of a random split.",
+          "line": null,
+          "evidence": [
+            {
+              "source": "data",
+              "kind": "statistic",
+              "description": "most rows share a group identifier with other rows, so a random split can place one entity on both sides",
+              "location": "customer_id",
+              "observed": "100% of rows share a customer_id with other rows",
+              "expected": "below 50% of rows sharing a group"
+            }
+          ]
+        }
+      ],
+      "counts": {
+        "high": 0,
+        "medium": 1,
+        "low": 0
+      },
+      "clean": false,
+      "trustScore": 85
     }
   ],
   "overlaps": [
@@ -686,7 +802,16 @@ export const fixtures = {
           "column": "*",
           "detail": "20 test rows (10.0%) also appear in train",
           "fix": "Deduplicate before splitting, or split by group so the same row cannot land on both sides.",
-          "line": null
+          "line": null,
+          "evidence": [
+            {
+              "source": "split",
+              "kind": "overlap",
+              "description": "test rows are exact duplicates of train rows",
+              "observed": "20 of 200 test rows shared",
+              "expected": "0 shared rows"
+            }
+          ]
         }
       ],
       "counts": {
@@ -2233,7 +2358,16 @@ export const fixtures = {
           "column": "*",
           "detail": "8 test rows (7.4%) match a train row after case/whitespace normalisation and rounding numbers to 4 decimals; check for near-duplicate samples before splitting",
           "fix": "Deduplicate or group near-identical rows before splitting; normalised duplicates inflate held-out scores and hide distribution shift.",
-          "line": null
+          "line": null,
+          "evidence": [
+            {
+              "source": "split",
+              "kind": "duplicate",
+              "description": "test rows match train rows after case/whitespace and numeric normalisation",
+              "observed": "8 of 108 test rows matched",
+              "expected": "0 matches after normalisation"
+            }
+          ]
         }
       ],
       "counts": {

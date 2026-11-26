@@ -138,6 +138,7 @@ export function fixtureMeta(fixture) {
     columns: fixture?.columns || [],
     rows: fixture?.rows ?? null,
     target: fixture?.target || null,
+    groupColumn: fixture?.groupColumn || null,
     check: fixture?.check || null,
     split: fixture?.split || null,
     duplicates: fixture?.plot?.counts?.duplicates ?? null,

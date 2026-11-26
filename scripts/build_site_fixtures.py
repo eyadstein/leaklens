@@ -30,6 +30,7 @@ from leaklens.ai.semantics import CodeSource  # noqa: E402
 from leaklens.fixes import advice  # noqa: E402
 from leaklens.leakage import (  # noqa: E402
     feature_overlap,
+    group_risk,
     near_duplicate_overlap,
     scan,
     score,
@@ -72,6 +73,7 @@ def _finding(finding) -> dict:
         "detail": finding.detail,
         "fix": advice(finding.kind),
         "line": _line_of(finding.column),
+        "evidence": [item.to_dict() for item in finding.evidence],
     }
 
 
@@ -196,6 +198,21 @@ def make_transactions(n: int = 600, seed: int = 11) -> pd.DataFrame:
     )
 
 
+def make_customers(customers: int = 120, per_customer: int = 5, seed: int = 5):
+    rng = np.random.default_rng(seed)
+    n = customers * per_customer
+    return pd.DataFrame(
+        {
+            "customer_id": np.repeat(
+                [f"c{i:03d}" for i in range(customers)], per_customer
+            ),
+            "amount": np.round(rng.lognormal(3, 1, n), 2),
+            "tenure_days": rng.integers(0, 2000, n),
+            "is_fraud": rng.integers(0, 2, n),
+        }
+    )
+
+
 def _preview(frame: pd.DataFrame, rows: int = 6) -> list[dict]:
     return json.loads(frame.head(rows).to_json(orient="records"))
 
@@ -207,8 +224,11 @@ def _dataset_fixture(
     frame: pd.DataFrame,
     target: str,
     command: str,
+    group_col: str | None = None,
 ) -> dict:
     findings = scan(frame, target)
+    if group_col:
+        findings += group_risk(frame, group_col)
     serialized = [_finding(f) for f in findings]
     return {
         "id": fixture_id,
@@ -217,6 +237,7 @@ def _dataset_fixture(
         "title": title,
         "description": description,
         "target": target,
+        "groupColumn": group_col,
         "rows": len(frame),
         "columns": list(frame.columns),
         "preview": _preview(frame),
@@ -430,6 +451,16 @@ def build() -> dict:
             "is_fraud",
             "leaklens clean_transactions.csv --target is_fraud",
         ),
+        _dataset_fixture(
+            "grouped_customers",
+            "Repeated entities across a random split",
+            "Every customer has several rows. A random split can place one customer "
+            "on both sides, so the audit asks for an entity-aware split.",
+            make_customers(),
+            "is_fraud",
+            "leaklens grouped_customers.csv --target is_fraud --group customer_id",
+            group_col="customer_id",
+        ),
     ]
 
     overlaps = [
@@ -462,6 +493,12 @@ def build() -> dict:
             "dataset": "leaklens.leakage.scan / score",
             "duplicateChecks": "leaklens.leakage.split_overlap / feature_overlap / near_duplicate_overlap",
             "prerecorded": True,
+            "sourceNote": (
+                "Fixtures are regenerated from the source tree that builds this "
+                "site. Version 0.14.0 is the published PyPI release; the "
+                "structured evidence records shown on data and split findings "
+                "were added on main after that release."
+            ),
             "note": (
                 "Every finding on the demo page is real output from the Python "
                 "scanners, generated at build time. The browser never executes "
