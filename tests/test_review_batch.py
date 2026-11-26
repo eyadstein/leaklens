@@ -550,3 +550,25 @@ def test_blind_show_suggests_recording_the_decision_as_blind(capsys):
     script.command_show(SimpleNamespace(id=ident, context=0, blind=False, side=None))
     full = capsys.readouterr().out.split("record one with:")[1].splitlines()[0]
     assert "--blind" not in full
+
+
+def test_committed_blind_pack_withholds_reviewer_identity_and_rationales():
+    """The shipped pack must not carry the first reviewer's identity or reasons."""
+    rows = load_manifest(EXPANSION / "review_batch_01.blind.jsonl")
+    markdown = (EXPANSION / "REVIEW_BATCH_01.blind.md").read_text(encoding="utf-8")
+    decisions = load_decisions(EXPANSION / "reviews.jsonl")
+    blob = json.dumps(rows) + markdown
+    assert rows
+    for row in rows:
+        assert set(row) == {
+            "candidate_id",
+            "provenance",
+            "license",
+            "code_refs",
+            "excerpts",
+            "decision",
+        }
+        assert row["decision"] == {"state": "not_reviewed"}
+    for decision in decisions:
+        assert decision["reviewer"] not in blob
+        assert decision["rationale"] not in blob

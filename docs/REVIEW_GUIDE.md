@@ -149,6 +149,34 @@ mechanism or the hypothesis. A distinct `--reviewer` id plus `--blind` is what
 the audit trail records; the tool cannot verify a human identity, so the
 handoff is also a trust boundary.
 
+**Handoff checklist (in order)**
+
+1. Rebuild the pack (`python scripts/collect_expansion.py blind-pack`) and
+   confirm `git status --short realworld_expansion` is clean. A dirty pack means
+   the committed artefact no longer matches the batch; do not send it.
+2. Send only the two blind files, this guide and the recording command. Do not
+   send `reviews.jsonl`, the full dossiers, a non-blind `show` output or any
+   note that states the first reviewer's conclusion.
+3. The reviewer records every case with `--blind` and a **distinct**
+   `--reviewer` id. A second pass by the same id is not independence.
+4. If the evidence cannot settle a case, record `potential` or `uncertain` with
+   the missing fact in the rationale. Do not force a decisive state to make the
+   pack look complete.
+5. Put the strongest counter-evidence in the rationale and cite the ref that
+   confirms or defeats it. "It looked leaky" is not a rationale.
+6. Do not read `reviews.jsonl` or open a non-blind dossier before recording.
+   The first verdict is withheld until the independent one exists.
+7. `review` appends only; it never edits an earlier row. A disagreement is left
+   as two decisive states (`disputed`), and only a separate
+   `--role adjudication` row resolves it. Do not delete the losing verdict.
+8. After recording, `python scripts/collect_expansion.py stats` must show the
+   new `single_reviewed`/`double_reviewed`/`disputed` count. A decision that does
+   not move the audit status was not recorded correctly.
+
+Independent validation exists only when the status is `double_reviewed` for the
+specific case. Do not convert a single-reviewer pack, however large, into a
+precision claim.
+
 ## Judging the common shapes
 
 Ask what the held-out rows could have contributed to, not whether the call
