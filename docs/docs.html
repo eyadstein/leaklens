@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Documentation — LeakLens</title>
-<meta name="description" content="Install LeakLens, run your first audit, understand every detector and CLI flag, wire it into CI, and use the Python API, FastAPI service or Streamlit UI.">
+<meta name="description" content="Install LeakLens, run your first audit, understand every detector and CLI flag, read structured evidence and evidence graphs, wire it into CI, and use the Python API, FastAPI service or Streamlit UI.">
 <meta name="theme-color" content="#060a10">
+<link rel="canonical" href="https://eyadstein.github.io/leaklens/docs.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LeakLens">
+<meta property="og:title" content="Documentation — LeakLens">
+<meta property="og:description" content="Install, quickstart, every detector, evidence records and graphs, CI, reports, the optional API and the documented limitations.">
+<meta property="og:url" content="https://eyadstein.github.io/leaklens/docs.html">
+<meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/site.css">
 <script>document.documentElement.classList.add("js");</script>
@@ -65,6 +72,7 @@
         </ul>
         <h2>Outputs</h2>
         <ul>
+          <li><a href="#evidence">Evidence and graphs</a></li>
           <li><a href="#reports">Reports and exports</a></li>
           <li><a href="#api">API and UI</a></li>
         </ul>
@@ -82,6 +90,7 @@
         <section id="install" data-doc-section>
           <h2>Install</h2>
           <p>The PyPI package is <code>leaklens-ml</code>; the installed command is <code>leaklens</code>. Python 3.10 or newer is required, and the base install needs no account, key, or network access.</p>
+          <div class="docs-callout"><strong>Release boundary:</strong> 0.14.0 is the published PyPI package. This documentation and the demo are built from the current <code>main</code> tree, which is ahead of 0.14.0. Structured evidence records on data and split findings are one of the newer <code>main</code> additions; run <code>leaklens --version</code> before relying on a flag that postdates your install.</div>
           <div class="docs-code">
             <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="python -m pip install --upgrade leaklens-ml&#10;leaklens --version&#10;leaklens doctor">Copy</button></div>
             <pre><code>python -m pip install --upgrade leaklens-ml
@@ -101,6 +110,9 @@ leaklens doctor</code></pre>
                 <tr><td><code>images</code></td><td>Near-duplicate image check via Pillow</td><td><code>pip install "leaklens-ml[images]"</code></td></tr>
                 <tr><td><code>arena</code></td><td>Three-model arena with MLflow tracking</td><td><code>pip install "leaklens-ml[arena]"</code></td></tr>
                 <tr><td><code>app</code></td><td>FastAPI service and Streamlit UI</td><td><code>pip install "leaklens-ml[app]"</code></td></tr>
+                <tr><td><code>api</code></td><td>Hardened public scan API without model deserialization</td><td><code>pip install "leaklens-ml[api]"</code></td></tr>
+                <tr><td><code>sql</code></td><td>Static SQL lineage checks via SQLGlot</td><td><code>pip install "leaklens-ml[sql]"</code></td></tr>
+                <tr><td><code>yaml</code></td><td>Pipeline and MLOps metadata audit via PyYAML</td><td><code>pip install "leaklens-ml[yaml]"</code></td></tr>
                 <tr><td><code>taintwatch</code></td><td>Optional guard for <code>--llm</code></td><td><code>pip install "leaklens-ml[taintwatch]"</code></td></tr>
                 <tr><td><code>dev</code></td><td>pytest, ruff, bandit, pip-audit and release tools</td><td><code>pip install "leaklens-ml[dev]"</code></td></tr>
               </tbody>
@@ -172,7 +184,12 @@ for finding in findings:
                 <tr><td><code>near_duplicate_overlap</code></td><td>Rows match after case/whitespace normalisation and rounding to four decimals.</td><td>medium</td></tr>
                 <tr><td><code>temporal_leakage</code></td><td>Training timestamps extend beyond the start of the test period.</td><td>high</td></tr>
                 <tr><td><code>group_overlap</code></td><td>The same entity appears in both splits when a <code>--group</code> column is supplied.</td><td>high / medium</td></tr>
-                <tr><td><code>group_leakage_risk</code></td><td>Group sizes are small or uneven enough to make entity leakage risky.</td><td>medium</td></tr>
+                <tr><td><code>group_leakage_risk</code></td><td>More than half of rows share a group value with another row, so a random split can place one entity on both sides.</td><td>medium</td></tr>
+                <tr><td><code>group_missing</code></td><td>The <code>--group</code> column is absent, so entity overlap cannot be checked.</td><td>low</td></tr>
+                <tr><td><code>missingness_target_signal</code></td><td>Missingness in a feature is associated with the target.</td><td>medium</td></tr>
+                <tr><td><code>missingness_split_shift</code></td><td>The missingness rate of a feature differs between train and test.</td><td>medium</td></tr>
+                <tr><td><code>missingness_group_signal</code></td><td>Missingness is associated with the supplied group column.</td><td>low</td></tr>
+                <tr><td><code>distribution_shift</code></td><td>An opt-in <code>--drift</code> diagnostic for a numeric shift between splits; excluded from the score.</td><td>low</td></tr>
               </tbody>
             </table>
           </div>
@@ -250,9 +267,17 @@ for finding in findings:
                 <tr><td><code>--badge</code></td><td>Write a shields.io endpoint JSON with the score.</td></tr>
                 <tr><td><code>--arena</code></td><td>Compare three model families with MLflow tracking (needs <code>arena</code>).</td></tr>
                 <tr><td><code>--llm</code></td><td>Optional LLM explanations; off by default, local Ollama by default.</td></tr>
+                <tr><td><code>--baseline PATH</code></td><td>Compare findings with a saved baseline: <code>new</code>, <code>unchanged</code>, <code>changed</code> or <code>resolved</code>.</td></tr>
+                <tr><td><code>--write-baseline</code></td><td>Write a new baseline; refuses to overwrite an existing file.</td></tr>
+                <tr><td><code>--fail-on-new</code></td><td>Opt in to exit 1 when the baseline comparison finds new findings.</td></tr>
+                <tr><td><code>--drift</code></td><td>Opt-in distribution-drift diagnostics; low severity and excluded from the score.</td></tr>
+                <tr><td><code>--pipeline</code></td><td>Audit DVC, DAG and notebook pipeline metadata (needs <code>yaml</code>).</td></tr>
+                <tr><td><code>--sql</code></td><td>Include <code>.sql</code> files in a <code>--scan</code> folder (needs <code>sql</code>).</td></tr>
+                <tr><td><code>--ai</code></td><td>Experimental evidence-bound hypotheses; never changes findings or the score.</td></tr>
               </tbody>
             </table>
           </div>
+          <p>Suppressions live under <code>[[suppressions]]</code> in <code>.leaklens.toml</code>. Each rule requires a reason and matches an exact finding fingerprint. It never changes severity, evidence or the fingerprint, but a suppressed finding stops counting toward the trust score and the default exit gate.</p>
           <h3>Code scan</h3>
           <div class="docs-code">
             <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens --scan src/ tests/ --explain&#10;leaklens --scan . --sarif leaklens.sarif">Copy</button></div>
@@ -268,6 +293,10 @@ leaklens --scan . --sarif leaklens.sarif</code></pre>
                 <tr><td><code>leaklens doctor [--json]</code></td><td>Check the install and optional dependencies offline.</td></tr>
                 <tr><td><code>leaklens init [dir]</code></td><td>Write a commented starter <code>.leaklens.toml</code> and print the pre-commit snippet.</td></tr>
                 <tr><td><code>leaklens images TRAIN TEST</code></td><td>Near-duplicate images across split folders (needs <code>images</code>).</td></tr>
+                <tr><td><code>leaklens splits DATASET</code></td><td>Read-only COCO/YOLO/VOC declared-split overlap audit.</td></tr>
+                <tr><td><code>leaklens text TRAIN TEST</code></td><td>Text dedup, eval-fingerprint contamination and RAG index wiring; diagnostic only.</td></tr>
+                <tr><td><code>leaklens dl DIR</code></td><td>Training-run, config and artifact audit; diagnostic only, never loads a framework.</td></tr>
+                <tr><td><code>leaklens workspace</code></td><td>Start the local FastAPI scan workspace for source and dataset audits.</td></tr>
                 <tr><td><code>leaklens --version</code></td><td>Print the installed version and exit.</td></tr>
               </tbody>
             </table>
@@ -315,6 +344,39 @@ leaklens --scan . --sarif leaklens.sarif</code></pre>
       - id: leaklens</code></pre>
           </div>
           <p>The hook scans staged Python and Jupyter files. It is fast because it only parses source; no dataset is read and no model is trained.</p>
+        </section>
+
+        <section id="evidence" data-doc-section>
+          <h2>Evidence and graphs</h2>
+          <p>A finding states that a rule fired. An evidence record states why: which detector surface produced it, what kind of observation it is, where it looked, the observed value or count, and the expected bound. Records are bounded and validated, and never include raw rows, credentials or dataset values.</p>
+          <div class="table-wrap">
+            <table class="data">
+              <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+              <tbody>
+                <tr><td><code>source</code></td><td>Detector surface: <code>data</code>, <code>split</code>, <code>code</code>, <code>notebook</code> or <code>image</code>.</td></tr>
+                <tr><td><code>kind</code></td><td>Observation class: <code>statistic</code>, <code>overlap</code>, <code>ordering</code>, <code>duplicate</code>, <code>parse</code> or <code>pattern</code>.</td></tr>
+                <tr><td><code>location</code></td><td>Column, path or label the check looked at, when one applies.</td></tr>
+                <tr><td><code>observed</code></td><td>The aggregate value or count that triggered the rule.</td></tr>
+                <tr><td><code>expected</code></td><td>The bound the detector compares against.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>Evidence appears in JSON output and in the HTML report. The <a href="demo.html">interactive demo</a> renders the same records for its dataset and split fixtures, so you can compare the badge with the reason behind it.</p>
+          <h3>Evidence graphs</h3>
+          <div class="docs-code">
+            <div class="docs-code-bar"><span>shell</span><button class="copy-button" type="button" data-copy="leaklens train.csv --target label --graph-out graph.mmd&#10;leaklens train.csv --target label --graph-snapshot snap.json&#10;leaklens train.csv --target label --graph-baseline snap.json&#10;leaklens train.csv --target label --graph-baseline snap.json --fail-on-graph-new">Copy</button></div>
+            <pre><code># Write a Mermaid, DOT or JSON graph of the findings
+leaklens train.csv --target label --graph-out graph.mmd
+
+# Save a validated snapshot, then compare a later run against it
+leaklens train.csv --target label --graph-snapshot snap.json
+leaklens train.csv --target label --graph-baseline snap.json
+
+# Opt in to failing the run when the comparison finds new evidence
+leaklens train.csv --target label --graph-baseline snap.json --fail-on-graph-new</code></pre>
+          </div>
+          <p>The graph flags imply <code>--intelligence</code>. <code>--graph-format mermaid|dot|json</code> overrides the format inferred from the filename, and <code>--graph-baseline</code> reports new, resolved and unchanged evidence. Without <code>--fail-on-graph-new</code>, a graph comparison never changes the exit code.</p>
+          <div class="docs-callout"><strong>Not a dataflow engine.</strong> The graph is built from deterministic findings and their evidence, not from tracing every value through your program. It is an investigation aid, not proof that no other leak exists.</div>
         </section>
 
         <section id="reports" data-doc-section>
@@ -387,19 +449,21 @@ uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000</code></pre>
 
         <section id="benchmarks" data-doc-section>
           <h2>Benchmarks</h2>
-          <p>The scanner benchmark is a regression guard built from labeled fixtures. It is not a claim of accuracy on your codebase.</p>
+          <p>The scanner benchmark is a regression guard built from labeled fixtures. It is not a claim of accuracy on your codebase. Every case below is synthetic or hand-authored, deterministic, and committed to the repository; the commands are the whole reproduction.</p>
           <div class="table-wrap">
             <table class="data">
               <thead><tr><th>Suite</th><th>Cases</th><th>Result</th><th>Command</th></tr></thead>
               <tbody>
-                <tr><td>Scanner (combined)</td><td>109</td><td>58 leaky / 51 clean · precision 1.00 · recall 1.00</td><td><code>python -m leaklens.bench</code></td></tr>
-                <tr><td>Advanced tuning and encoding</td><td>32</td><td>All expected classifications</td><td><code>python -m leaklens.bench_advanced</code></td></tr>
+                <tr><td>Scanner (combined)</td><td>117</td><td>63 leaky / 54 clean · precision 1.00 · recall 1.00</td><td><code>python -m leaklens.bench</code></td></tr>
+                <tr><td>Advanced tuning and encoding</td><td>32</td><td>All expected classifications; already included in the 117-case run</td><td><code>python -m leaklens.bench_advanced</code></td></tr>
                 <tr><td>Dataset detectors</td><td>12</td><td>9 leaky / 3 clean · precision 1.00 · recall 1.00</td><td><code>python -m leaklens.bench_data</code></td></tr>
-                <tr><td>Experimental AI layer</td><td>72</td><td>Grouped CV + external transfer; reported honestly, not an improvement claim</td><td><code>python -m leaklens.bench_ai</code></td></tr>
+                <tr><td>Experimental AI layer (authored)</td><td>72</td><td>Grouped CV; separate external transfer to the scanner benchmark. Not an improvement claim.</td><td><code>python -m leaklens.bench_ai</code></td></tr>
               </tbody>
             </table>
           </div>
-          <p>Generated results are committed to <a href="https://github.com/eyadstein/leaklens/blob/main/docs/BENCHMARK.md" rel="noopener">docs/BENCHMARK.md</a> and <a href="https://github.com/eyadstein/leaklens/blob/main/docs/DATA_BENCHMARK.md" rel="noopener">docs/DATA_BENCHMARK.md</a>; CI runs all three suites.</p>
+          <p>Additional authored regression suites cover split-aware missingness, drift diagnostics, pipeline/MLOps metadata, text and RAG wiring, deep-learning runs and artifacts, SQL lineage, and prompt-injection handling. Each is a hand-written control set that proves a rule still fires, not a sample of real user projects.</p>
+          <p>Generated results are committed to <a href="https://github.com/eyadstein/leaklens/blob/main/docs/BENCHMARK.md" rel="noopener">docs/BENCHMARK.md</a>, <a href="https://github.com/eyadstein/leaklens/blob/main/docs/DATA_BENCHMARK.md" rel="noopener">docs/DATA_BENCHMARK.md</a>, and the per-engine benchmark documents; CI runs the suites.</p>
+          <div class="docs-callout"><strong>Real-world evidence, reported separately.</strong> The deterministic scanner has a 60-notebook review subset with only 8 definitive labels (5 leakage, 3 legitimate) in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/REALWORLD.md" rel="noopener">REALWORLD.md</a>. The optional AI layer has a separate 48-unit transfer set from 12 public repositories in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/AI_REALWORLD.md" rel="noopener">AI_REALWORLD.md</a>. They measure different things, come from one reviewer, and are never combined into a single score. Neither is independent validation, a pristine holdout, or a reviewer-agreement study.</div>
         </section>
 
         <section id="limits" data-doc-section>

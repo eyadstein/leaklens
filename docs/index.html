@@ -6,6 +6,13 @@
 <title>LeakLens — catch data leakage before it fools you</title>
 <meta name="description" content="LeakLens audits machine-learning code and datasets for data leakage, scores trust from 0 to 100, and gates CI. Free, offline by default, Python 3.10+.">
 <meta name="theme-color" content="#060a10">
+<link rel="canonical" href="https://eyadstein.github.io/leaklens/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LeakLens">
+<meta property="og:title" content="LeakLens — catch data leakage before it fools you">
+<meta property="og:description" content="Audit ML code, datasets, SQL, text and training runs for data leakage. Every finding carries structured evidence, a fix and a reproducible CLI command.">
+<meta property="og:url" content="https://eyadstein.github.io/leaklens/">
+<meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/site.css">
 <script>document.documentElement.classList.add("js");</script>
@@ -98,7 +105,7 @@
   <!-- Proof strip --------------------------------------------------------- -->
   <div class="proof-strip">
     <div class="shell proof-grid">
-      <div><strong>109</strong><span>labeled scanner regression cases (synthetic)</span></div>
+      <div><strong>117</strong><span>labeled scanner regression cases (synthetic)</span></div>
       <div><strong>32</strong><span>advanced tuning &amp; encoding cases (synthetic)</span></div>
       <div><strong>12</strong><span>synthetic dataset-detector cases</span></div>
       <div><strong>0</strong><span>network calls in a default audit</span></div>
@@ -180,7 +187,7 @@ feeds the split</code></pre>
       <div class="section-head">
         <p class="eyebrow">Coverage</p>
         <h2 id="detections-title">What LeakLens looks for</h2>
-        <p class="lead">More than thirty detector kinds across code and data. Each finding names the exact rule, the line or column, and a concrete fix. Severity reflects how confident the check is — not how scary the label sounds.</p>
+        <p class="lead">65 detector kinds across code, datasets, splits, SQL, text, images and deep-learning artifacts. Each finding names the exact rule, the line or column, and a concrete fix. Severity reflects how confident the check is — not how scary the label sounds.</p>
       </div>
 
       <div class="filter-bar">
@@ -271,7 +278,33 @@ feeds the split</code></pre>
 
       <p class="detection-empty" data-detect-empty hidden>No detectors in this category. <button class="chip" type="button" data-filter-reset>Show all detectors</button></p>
 
-      <p class="detections-note">Also covered: group and entity overlap (<code>--group</code>), near-duplicate images across folders (<code>leaklens images</code>), notebook cell ordering, fit-on-eval-data, preprocessing outside CV, frequency encoding, fill/one-hot/temporal leakage, and repeated test-set reuse. The full list with severities lives in the <a href="docs.html#detections">documentation</a>.</p>
+      <p class="detections-note">Also covered: group and entity overlap (<code>--group</code>), near-duplicate images across folders (<code>leaklens images</code>), declared COCO/YOLO/VOC split overlap (<code>leaklens splits</code>), SQL lineage (<code>--sql</code>), text contamination and RAG wiring (<code>leaklens text</code>), training-run provenance (<code>leaklens dl</code>), notebook cell ordering, fit-on-eval-data, preprocessing outside CV, frequency encoding, fill/one-hot/temporal leakage, and repeated test-set reuse. The full list with severities lives in the <a href="docs.html#detections">documentation</a>.</p>
+    </div>
+  </section>
+
+  <!-- Evidence ------------------------------------------------------------ -->
+  <section class="section" id="evidence" aria-labelledby="evidence-title">
+    <div class="shell">
+      <div class="section-head">
+        <p class="eyebrow">Investigation</p>
+        <h2 id="evidence-title">Evidence you can inspect</h2>
+        <p class="lead">A severity badge tells you something fired. The record underneath tells you what was observed, what the detector expected, and where it looked. Findings are meant to be checked, argued with, and reproduced.</p>
+      </div>
+      <div class="limit-grid">
+        <article class="limit">
+          <h3>Structured evidence records</h3>
+          <p>Dataset and split findings carry a bounded record: detector source, evidence kind, location, the observed value or count, and the expected bound. No raw rows, credentials or dataset values are copied into it.</p>
+        </article>
+        <article class="limit">
+          <h3>Evidence graphs</h3>
+          <p><code>--graph-out graph.mmd</code> turns findings into a Mermaid, DOT or JSON graph. Snapshot one run with <code>--graph-snapshot</code>, compare later with <code>--graph-baseline</code>, and opt into a failing gate with <code>--fail-on-graph-new</code>.</p>
+        </article>
+        <article class="limit">
+          <h3>Reports you can reproduce</h3>
+          <p>The same findings drive terminal output, JSON, self-contained HTML, SARIF, shields.io badges, baselines and suppressions. Copy the command shown with any demo result and run it locally.</p>
+        </article>
+      </div>
+      <p class="caveat"><strong>Release boundary:</strong> the published PyPI package is 0.14.0. This site and the interactive demo are built from the current <code>main</code> tree, which is ahead of 0.14.0; structured evidence records on data and split findings are one of the newer additions. Check <code>leaklens --version</code> and the <a href="https://github.com/eyadstein/leaklens/blob/main/CHANGELOG.md" rel="noopener">changelog</a> before relying on a flag that postdates your install.</p>
     </div>
   </section>
 
@@ -332,22 +365,22 @@ feeds the split</code></pre>
       <p class="bench-honesty"><span class="badge badge-warn">synthetic fixtures</span> These counts are authored regression cases, not a population accuracy estimate. A perfect score here proves the rules still fire on the cases we wrote.</p>
       <div class="stat-grid">
         <div class="stat-card reveal">
-          <strong>109</strong>
+          <strong>117</strong>
           <span>labeled scanner cases</span>
-          <small>58 leaky / 51 clean · precision 1.00 · recall 1.00 · authored fixtures only</small>
+          <small>63 leaky / 54 clean · precision 1.00 · recall 1.00 · authored fixtures only</small>
         </div>
         <div class="stat-card reveal">
           <strong>32</strong>
           <span>advanced tuning and encoding cases</span>
-          <small>Reported separately so historical counts stay stable; authored fixtures only.</small>
+          <small>Scored separately and included in the 117-case run; authored fixtures only.</small>
         </div>
         <div class="stat-card reveal">
           <strong>12</strong>
           <span>synthetic dataset-detector cases</span>
-          <small>9 leaky / 3 clean · precision 1.00 · recall 1.00 · median case 3 ms</small>
+          <small>9 leaky / 3 clean · precision 1.00 · recall 1.00 · authored fixtures only</small>
         </div>
       </div>
-      <p class="caveat caveat-strong"><strong>Real-world evidence is thinner.</strong> The evaluation in <a href="REALWORLD.md">docs/REALWORLD.md</a> has only 8 labels: 5 confirmed leaks and 3 legitimate notebooks, drawn from 60 public notebooks. The other 52 are unlabelled and excluded, so treat its precision and recall as a smoke check, not a population estimate.</p>
+      <p class="caveat caveat-strong"><strong>Real-world evidence is thinner.</strong> The evaluation in <a href="REALWORLD.md">docs/REALWORLD.md</a> has only 8 labels: 5 confirmed leaks and 3 legitimate notebooks, drawn from 60 public notebooks. The other 52 are unlabelled and excluded, so treat its precision and recall as a smoke check, not a population estimate. A second, separate track measures only the optional AI layer: 48 reviewed pipeline units from 12 public repositories in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/AI_REALWORLD.md" rel="noopener">docs/AI_REALWORLD.md</a>. The two are never combined into one score, and neither is an independent-validation or reviewer-agreement claim.</p>
       <p class="caveat">Run them yourself: <code>python -m leaklens.bench</code> (which also scores the advanced cases), <code>python -m leaklens.bench_data</code>. Generated reports live in <a href="https://github.com/eyadstein/leaklens/blob/main/docs/BENCHMARK.md" rel="noopener">docs/BENCHMARK.md</a> and <a href="https://github.com/eyadstein/leaklens/blob/main/docs/DATA_BENCHMARK.md" rel="noopener">docs/DATA_BENCHMARK.md</a>.</p>
     </div>
   </section>
@@ -358,7 +391,7 @@ feeds the split</code></pre>
       <div class="section-head">
         <p class="eyebrow">Get started</p>
         <h2 id="install-title">Three commands to a trust score</h2>
-        <p class="lead">The base install handles CSV, JSON, dataset audits, code scans and every report format. Optional extras add Parquet, Excel, images, the model arena, and the API/UI.</p>
+        <p class="lead">The base install handles CSV, JSON, dataset audits, code scans and every report format. Optional extras add Parquet, Feather, Excel, images, SQL lineage, YAML pipeline metadata, the model arena, and the API/UI.</p>
       </div>
       <div class="steps">
         <div class="step">

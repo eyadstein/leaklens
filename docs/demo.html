@@ -4,8 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Interactive demo — LeakLens</title>
-<meta name="description" content="Replay real LeakLens scanner output: leaky code, clean pipelines, target leakage, and exact or near-duplicate train/test overlap. Prerecorded from the Python scanners.">
+<meta name="description" content="Replay real LeakLens scanner output: leaky code, clean pipelines, target leakage, entity risk, and exact or near-duplicate train/test overlap, with structured evidence. Prerecorded from the Python scanners.">
 <meta name="theme-color" content="#060a10">
+<link rel="canonical" href="https://eyadstein.github.io/leaklens/demo.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="LeakLens">
+<meta property="og:title" content="Interactive demo — LeakLens">
+<meta property="og:description" content="Replay real LeakLens scanner output, including structured evidence, remediation and the CLI gate. Explicitly prerecorded; no Python runs in the browser.">
+<meta property="og:url" content="https://eyadstein.github.io/leaklens/demo.html">
+<meta name="twitter:card" content="summary">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="assets/site.css">
 <script>document.documentElement.classList.add("js");</script>
@@ -44,7 +51,7 @@
         <a href="index.html">Home</a><span aria-hidden="true">/</span><span>Interactive demo</span>
       </nav>
       <h1>Read the evidence, not the badge</h1>
-      <p class="lead">Seven real audits: two Python scripts, a corrected pipeline, two transaction tables, and two train/test splits. Every severity, evidence string and remediation below came from the LeakLens Python scanners at build time. The code examples also show the optional experimental AI hypotheses — confidence, local evidence and a remediation plan — in a separate panel that never changes the deterministic findings.</p>
+      <p class="lead">Eight real audits: two Python scripts, a corrected pipeline, three dataset tables, and two train/test splits. Every severity, explanation, structured evidence record and remediation below came from the LeakLens Python scanners at build time. Dataset and split findings show the evidence records that explain why the detector fired; the code examples also show the optional experimental AI hypotheses in a separate panel that never changes the deterministic findings.</p>
       <p class="provenance">
         <span class="badge badge-safe">prerecorded</span>
         <strong>No Python runs in your browser.</strong>
@@ -64,7 +71,8 @@
         <div class="demo-side-panel">
           <h3>Source of truth</h3>
           <div class="side-note">
-            <p>Generated from LeakLens <strong>0.14.0</strong> by <code>scripts/build_site_fixtures.py</code>.</p>
+            <p>Generated from the LeakLens source tree by <code>scripts/build_site_fixtures.py</code>.</p>
+            <p>The published PyPI release is <strong>0.14.0</strong>. These fixtures include newer <code>main</code> work, such as the structured evidence records on dataset and split findings, so they are not a replay of the 0.14.0 package.</p>
             <p>Fixtures are committed, so this page cannot drift from the code without a rebuild failing CI.</p>
             <p><a href="report.html">See a full generated HTML report →</a></p>
           </div>
