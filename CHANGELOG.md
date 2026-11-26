@@ -4,10 +4,8 @@
 
 ## 0.14.0
 
-Changes in the prepared `0.14.0` release. **This release has not been published
-yet.** Release notes are in
-[docs/releases/0.14.0.md](docs/releases/0.14.0.md); the tag, GitHub Release and
-PyPI publication are still pending authorisation.
+Changes in the `0.14.0` release. The package is published on PyPI; release notes
+are in [docs/releases/0.14.0.md](docs/releases/0.14.0.md).
 
 Optional capabilities name the extra they require (`[sql]`, `[yaml]`,
 `[images]`, `[app]`, `[api]`). Diagnostic engines never
