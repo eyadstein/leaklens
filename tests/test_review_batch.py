@@ -381,6 +381,79 @@ def test_blind_show_does_not_leak_the_recorded_verdict(capsys):
     assert f"decision: {state} by" in full
 
 
+def test_blind_show_withholds_the_authored_interpretation(capsys):
+    """The verdict is not the only disclosure: the hypothesis states the answer."""
+    script = _collect_script()
+    dossier = load_manifest(BATCH)[0]
+    script.command_show(
+        SimpleNamespace(id=dossier["candidate_id"], context=0, blind=True, side=None)
+    )
+    blind = capsys.readouterr().out
+    assert dossier["workflow"]["summary"] not in blind
+    for item in dossier["evidence_against"]:
+        assert item not in blind
+    for item in dossier["questions"]:
+        assert item not in blind
+    for ref in dossier["code_refs"]:
+        assert ref["note"] not in blind
+        assert ref["ref"] in blind
+    assert "scanner signal" not in blind
+    assert "hypothesis confidence" not in blind
+
+
+# --- the blind pack --------------------------------------------------------
+
+
+def _blind_pack():
+    script = _collect_script()
+    script.command_blind_pack(None)
+    rows = load_manifest(EXPANSION / "review_batch_01.blind.jsonl")
+    markdown = (EXPANSION / "REVIEW_BATCH_01.blind.md").read_text(encoding="utf-8")
+    return rows, markdown
+
+
+def test_blind_pack_keeps_only_what_a_reviewer_may_see():
+    rows, _ = _blind_pack()
+    assert len(rows) == len(load_manifest(BATCH))
+    assert {row["candidate_id"] for row in rows} == {
+        row["candidate_id"] for row in load_manifest(BATCH)
+    }
+    for row in rows:
+        assert set(row) == {
+            "candidate_id",
+            "provenance",
+            "license",
+            "code_refs",
+            "excerpts",
+            "decision",
+        }
+        assert row["decision"] == {"state": "not_reviewed"}
+        assert all(set(ref) == {"ref"} for ref in row["code_refs"])
+
+
+def test_blind_pack_markdown_states_no_verdict_and_no_hypothesis():
+    dossiers = {row["candidate_id"]: row for row in load_manifest(BATCH)}
+    rows, markdown = _blind_pack()
+    assert "**Scanner signal**" not in markdown
+    assert "**Workflow.**" not in markdown
+    assert "AI hypothesis (unverified" not in markdown
+    assert "Possible mechanism" not in markdown
+    for row in rows:
+        assert f"`{row['candidate_id']}`" in markdown
+        dossier = dossiers[row["candidate_id"]]
+        assert dossier["workflow"]["summary"] not in markdown
+        assert dossier["why_it_may_apply"] not in markdown
+        for item in dossier["evidence_against"]:
+            assert item not in markdown
+    assert markdown.count("**Decision.** none recorded") == len(rows)
+
+
+def test_blind_pack_is_deterministic():
+    first, _ = _blind_pack()
+    second, _ = _blind_pack()
+    assert first == second
+
+
 # --- the manifest is history ----------------------------------------------
 
 

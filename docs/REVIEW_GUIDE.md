@@ -72,10 +72,15 @@ last decision for a candidate wins, and the whole history stays visible.
 
 A dossier is not blind: it shows the scanner's signal and the AI's mechanism and
 argument, so a first read is anchored by both. Independence therefore needs a
-second reviewer who does not see them:
+second reviewer who does not see them. Start from the blind pack, which is the
+same batch with every authored field removed:
 
 ```sh
-# second reviewer: hide the signal, the hypothesis and prior decisions
+# rebuild the blind pack (deterministic; writes review_batch_01.blind.*)
+python scripts/collect_expansion.py blind-pack
+
+# second reviewer: hide the signal, the hypothesis, the authored counter-argument,
+# the reviewer questions, the per-reference notes and prior decisions
 python scripts/collect_expansion.py show --id rwx_11f261a63388 --blind
 
 # record that pass; the distinct reviewer id is what makes it independent
@@ -84,6 +89,17 @@ python scripts/collect_expansion.py review \
   --rationale "the scaler at cell 21 is fitted on X_train only" \
   --ref "cell 21:1-3" --reviewer reviewer-b --blind
 ```
+
+`show --blind` keeps the provenance, the licence, the split side and the cited
+lines, and drops the workflow summary, `why_it_may_apply`, `evidence_against`,
+the reviewer questions, the per-reference notes, the scanner signal, the
+hypothesis, the review history, the recorded decision and the derived audit
+status. The split side stays visible on purpose: a reviewer needs to know whether
+the case is development or holdout material, and the side is label-blind.
+
+The blind pack is a second artifact, not a second review: it contains no verdict,
+no hypothesis and no scanner signal, and nothing becomes `double_reviewed` until
+a distinct human records a `--blind` decision.
 
 `--role` defaults to `first_pass`. Record `--role adjudication` only to resolve
 a disagreement; the adjudication is appended last so it supersedes the first

@@ -812,8 +812,11 @@ def command_show(args) -> int:
         f"{'redistributable' if dossier['license']['redistributable'] else 'references only'})"
     )
     print(f"  sha256    {provenance['sha256']}")
-    print(f"  workflow  {dossier['workflow']['summary']}")
+    # A blind pass withholds authored interpretation, not just the verdict: the
+    # workflow summary, the "evidence against" list, the reviewer questions and
+    # the per-reference notes all describe the expected answer.
     if not args.blind:
+        print(f"  workflow  {dossier['workflow']['summary']}")
         print(
             f"  mechanism {dossier['mechanism']} "
             f"(hypothesis confidence {dossier['hypothesis']['confidence']})"
@@ -821,18 +824,22 @@ def command_show(args) -> int:
         print("\n  why it may apply")
         for line in _wrap(dossier["why_it_may_apply"]):
             print(f"    {line}")
-    print("\n  evidence against")
-    for item in dossier["evidence_against"]:
-        for index, line in enumerate(_wrap(item)):
-            print(f"    {'-' if index == 0 else ' '} {line}")
-    print("\n  reviewer questions")
-    for number, item in enumerate(dossier["questions"], 1):
-        for index, line in enumerate(_wrap(item)):
-            print(f"    {number}. {line}" if index == 0 else f"       {line}")
+        print("\n  evidence against")
+        for item in dossier["evidence_against"]:
+            for index, line in enumerate(_wrap(item)):
+                print(f"    {'-' if index == 0 else ' '} {line}")
+        print("\n  reviewer questions")
+        for number, item in enumerate(dossier["questions"], 1):
+            for index, line in enumerate(_wrap(item)):
+                print(f"    {number}. {line}" if index == 0 else f"       {line}")
     print("\n  code references")
     for ref in dossier["code_refs"]:
         lines = _cell_lines(rec, ref["ref"], context=args.context)
-        print(f"    {ref['ref']}: {ref['note']}")
+        print(
+            f"    {ref['ref']}: {ref['note']}"
+            if not args.blind
+            else f"    {ref['ref']}"
+        )
         if lines is None:
             print("      (cached source unavailable; set LEAKLENS_CORPUS_CACHE)")
             continue
@@ -1099,6 +1106,140 @@ def _render_batch(dossiers, analysis) -> str:
     return "\n".join(out)
 
 
+BLIND = BATCH.with_suffix(".blind.jsonl")
+BLIND_MD = BATCH.parent / "REVIEW_BATCH_01.blind.md"
+# Everything authored after the source was read. A blind reviewer sees provenance,
+# licence, the cited lines and the source text, and nothing that states an answer.
+BLIND_DROP = (
+    "scanner",
+    "workflow",
+    "mechanism",
+    "hypothesis",
+    "why_it_may_apply",
+    "evidence_against",
+    "questions",
+)
+
+
+def command_blind_pack(_args) -> int:
+    """Write the second-reviewer pack: the same cases with the answer removed."""
+    dossiers = corpus.load_manifest(BATCH)
+    if not dossiers:
+        log(f"no dossiers at {BATCH}")
+        return 2
+    pack = []
+    for dossier in dossiers:
+        row = {k: v for k, v in dossier.items() if k not in BLIND_DROP}
+        row["code_refs"] = [{"ref": ref["ref"]} for ref in dossier["code_refs"]]
+        row["decision"] = {"state": "not_reviewed"}
+        pack.append(row)
+    corpus.write_manifest(BLIND, pack)
+    BLIND_MD.write_text(_render_blind(pack), encoding="utf-8", newline="\n")
+    log(f"{len(pack)} dossiers -> {BLIND.name}, {BLIND_MD.name}")
+    return 0
+
+
+def _render_blind(pack) -> str:
+    out = [
+        "# Review batch 01 - blind pack",
+        "",
+        "Second-reviewer material. Every scanner signal, AI hypothesis, workflow",
+        "summary, list of counter-evidence and reviewer question has been removed,",
+        "so nothing here states the expected answer. No verdict from the first",
+        "review is included either.",
+        "",
+        "Decide each case from the cited source lines, then record it with",
+        "`--blind` and your own reviewer id:",
+        "",
+        "```sh",
+        "python scripts/collect_expansion.py show --id <id> --blind",
+        "python scripts/collect_expansion.py review --id <id> --blind \\",
+        "  --state <confirmed_leakage|legitimate|potential|uncertain> \\",
+        "  --rationale '<what you concluded and why>' --ref '<cell N:L>' \\",
+        "  --reviewer <your name>",
+        "```",
+        "",
+        "States: `confirmed_leakage` (a real leak), `legitimate` (correct",
+        "practice), `potential` (suspicious but unresolved), `uncertain` (cannot",
+        "tell from this source). Only the first two are scored. See",
+        "[`docs/REVIEW_GUIDE.md`](../docs/REVIEW_GUIDE.md).",
+        "",
+        "Rationale template: what the code does at the cited lines, whether the",
+        "information crosses the split boundary, and why that is or is not a leak.",
+        "",
+        "Code text is included only for permissive licences. For the rest, read it",
+        "with `show --blind`, which prints the cached source without commentary.",
+        "",
+        f"Cases: {len(pack)}.",
+        "",
+        "## Index",
+        "",
+        "| # | Candidate | Repo | Licence |",
+        "|---|---|---|---|",
+    ]
+    for number, row in enumerate(pack, 1):
+        out.append(
+            f"| {number} | `{row['candidate_id']}` | {row['provenance']['repo']} "
+            f"| {row['license']['spdx'] or 'unknown'} |"
+        )
+    out.append("")
+    for number, row in enumerate(pack, 1):
+        provenance = row["provenance"]
+        out += [
+            "---",
+            "",
+            f"## {number}. `{row['candidate_id']}`",
+            "",
+            f"- **Source**: {provenance['source_id']}",
+            f"- **Repository**: {provenance['repo']}"
+            f" at `{provenance['commit_sha'] or 'HEAD'}`",
+            f"- **Path**: `{provenance['path']}`",
+            f"- **URL**: {provenance['file_url']}",
+            f"- **Licence**: {row['license']['spdx'] or 'unknown'}"
+            f" ({row['license']['status']}; "
+            f"{'redistribution allowed' if row['license']['redistributable'] else 'references only, no code text'})",
+            f"- **SHA-256**: `{provenance['sha256']}`",
+            "",
+            "**Code references.**",
+            "",
+        ]
+        out += [f"- `{ref['ref']}`" for ref in row["code_refs"]]
+        if row["excerpts"]:
+            out += ["", "```python"]
+            for excerpt in row["excerpts"]:
+                out += [f"# {excerpt['ref']}", excerpt["text"], ""]
+            out.append("```")
+        elif not row["license"]["redistributable"]:
+            out += [
+                "",
+                "_Code text omitted: licence is not permissive. "
+                f"Run `python scripts/collect_expansion.py show --id "
+                f"{row['candidate_id']} --blind`._",
+            ]
+        out += [
+            "",
+            "**Decision.** none recorded",
+            "",
+            "```sh",
+            f"python scripts/collect_expansion.py review --id {row['candidate_id']} --blind \\",
+            "  --state <confirmed_leakage|legitimate|potential|uncertain> \\",
+            "  --rationale '<what you concluded and why>' \\",
+            f"  --ref '{row['code_refs'][0]['ref']}' --reviewer <your name>",
+            "```",
+            "",
+        ]
+    out += [
+        "---",
+        "",
+        "## What this pack does not establish",
+        "",
+        "Producing it is not a review. Nothing here is a label, and no case becomes",
+        "`double_reviewed` until a distinct human records a `--blind` decision.",
+        "",
+    ]
+    return "\n".join(out)
+
+
 def _counts(counter) -> str:
     return ", ".join(f"{name} {count}" for name, count in sorted(counter.items()))
 
@@ -1166,6 +1307,11 @@ def main(argv=None) -> int:
     batch = sub.add_parser("batch", help="build review dossiers from the analysis file")
     batch.add_argument("--analysis", default=None, help="defaults to review_batch_01")
     batch.set_defaults(func=command_batch)
+
+    blind = sub.add_parser(
+        "blind-pack", help="rebuild the batch with the answer removed (second reviewer)"
+    )
+    blind.set_defaults(func=command_blind_pack)
 
     show = sub.add_parser("show", help="print one dossier and its cached source")
     show.add_argument("--id", required=True)
