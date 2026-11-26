@@ -54,6 +54,34 @@ optional field required needs a new `report-2` schema; adding a section or an
 optional field does not. A new version ships as a new file beside this one, and
 `$schema` is how a consumer picks between them — never guess from the contents.
 
+### Open compatibility question: `report-1` names a moving document (#649)
+
+`REPORT_SCHEMA_URL` and the schema's `$id` are both
+`https://raw.githubusercontent.com/eyadstein/leaklens/main/leaklens/schemas/report-1.schema.json`.
+Every report therefore names its contract with a URL whose content is whatever
+`main` ships today. Phase 20J added the optional `fix` field and tightened the
+suppression objects under the same name, so a report written by 0.14.0 and
+validated today can be checked against a stricter document that also calls
+itself `report-1`.
+
+Options, none chosen yet:
+
+1. **Version-addressed URL** (`.../v0.14.0/leaklens/schemas/...`), stamped by
+   released wheels only. Immutable and cheap; a schema change between releases
+   has no URL, so a dev build must stamp a dev URL or the package URL.
+2. **Versioned identity**: keep `#649`'s `report-1.1` for the additive change
+   and publish a resolution table from identity to document. Honest about the
+   change that already happened; costs one mapping file and a policy line.
+3. **Hosted immutable copy** (release asset or object store with a digest).
+   Strongest guarantee; gives an offline-only contract an external dependency.
+
+Recommendation: option 2 if `report-1` may mean "the document as of 0.14.x";
+option 1 if it must mean one frozen document forever. Either is a documented
+compatibility decision; changing the constant without deciding is the failure
+mode. No schema, payload or emitter behaviour has been changed while this is
+open, and the two contract tests (`tests/test_report_schema.py`,
+`tests/_meta/test_report_schema_emitters.py`) still pin the current URL.
+
 ## Validating a report
 
 The schema is not a runtime dependency of LeakLens. To validate, use any

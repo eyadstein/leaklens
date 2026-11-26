@@ -1,4 +1,4 @@
-# Real-world sources examined (Phase 20N)
+# Real-world sources examined (Phases 20N-20O)
 
 **Date:** 2026-11-26. **Scope:** a genuine attempt to expand LeakLens' real-world
 evidence base beyond the 1,147 candidates already in `realworld_expansion/`.
@@ -94,3 +94,21 @@ python scripts/collect_expansion.py finalize
 The collector records licence status per candidate; unknown licences stay in the
 corpus as metadata and out of any redistributed pack. Nothing in this pass was
 added to the corpus.
+
+## 6. Phase 20O pass (2026-11-26)
+
+The search resumed rather than repeating 20N. Two channels were checked:
+
+| Query / channel | What came back | Decision |
+|---|---|---|
+| GitHub repository search `data leakage benchmark`, sorted by update, 15 hits | Leakage-*avoidance* projects and benchmarks (`KashishMendiratta/DataSAIL_scaling` none, `Pratham1227-beep/aqi-gujarat-leakage` MIT, `hentablihamza/qsar-split-bench` none, `PinkPig97/flaw-bench` none, `JWLZGG/tabpfn-honest-benchmark` NOASSERTION) | **No corpus entry.** These are implementations and studies, not labelled ML-pipeline code corpora. Their licences also rarely permit reuse. They are useful as *documented leakage incidents* to cite, not as ground truth. |
+| Hugging Face dataset search `leakage`, 20 hits | Prompt-leakage eval datasets (`gabrielchua/system-prompt-leakage`, MIT) and de-duplicated derivatives of existing datasets | **No corpus entry.** Wrong leakage family (LLM prompt extraction, not split/preprocessing order) and no notebook provenance. |
+
+A permissive benchmark *implementation* (MIT) is not a labelled leaky notebook: it
+proves its author understood leakage, not that the pipeline is a labelled example
+LeakLens can be scored against. Adding one would repeat the "public URL is not
+evidence" mistake in a new form.
+
+**Result: still no new corpus entry.** The blockers are unchanged from §2: the
+only external labelled code corpus found has no licence, and the newly found
+material is either unlicensed or the wrong artefact type.
