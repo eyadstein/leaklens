@@ -280,11 +280,14 @@ const main = async () => {
               const closed = nav && !nav.classList.contains("is-open");
 
               const auditToggle = document.querySelector("[data-audit-toggle]");
+              const diff = document.querySelector("[data-audit-diff]");
+              const score = document.querySelector("[data-audit] .score-ring span")?.textContent;
               auditToggle?.click();
-              const fixedScore = document.querySelector("[data-audit-score]")?.textContent;
-              const fixed = document.querySelector("[data-audit]")?.classList.contains("is-fixed");
+              const diffOpen = diff ? !diff.hidden : false;
               auditToggle?.click();
-              const restoredScore = document.querySelector("[data-audit-score]")?.textContent;
+              const diffClosed = diff ? diff.hidden : false;
+              const scoreUnchanged =
+                document.querySelector("[data-audit] .score-ring span")?.textContent === score;
 
               const dup = document.querySelector("[data-dup-toggle]");
               const dupBefore = dup?.textContent;
@@ -300,9 +303,9 @@ const main = async () => {
                 audit: Boolean(document.querySelector("[data-audit]")),
                 opened,
                 closed,
-                fixedScore,
-                fixed,
-                restoredScore,
+                diffOpen,
+                diffClosed,
+                scoreUnchanged,
                 dupToggles: dupBefore !== dupAfter,
               };
             })()`
@@ -311,8 +314,9 @@ const main = async () => {
           check(landing.cards >= 12, `${label}: detection gallery is incomplete`);
           check(landing.filtersWork, `${label}: detection filter did not narrow the gallery`);
           check(landing.audit, `${label}: landing audit card missing`);
-          check(landing.fixed && landing.fixedScore === "100", `${label}: recorded fix did not reach 100`);
-          check(landing.restoredScore === "50", `${label}: recorded fix did not restore to 50`);
+          check(landing.diffOpen, `${label}: proposed patch did not open`);
+          check(landing.diffClosed, `${label}: proposed patch did not close`);
+          check(landing.scoreUnchanged, `${label}: the recorded card changed its trust score`);
           check(landing.dupToggles, `${label}: duplicate toggle did not change state`);
           if (viewport.name === "mobile") {
             check(landing.opened, `${label}: mobile navigation did not open`);
@@ -337,6 +341,7 @@ const main = async () => {
               await wait(120);
               const score = document.querySelector("[data-output] .score-ring span")?.textContent;
               const findings = document.querySelectorAll("[data-output] .finding").length;
+              const evidence = document.querySelectorAll("[data-output] .finding-evidence").length;
               const high = [...document.querySelectorAll("[data-output] .demo-filters .chip")][1];
               high?.click();
               await wait(80);
@@ -354,6 +359,7 @@ const main = async () => {
                 pressed,
                 preview,
                 active,
+                evidence,
                 sourceLines: document.querySelectorAll("[data-output] .source-line").length,
                 highlighted: document.querySelectorAll("[data-output] .source-line.is-target").length,
               };
@@ -364,6 +370,7 @@ const main = async () => {
           check(demo.pressed === 1, `${label}: severity filter did not activate`);
           check(demo.preview > 0, `${label}: dataset preview table is empty`);
           check(demo.active === "leaky_transactions", `${label}: dataset tab did not select a fixture`);
+          check(demo.evidence >= 2, `${label}: dataset findings did not render their evidence records`);
           check(demo.sourceLines > 10, `${label}: code fixture did not render its source`);
           check(demo.highlighted === 1, `${label}: opening a finding did not highlight its source line`);
         }

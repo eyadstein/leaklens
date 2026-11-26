@@ -274,6 +274,11 @@ def check_assets(page: Page) -> None:
         if not source:
             fail(f"{page.path.name}: {asset['tag']} without a source")
             continue
+        # Canonical/alternate/Open Graph links are metadata, not fetched assets.
+        if asset["tag"].startswith("link:"):
+            rel = asset["tag"].split(":", 1)[1]
+            if rel not in {"stylesheet", "icon", "preload", "manifest"}:
+                continue
         if source.startswith(("http://", "https://", "data:")):
             fail(f"{page.path.name}: external asset {source}")
             continue

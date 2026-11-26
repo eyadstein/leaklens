@@ -16,6 +16,7 @@ import pytest
 
 from leaklens import __version__
 from leaklens.config import load_config
+from leaklens.manifest import DETECTORS
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -77,9 +78,44 @@ def test_every_finding_has_evidence_and_a_fix(fixtures):
                 assert finding["kind"]
                 assert finding["detail"].strip()
                 assert finding["fix"].strip()
+                assert isinstance(finding["evidence"], list)
                 if fixture["group"] == "code":
                     assert isinstance(finding["line"], int)
     assert seen >= 10
+
+
+def test_evidence_records_are_bounded_and_attached(fixtures):
+    sources = {"data", "split", "code", "notebook", "image"}
+    kinds = {"statistic", "overlap", "ordering", "duplicate", "parse", "pattern"}
+    with_evidence = 0
+    for group in ("datasets", "overlaps"):
+        for fixture in fixtures[group]:
+            for finding in fixture["findings"]:
+                if not finding["evidence"]:
+                    continue
+                with_evidence += 1
+                for record in finding["evidence"]:
+                    assert record["source"] in sources
+                    assert record["kind"] in kinds
+                    assert 0 < len(record["description"]) <= 500
+                    for field in ("location", "observed", "expected"):
+                        if field in record:
+                            assert 0 < len(record[field]) <= 300
+                    # Evidence is provenance, not a copy of raw dataset cells.
+                    assert set(record) <= {
+                        "source",
+                        "kind",
+                        "description",
+                        "location",
+                        "observed",
+                        "expected",
+                    }
+    assert with_evidence >= 4
+
+    grouped = next(f for f in fixtures["datasets"] if f["id"] == "grouped_customers")
+    assert grouped["groupColumn"] == "customer_id"
+    assert [f["kind"] for f in grouped["findings"]] == ["group_leakage_risk"]
+    assert grouped["findings"][0]["evidence"]
 
 
 def test_demo_covers_leaky_and_clean_paths(fixtures):
@@ -92,6 +128,7 @@ def test_demo_covers_leaky_and_clean_paths(fixtures):
         "safe",
         "leaky_transactions",
         "clean_transactions",
+        "grouped_customers",
     } <= ids
     assert {"overlap_exact", "overlap_near"} <= ids
     clean = [f for f in fixtures["datasets"] if f["clean"]]
@@ -118,6 +155,61 @@ def test_site_build_validation_passes(capsys):
     assert "site ok" in output
 
 
+def test_public_benchmark_counts_match_committed_reports():
+    bench = (DOCS / "BENCHMARK.md").read_text(encoding="utf-8")
+    data = (DOCS / "DATA_BENCHMARK.md").read_text(encoding="utf-8")
+    assert "| Cases | 117 |" in bench
+    assert "| Leaky / clean | 63 / 54 |" in bench
+    assert "| Cases | 12 |" in data
+    assert "| Leaky / clean | 9 / 3 |" in data
+
+    index = (DOCS / "index.html").read_text(encoding="utf-8")
+    docs = (DOCS / "docs.html").read_text(encoding="utf-8")
+    for text in (index, docs):
+        assert "117" in text
+        assert "63 leaky / 54 clean" in text
+        assert "12" in text
+        assert "9 leaky / 3 clean" in text
+    assert "109" not in index
+    assert "<td>109</td>" not in docs
+
+
+def test_detector_count_matches_the_manifest():
+    count = len(DETECTORS)
+    index = (DOCS / "index.html").read_text(encoding="utf-8")
+    manifest_doc = (DOCS / "DETECTORS.md").read_text(encoding="utf-8")
+    assert f"LeakLens emits {count} deterministic finding kinds" in manifest_doc
+    assert f"{count} detector kinds" in index
+
+
+def test_public_pages_have_canonical_and_social_metadata():
+    base = "https://eyadstein.github.io/leaklens/"
+    expected = {
+        "index.html": base,
+        "demo.html": base + "demo.html",
+        "docs.html": base + "docs.html",
+        "live.html": base + "live.html",
+        "report.html": base + "report.html",
+    }
+    for name, url in expected.items():
+        text = (DOCS / name).read_text(encoding="utf-8")
+        assert f'<link rel="canonical" href="{url}">' in text, name
+        assert f'<meta property="og:url" content="{url}">' in text, name
+        assert '<meta property="og:title"' in text, name
+        assert '<meta property="og:description"' in text, name
+        assert '<meta name="twitter:card"' in text, name
+
+
+def test_release_boundary_is_stated():
+    index = (DOCS / "index.html").read_text(encoding="utf-8")
+    docs = (DOCS / "docs.html").read_text(encoding="utf-8")
+    demo = (DOCS / "demo.html").read_text(encoding="utf-8")
+    assert "ahead of 0.14.0" in index
+    assert "ahead of 0.14.0" in docs
+    assert "not a replay of the 0.14.0 package" in demo
+    assert "0.14.0" in demo
+
+
 def test_pages_have_landmarks_and_no_duplicate_ids():
     pages = {name: build_site.parse_page(name) for name in PAGES}
     assert set(pages) == set(PAGES)
@@ -138,6 +230,17 @@ def test_demo_page_is_explicitly_prerecorded():
     assert "No Python runs in your browser" in text
     assert "Replaying recorded output" in text
     assert "build_site_fixtures.py" in text
+    script = (DOCS / "assets" / "demo.js").read_text(encoding="utf-8")
+    css = (DOCS / "assets" / "site.css").read_text(encoding="utf-8")
+    assert "finding-evidence" in script
+    assert ".finding-evidence" in css
+
+
+def test_demo_commands_name_the_shown_fixture(fixtures):
+    for group in ("code", "datasets"):
+        for fixture in fixtures[group]:
+            assert fixture["name"] in fixture["command"], fixture["id"]
+            assert fixture["command"].startswith("leaklens "), fixture["id"]
 
 
 def test_live_page_is_explicitly_not_a_mock():
@@ -192,7 +295,12 @@ def test_frontend_assets_are_local_and_motion_is_respected():
     for name in PAGES:
         text = (DOCS / name).read_text(encoding="utf-8")
         assert not re.search(r'<script[^>]+src="https?://', text, re.IGNORECASE), name
-        assert not re.search(r'<link[^>]+href="https?://', text, re.IGNORECASE), name
+        # Canonical/Open Graph links are metadata; stylesheets and icons stay local.
+        assert not re.search(
+            r'<link[^>]+rel="(?:stylesheet|icon|preload)"[^>]+href="https?://',
+            text,
+            re.IGNORECASE,
+        ), name
 
 
 def test_safe_pipeline_example_matches_the_recorded_fixture(fixtures):
