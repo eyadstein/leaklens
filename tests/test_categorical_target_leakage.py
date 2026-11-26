@@ -87,3 +87,13 @@ def test_id_like_still_separate():
     d = pd.DataFrame({"uid": uid, "y": y})
     findings = categorical_target_leaks(d, "y")
     assert not [f for f in findings if f.column == "uid"], findings
+
+
+def test_categorical_target_leakage_carries_structured_evidence():
+    d, _ = _df_with_cat_target_encoding(n=400)
+    finding = next(f for f in categorical_target_leaks(d, "y") if f.column == "cat")
+    evidence = finding.to_dict()["evidence"]
+    assert evidence and evidence[0]["source"] == "data"
+    assert evidence[0]["kind"] == "statistic"
+    assert "entropy reduction" in evidence[0]["observed"]
+    assert evidence[0]["location"] == "cat"

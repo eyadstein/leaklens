@@ -174,6 +174,19 @@ def id_like(df, target, ratio=0.98):
                     "id_like",
                     c,
                     f"{r:.1%} unique values; {evidence}",
+                    evidence=(
+                        Evidence(
+                            source="data",
+                            kind="statistic",
+                            description=(
+                                "a column has a distinct value for nearly every "
+                                "row and an identifier-like role"
+                            ),
+                            location=c,
+                            observed=f"{r:.1%} unique values",
+                            expected=f"below {ratio:.0%} unique values for a feature",
+                        ),
+                    ),
                 )
             )
     return out
@@ -321,6 +334,19 @@ def categorical_target_leaks(df, target, threshold=0.95, min_rows=50):
                 c,
                 f"category almost determines target (entropy reduction={gain:.2f}, "
                 f"{n_unique} categories in {len(df)} rows); the column likely encodes the target",
+                evidence=(
+                    Evidence(
+                        source="data",
+                        kind="statistic",
+                        description="a categorical column almost determines the target",
+                        location=c,
+                        observed=(
+                            f"entropy reduction {gain:.2f} across {n_unique} "
+                            f"categories in {len(df)} rows"
+                        ),
+                        expected="entropy reduction below 0.80 for a feature",
+                    ),
+                ),
             )
         )
     return out
@@ -353,7 +379,27 @@ def score(findings) -> int:
 
 def group_risk(df, group_col):
     if group_col not in df.columns:
-        return [Finding("low", "group_missing", group_col, "group column not found")]
+        return [
+            Finding(
+                "low",
+                "group_missing",
+                group_col,
+                "group column not found",
+                evidence=(
+                    Evidence(
+                        source="data",
+                        kind="pattern",
+                        description=(
+                            "the requested group column is absent, so entity "
+                            "overlap cannot be checked"
+                        ),
+                        location=group_col,
+                        observed="column not found",
+                        expected="the named group column exists",
+                    ),
+                ),
+            )
+        ]
     sizes = df.groupby(group_col).size()
     share = float(sizes[sizes > 1].sum() / max(len(df), 1))
     if share < 0.5:
@@ -364,6 +410,19 @@ def group_risk(df, group_col):
             "group_leakage_risk",
             group_col,
             f"{share:.0%} of rows share a {group_col} with other rows; a random split leaks entities, split by group",
+            evidence=(
+                Evidence(
+                    source="data",
+                    kind="statistic",
+                    description=(
+                        "most rows share a group identifier with other rows, so a "
+                        "random split can place one entity on both sides"
+                    ),
+                    location=group_col,
+                    observed=f"{share:.0%} of rows share a {group_col} with other rows",
+                    expected="below 50% of rows sharing a group",
+                ),
+            ),
         )
     ]
 
@@ -478,6 +537,18 @@ def feature_overlap(train, test, target=None, max_rows=50_000):
                 f"{lead} share a feature vector with train rows but "
                 f"carry a different label; duplicate samples with conflicting labels "
                 f"leak across the split",
+                evidence=(
+                    Evidence(
+                        source="split",
+                        kind="overlap",
+                        description=(
+                            "test rows share a feature vector with train rows but "
+                            "carry a different label"
+                        ),
+                        observed=lead,
+                        expected="no shared feature vectors across the split",
+                    ),
+                ),
             )
         ]
     if sampled:
@@ -492,7 +563,28 @@ def feature_overlap(train, test, target=None, max_rows=50_000):
             f"{n} test {rows} ({n / len(b):.1%}) share an identical feature vector with "
             f"train rows (the label column is ignored); deduplicate before splitting"
         )
-    return [Finding("medium", "feature_overlap", "*", detail)]
+    return [
+        Finding(
+            "medium",
+            "feature_overlap",
+            "*",
+            detail,
+            evidence=(
+                Evidence(
+                    source="split",
+                    kind="overlap",
+                    description=(
+                        "test rows share an identical feature vector with train rows"
+                    ),
+                    observed=(
+                        f"{n} of {len(b)} examined test rows"
+                        + (" (deterministic sample)" if sampled else "")
+                    ),
+                    expected="no identical feature vectors across the split",
+                ),
+            ),
+        )
+    ]
 
 
 def near_duplicate_overlap(train, test, target=None, max_rows=20_000, max_columns=64):

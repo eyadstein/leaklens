@@ -29,3 +29,15 @@ def test_cli_group(tmp_path):
     d.iloc[:4].to_csv(a, index=False)
     d.iloc[3:].to_csv(b, index=False)
     assert main([str(a), "--target", "y", "--test", str(b), "--group", "pid"]) == 1
+
+
+def test_group_findings_carry_structured_evidence():
+    missing = group_risk(_df(), "nope")[0].to_dict()["evidence"]
+    assert missing and missing[0]["source"] == "data"
+    assert missing[0]["kind"] == "pattern"
+    assert missing[0]["location"] == "nope"
+
+    risk = group_risk(_df(), "pid")[0].to_dict()["evidence"]
+    assert risk and risk[0]["source"] == "data"
+    assert risk[0]["kind"] == "statistic"
+    assert "share a pid" in risk[0]["observed"]

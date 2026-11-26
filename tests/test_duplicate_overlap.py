@@ -143,3 +143,22 @@ def test_sampling_disclosure_is_deterministic():
         second.severity,
         second.detail,
     )
+
+
+def test_feature_overlap_branches_carry_structured_evidence():
+    high = feature_overlap(
+        _train(),
+        pd.DataFrame({"x": [2.0, 9.0], "city": ["Lyon", "Brest"], "y": [0, 1]}),
+        "y",
+    )[0].to_dict()["evidence"]
+    assert high and high[0]["source"] == "split"
+    assert high[0]["kind"] == "overlap"
+    assert "different label" in high[0]["description"]
+
+    medium = feature_overlap(
+        _train(),
+        pd.DataFrame({"x": [2.0, 9.0], "city": ["Lyon", "Brest"], "y": [1, 0]}),
+        "y",
+    )[0].to_dict()["evidence"]
+    assert medium and medium[0]["source"] == "split"
+    assert "examined test rows" in medium[0]["observed"]

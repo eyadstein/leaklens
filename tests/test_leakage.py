@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -249,3 +251,22 @@ def test_single_feature_leaks_skips_uncrossvalidatable_columns(monkeypatch):
     findings = leakage.single_feature_leaks(d, "y", threshold=0.99)
     # Must not raise, and must still be able to run the remaining columns.
     assert isinstance(findings, list)
+
+
+def test_id_like_carries_structured_evidence():
+    d = _df()
+    d["uid"] = [f"u{i}" for i in range(len(d))]
+    finding = next(f for f in scan(d, "y") if f.kind == "id_like")
+    evidence = finding.to_dict()["evidence"]
+    assert evidence and evidence[0]["source"] == "data"
+    assert evidence[0]["kind"] == "statistic"
+    assert "unique values" in evidence[0]["observed"]
+    assert evidence[0]["location"] == "uid"
+
+
+def test_evidence_never_copies_a_raw_cell_value():
+    d = _df()
+    sentinel = "SENTINEL-9f3"
+    d["account_id"] = [f"{sentinel}-{i}" for i in range(len(d))]
+    blob = json.dumps([f.to_dict()["evidence"] for f in scan(d, "y")])
+    assert sentinel not in blob
