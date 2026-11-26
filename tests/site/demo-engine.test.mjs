@@ -34,9 +34,9 @@ test("fixtures expose the three demo groups", () => {
     GROUPS.map((group) => group.id)
   );
   assert.equal(groups[0].fixtures.length, 3);
-  assert.equal(groups[1].fixtures.length, 2);
+  assert.equal(groups[1].fixtures.length, 3);
   assert.equal(groups[2].fixtures.length, 2);
-  assert.equal(allFixtures(fixtures).length, 7);
+  assert.equal(allFixtures(fixtures).length, 8);
 });
 
 test("findFixture returns a fixture or null", () => {
