@@ -829,12 +829,13 @@ def render_docs() -> str:
         "conservatively as consumption. Target-derived values stay high severity, "
         "non-target group statistics are medium and category frequencies are low. "
         "Because the rules are syntactic, they remain silent when the split or the "
-        "data flow is hidden inside a helper, a loop, a dynamic column name or a "
-        "cross-file pipeline; those gaps are not claimed as clean code. The "
-        "post-split rules also require a visible `train_test_split`, so a "
-        "`KFold`/`GroupShuffleSplit`/`TimeSeriesSplit` `.split()` loop is not "
-        "followed and a full-frame statistic written after such a loop stays "
-        "silent.",
+        "data flow is hidden inside a helper, a dynamic column name, a dynamically "
+        "chosen splitter or a cross-file pipeline; those gaps are not claimed as "
+        "clean code. A visible `train_test_split` or a `KFold`/`GroupShuffleSplit`/"
+        "`TimeSeriesSplit` `.split()` call on the frame counts as the boundary. A "
+        "`.split()` yields index arrays, so the rules do not resolve which rows are "
+        "in which fold: a full-frame statistic written after the loop is reported, "
+        "while a per-fold statistic computed from the fold's own rows stays silent.",
         "",
         "## Fingerprint canonical form",
         "",

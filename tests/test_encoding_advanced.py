@@ -608,32 +608,178 @@ def test_dead_full_frame_frequency_is_clean():
     assert "frequency_encode_after_split" not in kinds(src)
 
 
-def test_group_and_time_split_loops_stay_silent():
-    # The post-split rules need a visible train_test_split. A CV/group/time
-    # `.split()` loop yields index arrays, so a fold write is not treated as a
-    # full-frame write; this is a documented blind spot, not a clean verdict.
-    for src in (
+def test_group_shuffle_split_loop_reports_a_full_frame_group_stat():
+    src = (
         "import pandas as pd\n"
         "from sklearn.model_selection import GroupShuffleSplit\n"
         "df = pd.read_csv('d.csv')\n"
         "gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=0)\n"
         "tr, te = next(gss.split(df, groups=df['g']))\n"
         "df['m'] = df.groupby('c')['x'].transform('mean')\n"
-        "X = df.drop(columns=['target'])\n",
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert kinds(src) == {"group_stat_after_split"}
+
+
+def test_time_series_split_loop_reports_a_full_frame_target_stat():
+    src = (
         "import pandas as pd\n"
         "from sklearn.model_selection import TimeSeriesSplit\n"
         "df = pd.read_csv('d.csv')\n"
         "ts = TimeSeriesSplit(n_splits=5)\n"
         "for tr, te in ts.split(df):\n"
         "    pass\n"
+        "df['te'] = df.groupby('c')['target'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert kinds(src) == {"target_encode_after_split"}
+
+
+def test_kfold_loop_reports_a_full_frame_frequency_encoding():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "kf = KFold(n_splits=5, shuffle=True, random_state=0)\n"
+        "for tr, te in kf.split(df):\n"
+        "    pass\n"
+        "df['city_freq'] = df['city'].map(df['city'].value_counts())\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert kinds(src) == {"frequency_encode_after_split"}
+
+
+def test_split_loop_through_an_alias_still_reports():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import StratifiedKFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "skf = StratifiedKFold(n_splits=5)\n"
+        "folds = skf.split(df, df['target'])\n"
+        "for tr, te in folds:\n"
+        "    pass\n"
         "df['m'] = df.groupby('c')['x'].transform('mean')\n"
-        "X = df.drop(columns=['target'])\n",
-    ):
-        assert not {f.kind for f in scan_source(src)} & {
-            "group_stat_after_split",
-            "frequency_encode_after_split",
-            "target_encode_after_split",
-        }
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert kinds(src) == {"group_stat_after_split"}
+
+
+def test_nested_split_loop_reports_once():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import GroupKFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "gkf = GroupKFold(n_splits=3)\n"
+        "for tr, te in gkf.split(df, groups=df['g']):\n"
+        "    for tr2, te2 in gkf.split(df, groups=df['g']):\n"
+        "        pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert kinds(src) == {"group_stat_after_split"}
+
+
+def test_split_loop_per_fold_statistics_are_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "kf = KFold(n_splits=5, shuffle=True, random_state=0)\n"
+        "for tr, te in kf.split(df):\n"
+        "    X_tr, X_te = df.iloc[tr], df.iloc[te]\n"
+        "    X_tr['m'] = X_tr.groupby('c')['x'].transform('mean')\n"
+    )
+    assert not kinds(src) & {
+        "group_stat_after_split",
+        "frequency_encode_after_split",
+        "target_encode_after_split",
+    }
+
+
+def test_split_loop_dead_full_frame_write_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "kf = KFold(n_splits=5)\n"
+        "for tr, te in kf.split(df):\n"
+        "    pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+    )
+    assert "group_stat_after_split" not in kinds(src)
+
+
+def test_split_loop_on_an_unrelated_frame_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "other = pd.read_csv('o.csv')\n"
+        "kf = KFold(n_splits=5)\n"
+        "for tr, te in kf.split(df):\n"
+        "    pass\n"
+        "other['m'] = other.groupby('c')['x'].transform('mean')\n"
+        "X = other.drop(columns=['target'])\n"
+    )
+    assert not kinds(src) & {
+        "group_stat_after_split",
+        "frequency_encode_after_split",
+        "target_encode_after_split",
+    }
+
+
+def test_split_call_on_a_frame_alias_reports():
+    # `X` is the same rows as `df`, so a fold split of `X` divides `df`.
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "X = df.drop(columns=['target'])\n"
+        "kf = KFold(n_splits=5)\n"
+        "for tr, te in kf.split(X):\n"
+        "    pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "y = df['target']\n"
+    )
+    assert kinds(src) == {"group_stat_after_split"}
+
+
+def test_split_loop_on_a_non_frame_input_is_clean():
+    # The splitter divides an array, not the pandas frame, so the frame's
+    # provenance is unrelated and the rule deliberately stays silent.
+    src = (
+        "import numpy as np\n"
+        "import pandas as pd\n"
+        "from sklearn.model_selection import KFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "arr = np.load('x.npy')\n"
+        "kf = KFold(n_splits=5)\n"
+        "for tr, te in kf.split(arr):\n"
+        "    pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    assert not kinds(src) & {
+        "group_stat_after_split",
+        "frequency_encode_after_split",
+        "target_encode_after_split",
+    }
+
+
+def test_split_loop_feature_detection_is_deterministic():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import GroupKFold\n"
+        "df = pd.read_csv('d.csv')\n"
+        "gkf = GroupKFold(n_splits=3)\n"
+        "for tr, te in gkf.split(df, groups=df['g']):\n"
+        "    pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    first = [(f.kind, f.severity, f.detail) for f in scan_source(src)]
+    second = [(f.kind, f.severity, f.detail) for f in scan_source(src)]
+    assert first == second
 
 
 def test_post_split_feature_detection_is_deterministic():

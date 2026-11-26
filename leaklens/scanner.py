@@ -953,15 +953,21 @@ def _scan_core(
     # the split leaks exactly like the pre-split case. Statistics read from a
     # train/test partition are legitimate and stay silent. Only the visible
     # frame aliases and pandas idempotent operations are followed.
-    if first is not None and tts:
+    if first is not None:
         split_inputs: set = set()
         partitions: set = set()
-        for s in tts:
-            for a in s.args:
-                split_inputs |= _all_names(a)
-            for kw in s.keywords:
-                if kw.arg in ("X", "y"):
-                    split_inputs |= _all_names(kw.value)
+        for s in split_calls:
+            if _name(s) == "train_test_split":
+                for a in s.args:
+                    split_inputs |= _all_names(a)
+                for kw in s.keywords:
+                    if kw.arg in ("X", "y"):
+                        split_inputs |= _all_names(kw.value)
+            elif s.args:
+                # A `KFold`/`GroupShuffleSplit`/`TimeSeriesSplit` loop yields
+                # index arrays, not partitions, but the frame it divides is
+                # still the full frame every fold draws from (#656).
+                split_inputs |= _all_names(s.args[0])
         for a in assigns:
             if _is_tts(a.value):
                 for t in a.targets:
