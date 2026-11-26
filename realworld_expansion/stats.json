@@ -1,9 +1,9 @@
 {
-  "bytes": 89624224,
+  "bytes": 89601703,
   "candidates": 1147,
   "confirmed_labels": 15,
-  "duplicates": 95,
-  "eligible_for_review": 931,
+  "duplicates": 96,
+  "eligible_for_review": 930,
   "file_types": {
     "ipynb": 1122,
     "py": 25
@@ -15,7 +15,7 @@
     "permissive": 541,
     "unknown": 568
   },
-  "near_duplicates": 63,
+  "near_duplicates": 64,
   "overlaps_frozen": 8,
   "queue_size": 300,
   "redistributable": 541,
@@ -25,7 +25,7 @@
     "disputed": 0,
     "double_reviewed": 0,
     "double_reviewed_unblinded": 0,
-    "not_reviewed": 1026,
+    "not_reviewed": 1025,
     "single_reviewed": 22,
     "uncertain": 4
   },
@@ -44,9 +44,9 @@
   },
   "splits": {
     "development": 571,
-    "holdout": 481
+    "holdout": 480
   },
-  "unique_repositories": 776,
-  "unique_samples": 1052,
+  "unique_repositories": 775,
+  "unique_samples": 1051,
   "unknown_license": 568
 }

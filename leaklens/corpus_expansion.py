@@ -219,8 +219,12 @@ def deduplicate(records) -> None:
     }
     if len(signatures) < 2:
         return
+    # ``rows=1`` bands a sorted bottom-k sketch by individual value. Positional
+    # bands (``rows>1``) assume a minhash signature where position is the hash
+    # function; here one extra element shifts every later position and two
+    # 0.95-similar notebooks share no band at all. Text dedup bands the same way.
     for cluster in near_duplicate.cluster(
-        signatures, threshold=NEAR_THRESHOLD, rows=4, max_bucket=200
+        signatures, threshold=NEAR_THRESHOLD, rows=1, max_bucket=200
     ):
         members = [rec for rec in records if rec["id"] in cluster.members]
         canonical = cluster.members[0]

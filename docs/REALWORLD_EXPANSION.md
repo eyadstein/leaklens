@@ -166,9 +166,16 @@ keeps them as historical evidence instead of rewriting them. A disagreement
 stays visible after an adjudication. As of this writing every recorded decision
 has one reviewer, so no candidate is independently validated and the corpus
 cannot support a precision claim.
-`show --blind` withholds the scanner signal, the AI mechanism, review history,
-the recorded decision and the derived audit status, so a second reviewer cannot
-learn from the first pass before recording a verdict.
+`show --blind` withholds the scanner signal, the workflow summary, the AI
+mechanism, `why_it_may_apply`, the counter-evidence list, the reviewer questions,
+the per-reference notes, review history, the recorded decision and the derived
+audit status. The provenance, licence, split side and cited line numbers stay,
+because a reviewer needs them to read the code; the split side is label-blind.
+`blind-pack` rebuilds the whole batch with those same fields removed
+(`review_batch_01.blind.jsonl` and `REVIEW_BATCH_01.blind.md`), so a second
+reviewer can start from material that never contained an expected answer. It is
+still not a review: no case becomes `double_reviewed` without a distinct human
+`--blind` decision.
 
 The first batch is `realworld_expansion/review_batch_01.jsonl` plus
 `review_batch_01.analysis.json` and the human-readable
@@ -224,6 +231,15 @@ separation rule is enforced by `corpus_expansion.split_roles()`:
   member hashes to development, the whole group moves to development and loses
   its holdout side. A newly collected copy can therefore only move a group toward
   development, never promote a development sample into holdout.
+- **Near-duplicate banding must be shift-invariant.** `deduplicate` feeds sorted
+  bottom-k sketches to `near_duplicate.cluster` with `rows=1`. Positional bands
+  assume a minhash signature where position is the hash function; with a sorted
+  sketch one extra low value shifts every later position and two 0.97-similar
+  notebooks share no band. With `rows=4` six development/holdout near-copy pairs
+  went undetected, all copies of one `CS.ipynb`; `rows=1` links them and the
+  straddling record moves to development. The committed manifest is re-checked by
+  an independent candidate generator in `tests/test_review_batch.py`, so a future
+  banding change cannot silently reopen the gap.
 
 `finalize` writes the side into every `review_queue.jsonl` record and counts both
 sides in `stats.json` (`development + holdout == unique_samples`). `show` prints
@@ -239,6 +255,10 @@ know a side existed. Treat the first holdout run as contaminated for those 8
 cases; a pristine holdout needs repositories collected and reviewed after this
 rule existed. No Phase 20L detector was tuned on a reviewed expansion sample;
 workflow verification opened one holdout dossier after the detector was written.
+Phase 20N tightened the cluster rule and re-ran `finalize`: one unreviewed record
+(`simpleniick/NIDS`) moved from holdout to development because its `CS.ipynb` is
+a 0.95-similar copy of six development notebooks. No reviewed holdout case moved,
+so the contaminated-history count stays at 8.
 
 ### Locked evaluation protocol (not yet run)
 

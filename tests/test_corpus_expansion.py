@@ -1,17 +1,21 @@
 """Collection pipeline logic for the real-world expansion corpus (Mission 1).
 
-These tests use synthetic fixtures only: no network, no downloads. The
-acquisition script (``scripts/collect_expansion.py``) is exercised by the live
-run recorded in ``realworld_expansion/``, not here.
+These tests use synthetic fixtures, plus the committed manifest for the
+split-integrity invariant: no network, no downloads. The acquisition script
+(``scripts/collect_expansion.py``) is exercised by the live run recorded in
+``realworld_expansion/``, not here.
 """
 
 import json
+import pathlib
 
 import pytest
 
 from leaklens.corpus_expansion import (
+    NEAR_THRESHOLD,
     REVIEW_STATES,
     SCORED_STATES,
+    SKETCH_SIZE,
     candidate_id,
     code_text,
     content_sha256,
@@ -28,6 +32,8 @@ from leaklens.corpus_expansion import (
     validate,
     write_manifest,
 )
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def _record(sid, repo="o/r", path="a.ipynb", sha="a" * 16, **kw):
@@ -181,6 +187,66 @@ def test_near_duplicates_are_clustered_and_linked():
     assert other["duplicate_of"] == canon["id"]
     assert a["near_cluster"] and a["near_cluster"] == b["near_cluster"]
     assert other["near_of"] == canon["id"]
+
+
+def test_near_duplicate_banding_survives_one_extra_sketch_value():
+    """A sorted bottom-k sketch shifts every position after one insertion.
+
+    Banding by position then finds no shared band even at 0.97 similarity, so
+    ``deduplicate`` bands by value instead. Without that, near-copies land on
+    opposite development/holdout sides.
+    """
+    words = " ".join(f"token{i}" for i in range(400))
+    base = sorted(sketch(words))
+    # One extra low value pushes the largest out and shifts every later position.
+    shifted = sorted([base[0] - 1, *base[:-1]])
+    a = _record("s", repo="o/a", sha="a" * 16, code_sha256="1" * 16)
+    b = _record("s", repo="o/b", sha="b" * 16, code_sha256="2" * 16)
+    a["sketch"], b["sketch"] = base, shifted
+    deduplicate([a, b])
+    assert a["near_cluster"] and a["near_cluster"] == b["near_cluster"]
+    assert {a["duplicate_of"], b["duplicate_of"]} != {None}
+
+
+def test_no_near_duplicate_straddles_the_development_holdout_split():
+    """Repository hashing alone is not isolation: content must agree.
+
+    A near-copy in development that also sits in the holdout would let detector
+    development see holdout material. This checks the committed manifest with an
+    independent candidate generator (shared sketch values), not the code under
+    test.
+    """
+    records = load_manifest(ROOT / "realworld_expansion" / "manifest.jsonl")
+    sides = split_roles(records)
+    sketched = [
+        rec
+        for rec in records
+        if len(rec.get("sketch") or ()) >= SKETCH_SIZE
+        and sides[rec["id"]]["side"] == "holdout"
+    ]
+    development = [
+        rec
+        for rec in records
+        if len(rec.get("sketch") or ()) >= SKETCH_SIZE
+        and sides[rec["id"]]["side"] == "development"
+    ]
+    by_value: dict[int, list[int]] = {}
+    for index, rec in enumerate(development):
+        for value in rec["sketch"]:
+            by_value.setdefault(value, []).append(index)
+
+    def jaccard(left, right):
+        a, b = set(left), set(right)
+        return len(a & b) / len(a | b)
+
+    for hold in sketched:
+        candidates = {i for value in hold["sketch"] for i in by_value.get(value, ())}
+        for index in candidates:
+            dev = development[index]
+            assert jaccard(hold["sketch"], dev["sketch"]) < NEAR_THRESHOLD, (
+                f"{hold['repo']} ({hold['id']}) is a near-duplicate of "
+                f"{dev['repo']} ({dev['id']}) across the split"
+            )
 
 
 def test_unrelated_notebooks_stay_unique():
