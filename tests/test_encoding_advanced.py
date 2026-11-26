@@ -161,6 +161,7 @@ POST_SPLIT_FULL_TRANSFORM = (
     "X_train, X_test, y_train, y_test = train_test_split("
     "df.drop(columns=['target']), df['target'], random_state=0)\n"
     "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+    "X = df.drop(columns=['target'])\n"
 )
 
 POST_SPLIT_TRAIN_TRANSFORM = (
@@ -188,10 +189,15 @@ def test_post_split_transform_from_train_only_is_clean():
 
 
 def test_post_split_transform_through_a_copy_alias_is_detected():
-    src = POST_SPLIT_FULL_TRANSFORM.replace(
-        "df = pd.read_csv('d.csv')\n",
-        "df = pd.read_csv('d.csv')\ndata = df.copy()\n",
-    ).replace("df['city_te'] = df.groupby", "data['city_te'] = data.groupby")
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "data = df.copy()\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "data['city_te'] = data.groupby('city')['target'].transform('mean')\n"
+        "X = data.drop(columns=['target'])\n"
+    )
     assert "target_encode_after_split" in kinds(src)
 
 
@@ -204,6 +210,7 @@ def test_post_split_transform_through_x_y_intermediates_is_detected():
         "y = df['target']\n"
         "X_train, X_test, y_train, y_test = train_test_split(X, y, random_state=0)\n"
         "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
     )
     assert "target_encode_after_split" in kinds(src)
 
@@ -224,6 +231,7 @@ def test_post_split_transform_through_a_groupby_object_is_detected():
         "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
         "g = df.groupby('city')['target']\n"
         "df['city_te'] = g.transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
     )
     assert "target_encode_after_split" in kinds(src)
 
@@ -382,4 +390,262 @@ def test_post_split_detection_is_deterministic():
         (f.kind, f.severity, f.column, f.detail)
         for f in scan_source(POST_SPLIT_FULL_TRANSFORM)
     ]
+    assert first == second
+
+
+# Precision: a full-frame statistic written into the frame the split divided
+# only reaches a model when that frame is read again. A dead write or a pure
+# display is analysis, not leakage. Partition writes stay flagged because the
+# contaminated frame is the one used for training.
+
+
+def test_dead_full_frame_target_write_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+    )
+    assert "target_encode_after_split" not in kinds(src)
+
+
+def test_displaying_the_encoded_frame_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "print(df)\n"
+    )
+    assert "target_encode_after_split" not in kinds(src)
+
+
+def test_reassigning_the_frame_is_not_consumption():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "df = pd.read_csv('other.csv')\n"
+    )
+    assert "target_encode_after_split" not in kinds(src)
+
+
+def test_full_frame_target_write_then_resplit_is_detected():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "train2, test2 = train_test_split(df, test_size=0.2, random_state=1)\n"
+    )
+    assert "target_encode_after_split" in kinds(src)
+
+
+def test_full_frame_target_write_used_by_an_estimator_is_detected():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "from sklearn.linear_model import LogisticRegression\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "model = LogisticRegression()\n"
+        "model.fit(df[['city_te']], df['target'])\n"
+    )
+    assert "target_encode_after_split" in kinds(src)
+
+
+def test_post_split_full_frame_group_stat_is_medium():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['price_mean'] = df.groupby('city')['price'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    fs = [f for f in scan_source(src) if f.kind == "group_stat_after_split"]
+    assert fs and fs[0].severity == "medium"
+    assert "after the split" in fs[0].detail
+
+
+def test_post_split_group_stat_on_train_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "train['price_mean'] = train.groupby('city')['price'].transform('mean')\n"
+        "X = train.drop(columns=['target'])\n"
+    )
+    assert "group_stat_after_split" not in kinds(src)
+
+
+def test_post_split_group_stat_aggregate_then_map_is_medium():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "means = df.groupby('city')['price'].agg('mean')\n"
+        "train['price_mean'] = train['city'].map(means)\n"
+    )
+    assert "group_stat_after_split" in kinds(src)
+
+
+def test_post_split_group_stat_merge_is_medium():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "counts = df.groupby('city')['price'].count().rename('n').reset_index()\n"
+        "train = train.merge(counts, on='city', how='left')\n"
+    )
+    assert "group_stat_after_split" in kinds(src)
+
+
+def test_post_split_group_stat_from_train_aggregate_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "means = train.groupby('city')['price'].mean()\n"
+        "train['price_mean'] = train['city'].map(means)\n"
+    )
+    assert "group_stat_after_split" not in kinds(src)
+
+
+def test_dead_full_frame_group_stat_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['price_mean'] = df.groupby('city')['price'].transform('mean')\n"
+    )
+    assert "group_stat_after_split" not in kinds(src)
+
+
+def test_target_stat_after_split_does_not_also_emit_group_stat():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_te'] = df.groupby('city')['target'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n"
+    )
+    found = kinds(src)
+    assert "target_encode_after_split" in found
+    assert "group_stat_after_split" not in found
+
+
+def test_post_split_full_frame_frequency_is_low():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "counts = df['city'].value_counts()\n"
+        "train['city_freq'] = train['city'].map(counts)\n"
+    )
+    fs = [f for f in scan_source(src) if f.kind == "frequency_encode_after_split"]
+    assert fs and fs[0].severity == "low"
+    assert "after the split" in fs[0].detail
+
+
+def test_inline_post_split_frequency_is_low():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "train['city_freq'] = train['city'].map(df['city'].value_counts())\n"
+    )
+    assert "frequency_encode_after_split" in kinds(src)
+
+
+def test_post_split_frequency_through_an_alias_is_low():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "counts = df['city'].value_counts()\n"
+        "alias = counts\n"
+        "train['city_freq'] = train['city'].map(alias)\n"
+    )
+    assert "frequency_encode_after_split" in kinds(src)
+
+
+def test_post_split_frequency_from_train_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "counts = train['city'].value_counts()\n"
+        "train['city_freq'] = train['city'].map(counts)\n"
+    )
+    assert "frequency_encode_after_split" not in kinds(src)
+
+
+def test_dead_full_frame_frequency_is_clean():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "df['city_freq'] = df['city'].map(df['city'].value_counts())\n"
+    )
+    assert "frequency_encode_after_split" not in kinds(src)
+
+
+def test_group_and_time_split_loops_stay_silent():
+    # The post-split rules need a visible train_test_split. A CV/group/time
+    # `.split()` loop yields index arrays, so a fold write is not treated as a
+    # full-frame write; this is a documented blind spot, not a clean verdict.
+    for src in (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import GroupShuffleSplit\n"
+        "df = pd.read_csv('d.csv')\n"
+        "gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=0)\n"
+        "tr, te = next(gss.split(df, groups=df['g']))\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n",
+        "import pandas as pd\n"
+        "from sklearn.model_selection import TimeSeriesSplit\n"
+        "df = pd.read_csv('d.csv')\n"
+        "ts = TimeSeriesSplit(n_splits=5)\n"
+        "for tr, te in ts.split(df):\n"
+        "    pass\n"
+        "df['m'] = df.groupby('c')['x'].transform('mean')\n"
+        "X = df.drop(columns=['target'])\n",
+    ):
+        assert not {f.kind for f in scan_source(src)} & {
+            "group_stat_after_split",
+            "frequency_encode_after_split",
+            "target_encode_after_split",
+        }
+
+
+def test_post_split_feature_detection_is_deterministic():
+    src = (
+        "import pandas as pd\n"
+        "from sklearn.model_selection import train_test_split\n"
+        "df = pd.read_csv('d.csv')\n"
+        "train, test = train_test_split(df, test_size=0.2, random_state=0)\n"
+        "train['price_mean'] = train.groupby('city')['price'].transform('mean')\n"
+        "counts = df['city'].value_counts()\n"
+        "train['city_freq'] = train['city'].map(counts)\n"
+    )
+    first = [(f.kind, f.severity, f.detail) for f in scan_source(src)]
+    second = [(f.kind, f.severity, f.detail) for f in scan_source(src)]
     assert first == second

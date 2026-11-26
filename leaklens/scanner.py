@@ -1000,10 +1000,16 @@ def _scan_core(
         # map/merge/join only need their result to be assigned somewhere.
         column_writes = set()
         assigned_calls = set()
+        write_frames: dict[int, set] = {}
         for a in assigns:
             assigned_calls |= {
                 id(n) for n in ast.walk(a.value) if isinstance(n, ast.Call)
             }
+            frame_names = set()
+            for t in a.targets:
+                frame_names |= (
+                    _all_names(t.value) if isinstance(t, ast.Subscript) else _tnames(t)
+                )
             exprs = []
             if a.targets and isinstance(a.targets[0], ast.Subscript):
                 exprs.append(a.value)
@@ -1013,8 +1019,40 @@ def _scan_core(
                 if isinstance(n, ast.Call) and _name(n) == "assign"
                 for kw in n.keywords
             ]
+            for n in ast.walk(a.value):
+                if isinstance(n, ast.Call) and _name(n) == "assign":
+                    frame_names |= _all_names(n.func.value)
             for e in exprs:
-                column_writes |= {id(n) for n in ast.walk(e) if isinstance(n, ast.Call)}
+                for n in ast.walk(e):
+                    if isinstance(n, ast.Call):
+                        column_writes.add(id(n))
+                        write_frames.setdefault(id(n), set()).update(frame_names)
+
+        # A statistic written into the split frame only reaches a model if the
+        # frame is read afterwards; an unused write is analysis, not leakage.
+        # Display calls are excluded so printing the encoded frame stays silent.
+        display_nodes = {
+            id(x)
+            for n in nodes
+            if isinstance(n, ast.Call) and _name(n) in ("print", "display")
+            for x in ast.walk(n)
+        }
+
+        def reaches_model(c) -> bool:
+            frames = write_frames.get(id(c), set())
+            if not frames:
+                return True  # unknown target: keep the conservative verdict
+            if frames & partitions:
+                return True
+            end = getattr(c, "end_lineno", c.lineno)
+            return any(
+                isinstance(n, ast.Name)
+                and isinstance(n.ctx, ast.Load)
+                and n.id in frames
+                and getattr(n, "lineno", 0) > end
+                and id(n) not in display_nodes
+                for n in nodes
+            )
 
         # target-derived aggregates of a full frame, whichever side of the split.
         # One level of groupby-object alias is followed: g = df.groupby("c")["t"].
@@ -1033,14 +1071,12 @@ def _scan_core(
                 for t in a.targets:
                     for nm in _tnames(t):
                         groupby_objs[nm] = target_ish
-        target_stats = set()
+        target_stats, group_stats = set(), set()
         for a in assigns:
             if _is_tts(a.value):
                 continue
             names = _all_names(a.value)
             if not (names & (full_frames | set(groupby_objs))):
-                continue
-            if not (uses_target(a.value) or any(groupby_objs.get(nm) for nm in names)):
                 continue
             calls_in = [n for n in ast.walk(a.value) if isinstance(n, ast.Call)]
             if not any(
@@ -1048,25 +1084,50 @@ def _scan_core(
                 for n in calls_in
             ):
                 continue
-            target_stats |= set().union(*(_tnames(t) for t in a.targets))
-        changed = True
-        while changed:
-            changed = False
-            for a in assigns:
-                if not (isinstance(a.value, ast.Name) and a.value.id in target_stats):
-                    continue
-                for t in a.targets:
-                    for nm in _tnames(t):
-                        if nm not in target_stats:
-                            target_stats.add(nm)
-                            changed = True
+            named = set().union(*(_tnames(t) for t in a.targets))
+            if uses_target(a.value) or any(groupby_objs.get(nm) for nm in names):
+                target_stats |= named
+                continue
+            grouped = any(_name(n) == "groupby" for n in calls_in) or any(
+                nm in groupby_objs for nm in names
+            )
+            if grouped:
+                group_stats |= named
+
+        # category frequencies built from the frame the split divided (#654)
+        freq_stats = set()
+        for a in assigns:
+            if _is_tts(a.value) or not (_all_names(a.value) & full_frames):
+                continue
+            if any(
+                isinstance(n, ast.Call) and _name(n) == "value_counts"
+                for n in ast.walk(a.value)
+            ):
+                freq_stats |= (
+                    set().union(*(_tnames(t) for t in a.targets))
+                    if a.targets
+                    else set()
+                )
+
+        for stats in (target_stats, group_stats, freq_stats):
+            changed = True
+            while changed:
+                changed = False
+                for a in assigns:
+                    if not (isinstance(a.value, ast.Name) and a.value.id in stats):
+                        continue
+                    for t in a.targets:
+                        for nm in _tnames(t):
+                            if nm not in stats:
+                                stats.add(nm)
+                                changed = True
 
         for c in sorted(calls, key=lambda x: (x.lineno, x.col_offset)):
             if c.lineno < first or not isinstance(c.func, ast.Attribute):
                 continue
             method = c.func.attr
             sel, base = None, None
-            if method == "transform" and id(c) in column_writes:
+            if method in ("transform", "agg", "apply") and id(c) in column_writes:
                 if (
                     isinstance(c.func.value, ast.Subscript)
                     and isinstance(c.func.value.value, ast.Call)
@@ -1078,8 +1139,9 @@ def _scan_core(
                     and _name(c.func.value) == "groupby"
                 ):
                     base = c.func.value
-                alias = isinstance(c.func.value, ast.Name) and groupby_objs.get(
-                    c.func.value.id
+                alias = (
+                    isinstance(c.func.value, ast.Name)
+                    and c.func.value.id in groupby_objs
                 )
                 if base is not None:
                     if not (_all_names(base.func.value) & full_frames):
@@ -1094,8 +1156,10 @@ def _scan_core(
                         uses_target(c) or used & target or group_keys & target
                     )
                 elif alias:
-                    is_target = True
+                    is_target = bool(groupby_objs.get(c.func.value.id))
                 else:
+                    continue
+                if not reaches_model(c):
                     continue
                 if is_target:
                     out.append(
@@ -1109,8 +1173,27 @@ def _scan_core(
                             stable_key=keys[id(c)],
                         )
                     )
-            elif method in ("map", "merge", "join") and id(c) in assigned_calls:
-                if not (_all_names(c.func.value) & partitions):
+                else:
+                    out.append(
+                        Finding(
+                            "medium",
+                            "group_stat_after_split",
+                            loc(c.lineno),
+                            f"{ast.unparse(c)} builds a feature from full-frame group "
+                            f"statistics after the split at {loc(first)}; held-out rows "
+                            "help set the value",
+                            stable_key=keys[id(c)],
+                        )
+                    )
+            elif (
+                method in ("map", "merge", "join", "replace")
+                and id(c) in assigned_calls
+            ):
+                receiver = _all_names(c.func.value)
+                if not (
+                    receiver & partitions
+                    or (receiver & full_frames and reaches_model(c))
+                ):
                     continue
                 exprs = [
                     e
@@ -1134,19 +1217,48 @@ def _scan_core(
                     and (_all_names(e) & full_frames)
                     for e in exprs
                 )
-                if not (names & target_stats or inline):
-                    continue
-                out.append(
-                    Finding(
-                        "high",
-                        "target_encode_after_split",
-                        loc(c.lineno),
-                        f"{ast.unparse(c)} maps a target-derived statistic computed on "
-                        f"the full frame into records after the split at {loc(first)}; "
-                        "the held-out labels shape the encoding",
-                        stable_key=keys[id(c)],
+                if names & target_stats or inline:
+                    out.append(
+                        Finding(
+                            "high",
+                            "target_encode_after_split",
+                            loc(c.lineno),
+                            f"{ast.unparse(c)} maps a target-derived statistic computed on "
+                            f"the full frame into records after the split at {loc(first)}; "
+                            "the held-out labels shape the encoding",
+                            stable_key=keys[id(c)],
+                        )
                     )
-                )
+                elif names & group_stats:
+                    out.append(
+                        Finding(
+                            "medium",
+                            "group_stat_after_split",
+                            loc(c.lineno),
+                            f"{ast.unparse(c)} maps a full-frame group statistic into "
+                            f"records after the split at {loc(first)}; held-out rows "
+                            "help set the value",
+                            stable_key=keys[id(c)],
+                        )
+                    )
+                elif names & freq_stats or any(
+                    isinstance(n, ast.Call)
+                    and _name(n) == "value_counts"
+                    and (_all_names(n.func.value) & full_frames)
+                    for e in exprs
+                    for n in ast.walk(e)
+                ):
+                    out.append(
+                        Finding(
+                            "low",
+                            "frequency_encode_after_split",
+                            loc(c.lineno),
+                            f"{ast.unparse(c)} maps a category frequency computed on the "
+                            f"full frame into records after the split at {loc(first)}; "
+                            "held-out rows help set the value",
+                            stable_key=keys[id(c)],
+                        )
+                    )
 
     # Time-ordered data split with shuffling enabled: adjacent timestamps leak
     # across the boundary even when no column is literally named "target".

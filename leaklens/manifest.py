@@ -99,6 +99,7 @@ def _entry(
     scored: bool | None = None,
     requires: str | None = None,
     modalities: tuple[str, ...] | None = None,
+    introduced: str = INTRODUCED,
 ) -> Detector:
     return Detector(
         kind=kind,
@@ -108,7 +109,7 @@ def _entry(
         benchmark=benchmark,
         no_bench_reason=no_bench_reason,
         docs_anchor=f"#{kind}",
-        introduced=INTRODUCED,
+        introduced=introduced,
         scored=kind not in _DIAGNOSTIC_KINDS if scored is None else scored,
         requires=requires,
         modalities=frozenset(modalities or _SURFACE_MODALITIES[surface]),
@@ -379,6 +380,7 @@ DETECTORS: tuple[Detector, ...] = (
             "train partition) and are covered by tests/test_encoding_advanced.py; "
             "adding a case would change the frozen scanner benchmark metrics."
         ),
+        introduced="unreleased",
     ),
     _entry(
         "feature_selection_before_split",
@@ -452,6 +454,30 @@ DETECTORS: tuple[Detector, ...] = (
         "low",
         "frequency_encode_before_split",
         "frequency encoding from all rows before split",
+    ),
+    _entry(
+        "group_stat_after_split",
+        "code",
+        "medium",
+        "group_stat_after_split",
+        no_bench_reason=(
+            "Needs a post-split groupby context; covered by "
+            "tests/test_encoding_advanced.py, and adding a case would change the "
+            "frozen scanner benchmark metrics."
+        ),
+        introduced="unreleased",
+    ),
+    _entry(
+        "frequency_encode_after_split",
+        "code",
+        "low",
+        "frequency_encode_after_split",
+        no_bench_reason=(
+            "Needs a post-split value_counts context; covered by "
+            "tests/test_encoding_advanced.py, and adding a case would change the "
+            "frozen scanner benchmark metrics."
+        ),
+        introduced="unreleased",
     ),
     _entry(
         "temporal_split_shuffle",
@@ -786,7 +812,33 @@ def render_docs() -> str:
             f"{entry.requires or '-'} | {', '.join(sorted(entry.modalities))} | "
             f"`{entry.advice}` | {coverage} | {entry.introduced} |"
         )
-    lines += ["", "## Fingerprint canonical form", ""]
+    lines += ["", "## Scope and limits of the code scanner", ""]
+    lines += [
+        "The `.py`/`.ipynb` rules are single-file AST analyses. They never import, "
+        "execute or trace the scanned code, and they do not follow values across "
+        "files, helper-function bodies, dynamic column names or container aliases. "
+        "A rule that names a frame follows visible aliases through `copy`, `rename`, "
+        "`astype`, `reset_index`, `assign` and column-only `drop`, plus one level of "
+        "`groupby` object.",
+        "",
+        "For post-split feature construction, a target-derived or group statistic is "
+        "reported when it is read from the frame the split divided and written into a "
+        "train/test partition, or written into the split frame and that frame is used "
+        "again afterwards. `print`/`display` uses are treated as analysis, so a dead "
+        "or display-only write stays silent; any other later reference is treated "
+        "conservatively as consumption. Target-derived values stay high severity, "
+        "non-target group statistics are medium and category frequencies are low. "
+        "Because the rules are syntactic, they remain silent when the split or the "
+        "data flow is hidden inside a helper, a loop, a dynamic column name or a "
+        "cross-file pipeline; those gaps are not claimed as clean code. The "
+        "post-split rules also require a visible `train_test_split`, so a "
+        "`KFold`/`GroupShuffleSplit`/`TimeSeriesSplit` `.split()` loop is not "
+        "followed and a full-frame statistic written after such a loop stays "
+        "silent.",
+        "",
+        "## Fingerprint canonical form",
+        "",
+    ]
     lines += [
         "Finding fingerprints are `SHA-256` over a domain-separated, versioned "
         "canonical form (`schema=1`) containing the detector kind, surface, "
