@@ -30,7 +30,7 @@ scaler.fit(X_test)
 """
 
 
-def _action_args(path, fail_under, baseline=None, fail_on_new=None):
+def _action_args(path, fail_under, baseline=None, fail_on_new=None, sarif=None):
     """Mirror action.yml: append each flag only when its input is set."""
     args = ["--scan", str(path)]
     if fail_under:
@@ -39,6 +39,8 @@ def _action_args(path, fail_under, baseline=None, fail_on_new=None):
         args += ["--baseline", str(baseline)]
     if fail_on_new:
         args += ["--fail-on-new"]
+    if sarif:
+        args += ["--sarif", str(sarif)]
     return args
 
 
@@ -49,9 +51,9 @@ def test_fail_under_input_is_optional_without_a_default():
     assert "default:" not in block
 
 
-def test_baseline_and_fail_on_new_inputs_are_optional_without_defaults():
+def test_baseline_fail_on_new_and_sarif_inputs_are_optional_without_defaults():
     text = ACTION.read_text(encoding="utf-8")
-    for name in ("baseline", "fail-on-new"):
+    for name in ("baseline", "fail-on-new", "sarif"):
         block = text.split(f"  {name}:")[1].split("runs:")[0]
         assert "required: false" in block, name
         assert "default:" not in block, name
@@ -63,11 +65,13 @@ def test_action_wires_inputs_into_the_cli():
     assert "LEAKLENS_FAIL_UNDER: ${{ inputs.fail-under }}" in text
     assert "LEAKLENS_BASELINE: ${{ inputs.baseline }}" in text
     assert "LEAKLENS_FAIL_ON_NEW: ${{ inputs.fail-on-new }}" in text
+    assert "LEAKLENS_SARIF: ${{ inputs.sarif }}" in text
     assert 'if [[ -n "$LEAKLENS_FAIL_UNDER" ]]' in text
     assert 'args+=(--fail-under "$LEAKLENS_FAIL_UNDER")' in text
     assert 'args+=(--baseline "$LEAKLENS_BASELINE")' in text
     assert 'if [[ "$LEAKLENS_FAIL_ON_NEW" == "true" ]]' in text
     assert "args+=(--fail-on-new)" in text
+    assert 'args+=(--sarif "$LEAKLENS_SARIF")' in text
     assert 'leaklens --scan "$INPUT_PATH" "${args[@]}"' in text
 
 
@@ -162,3 +166,13 @@ def test_fail_on_new_without_a_baseline_is_a_usage_error(tmp_path, capsys):
         main(_action_args(target, None, None, True))
     assert err.value.code == 2
     assert "fail-on-new" in capsys.readouterr().err
+
+
+def test_sarif_input_writes_the_report_and_keeps_the_gate(tmp_path):
+    """A code-scanning upload needs the file, not a different exit contract."""
+    target = tmp_path / "high.py"
+    target.write_text(HIGH, encoding="utf-8")
+    sarif = tmp_path / "leaklens.sarif"
+    assert main(_action_args(target, None, sarif=sarif)) == 1
+    assert sarif.exists()
+    assert '"version": "2.1.0"' in sarif.read_text(encoding="utf-8")

@@ -281,6 +281,7 @@ The Action installs the CLI and runs `leaklens --scan` on a file or folder. It d
 | `fail-under` | optional | unset | minimum trust score (0-100); when set, the step also fails on a score below it |
 | `baseline` | optional | unset | baseline file to compare against; findings are labelled `new`/`unchanged`/`changed`/`resolved` |
 | `fail-on-new` | optional | unset | fail when a non-diagnostic finding is new relative to `baseline` |
+| `sarif` | optional | unset | path for a SARIF 2.1.0 report, for `github/codeql-action/upload-sarif` |
 
 ```yaml
 name: leakage
@@ -312,6 +313,19 @@ The step fails when the scan exits `1`: a high-severity finding, or a trust scor
           path: .
           baseline: leaklens-baseline.json
           fail-on-new: true
+```
+
+`sarif` writes the same SARIF 2.1.0 report as `--sarif` and leaves the exit contract unchanged, so a code-scanning upload can run after the step. It is unreleased too, so pin `@main` until the next tag:
+
+```yaml
+      - uses: eyadstein/leaklens@main
+        with:
+          path: .
+          sarif: leaklens.sarif
+      - if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: leaklens.sarif
 ```
 
 Pin a tag or a full commit SHA for reproducible CI. `@main` tracks the default branch and therefore unreleased changes.

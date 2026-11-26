@@ -108,11 +108,12 @@ the evidence, the human verdict and the corrected pipeline. Redact where needed.
 ### 3. Meet teams where they already run
 
 The GitHub Action and pre-commit hook exist. The Action now carries `path`,
-`fail-under`, `baseline` and `fail-on-new`, so the documented adoption path —
-record the findings you have reviewed, then fail only on new ones — is reachable
-from CI without a hand-written `run:` step. The README shows the copy-paste
-workflow; the baseline inputs are unreleased, so they need `@main` until the next
-tag. One integration that works beats five adapters that are announced.
+`fail-under`, `baseline`, `fail-on-new` and `sarif`, so the documented adoption
+path — record the findings you have reviewed, then fail only on new ones — is
+reachable from CI without a hand-written `run:` step, and a code-scanning upload
+can follow the scan. The README shows the copy-paste workflow; the `baseline`,
+`fail-on-new` and `sarif` inputs are unreleased, so they need `@main` until the
+next tag. One integration that works beats five adapters that are announced.
 
 - **Signal:** an external repository uses the Action and links back.
 - **Falsified if:** no external usage appears after the docs and a single

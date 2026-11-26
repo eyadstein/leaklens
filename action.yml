@@ -16,6 +16,9 @@ inputs:
   fail-on-new:
     description: Optional; fail when a finding is new relative to the baseline (requires baseline)
     required: false
+  sarif:
+    description: Optional path; write a SARIF 2.1.0 report for GitHub code scanning
+    required: false
 runs:
   using: composite
   steps:
@@ -35,6 +38,9 @@ runs:
         if [[ "$LEAKLENS_FAIL_ON_NEW" == "true" ]]; then
           args+=(--fail-on-new)
         fi
+        if [[ -n "$LEAKLENS_SARIF" ]]; then
+          args+=(--sarif "$LEAKLENS_SARIF")
+        fi
         leaklens --scan "$INPUT_PATH" "${args[@]}"
       shell: bash
       env:
@@ -42,3 +48,4 @@ runs:
         LEAKLENS_FAIL_UNDER: ${{ inputs.fail-under }}
         LEAKLENS_BASELINE: ${{ inputs.baseline }}
         LEAKLENS_FAIL_ON_NEW: ${{ inputs.fail-on-new }}
+        LEAKLENS_SARIF: ${{ inputs.sarif }}
