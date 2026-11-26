@@ -881,6 +881,49 @@ def write_manifest(path, records) -> None:
 
 
 FREEZE_SCHEMA = "leaklens-corpus-freeze-1"
+FREEZE_FIELDS = ("id", "repo", "path", "sha256", "side", "reason")
+FREEZE_SIDES = frozenset({"development", "holdout"})
+FREEZE_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def freeze_filename(label: str) -> str:
+    """A snapshot name that cannot escape ``freezes/``.
+
+    The label is operator input, but it becomes a path; refuse separators and a
+    leading ``.`` rather than relying on the caller to sanitise it.
+    """
+    if not FREEZE_LABEL.fullmatch(label or ""):
+        raise ValueError(
+            "freeze label must start alphanumeric and contain only letters, "
+            "digits, dot, underscore or hyphen"
+        )
+    return f"{label}.json"
+
+
+def _freeze_case_problems(cases) -> list[str]:
+    """Shape problems that make a snapshot unsafe to interpret or compare."""
+    if not isinstance(cases, list):
+        return ["the frozen cases are not a list"]
+    problems = []
+    seen = set()
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            problems.append(f"case {index}: not an object")
+            continue
+        missing = [
+            field for field in FREEZE_FIELDS if not isinstance(case.get(field), str)
+        ]
+        if missing:
+            problems.append(f"case {index}: missing or non-string {', '.join(missing)}")
+        ident = case.get("id")
+        if isinstance(ident, str):
+            if ident in seen:
+                problems.append(f"{ident}: duplicated in the freeze")
+            seen.add(ident)
+        side = case.get("side")
+        if isinstance(side, str) and side not in FREEZE_SIDES:
+            problems.append(f"case {index}: unknown side {side!r}")
+    return problems
 
 
 def freeze(records, detector) -> dict:
@@ -892,6 +935,9 @@ def freeze(records, detector) -> dict:
     is drift that :func:`verify_freeze` reports.
     """
     records = list(records)
+    ids = [rec["id"] for rec in records]
+    if len(ids) != len(set(ids)):
+        raise ValueError("records contain duplicate ids; a freeze must be unique")
     sides = split_roles(records)
     cases = [
         {
@@ -922,15 +968,20 @@ def verify_freeze(records, frozen) -> list[str]:
     Labels are not consulted: a freeze that still matches says the evaluated
     bytes and sides are stable, nothing about whether they are correct.
     """
+    if not isinstance(frozen, dict):
+        return ["the freeze is not an object"]
     if frozen.get("schema") != FREEZE_SCHEMA:
         return [f"unexpected freeze schema {frozen.get('schema')!r}"]
-    cases = frozen.get("cases") or []
+    cases = frozen.get("cases")
+    if cases is None:
+        return ["the freeze has no cases"]
+    problems = _freeze_case_problems(cases)
+    if problems:
+        # A malformed snapshot cannot be compared case by case without guessing.
+        return problems
     payload = json.dumps(cases, sort_keys=True, separators=(",", ":"))
-    problems = (
-        []
-        if hashlib.sha256(payload.encode("utf-8")).hexdigest() == frozen.get("digest")
-        else ["the digest does not match the frozen cases"]
-    )
+    if hashlib.sha256(payload.encode("utf-8")).hexdigest() != frozen.get("digest"):
+        problems.append("the digest does not match the frozen cases")
     current = {rec["id"]: rec for rec in records}
     sides = split_roles(records)
     for case in cases:
@@ -942,9 +993,14 @@ def verify_freeze(records, frozen) -> list[str]:
         for field in ("repo", "path", "sha256"):
             if rec.get(field) != case.get(field):
                 problems.append(f"{ident}: {field} changed")
-        if sides[ident]["side"] != case.get("side"):
+        if sides[ident]["side"] != case["side"]:
             problems.append(
-                f"{ident}: side moved {case.get('side')} -> {sides[ident]['side']}"
+                f"{ident}: side moved {case['side']} -> {sides[ident]['side']}"
+            )
+        if sides[ident]["reason"] != case["reason"]:
+            problems.append(
+                f"{ident}: side reason changed {case['reason']} -> "
+                f"{sides[ident]['reason']}"
             )
     added = len(set(current) - {case["id"] for case in cases})
     if added:

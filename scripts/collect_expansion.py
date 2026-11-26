@@ -708,8 +708,16 @@ def detector_stamp() -> dict:
     }
 
 
+def freeze_path(label: str) -> pathlib.Path:
+    return FREEZES / corpus.freeze_filename(label)
+
+
 def command_freeze(args) -> int:
-    path = FREEZES / f"{args.label}.json"
+    try:
+        path = freeze_path(args.label)
+    except ValueError as exc:
+        log(str(exc))
+        return 2
     if path.exists():
         log(
             f"freeze {args.label} already exists: a freeze is immutable, pick a new label"
@@ -730,7 +738,11 @@ def command_freeze(args) -> int:
 
 
 def command_verify_freeze(args) -> int:
-    path = FREEZES / f"{args.label}.json"
+    try:
+        path = freeze_path(args.label)
+    except ValueError as exc:
+        log(str(exc))
+        return 2
     try:
         frozen = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:

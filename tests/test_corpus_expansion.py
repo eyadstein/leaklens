@@ -6,12 +6,14 @@ split-integrity invariant: no network, no downloads. The acquisition script
 ``realworld_expansion/``, not here.
 """
 
+import hashlib
 import json
 import pathlib
 
 import pytest
 
 from leaklens.corpus_expansion import (
+    FREEZE_SCHEMA,
     NEAR_THRESHOLD,
     REVIEW_STATES,
     SCORED_STATES,
@@ -21,6 +23,7 @@ from leaklens.corpus_expansion import (
     content_sha256,
     deduplicate,
     freeze,
+    freeze_filename,
     license_status,
     load_manifest,
     queue,
@@ -623,3 +626,69 @@ def test_verify_freeze_reports_added_removed_changed_and_moved_cases():
     assert "the digest does not match the frozen cases" in verify_freeze(
         records, tampered
     )
+
+
+def test_freeze_refuses_duplicate_record_ids():
+    records = _freeze_corpus()
+    with pytest.raises(ValueError, match="duplicate"):
+        freeze([*records, records[0]], {"version": "0.14.0", "commit": "abc"})
+
+
+def test_verify_freeze_rejects_malformed_snapshots_without_raising():
+    records = _freeze_corpus()
+    frozen = freeze(records, {"version": "0.14.0", "commit": "abc"})
+    malformed = (
+        [],
+        {"schema": FREEZE_SCHEMA},
+        {"schema": FREEZE_SCHEMA, "cases": {}},
+        {"schema": FREEZE_SCHEMA, "cases": ["not an object"]},
+        {"schema": FREEZE_SCHEMA, "cases": [{"id": "only-an-id"}]},
+        {
+            "schema": FREEZE_SCHEMA,
+            "cases": [
+                {
+                    "id": records[0]["id"],
+                    "repo": records[0]["repo"],
+                    "path": records[0]["path"],
+                    "sha256": records[0]["sha256"],
+                    "side": "bogus",
+                    "reason": "repo-hash",
+                }
+            ],
+        },
+    )
+    for broken in malformed:
+        problems = verify_freeze(records, broken)
+        assert problems, broken
+    assert verify_freeze(records, "not a mapping") == ["the freeze is not an object"]
+    assert verify_freeze(records, frozen) == []
+
+
+def test_verify_freeze_rejects_a_duplicate_case_id():
+    records = _freeze_corpus()
+    frozen = freeze(records, {"version": "0.14.0", "commit": "abc"})
+    duplicated = dict(frozen, cases=[frozen["cases"][0], frozen["cases"][0]])
+    payload = json.dumps(duplicated["cases"], sort_keys=True, separators=(",", ":"))
+    duplicated["digest"] = hashlib.sha256(payload.encode()).hexdigest()
+    problems = verify_freeze(records, duplicated)
+    assert any("duplicated in the freeze" in problem for problem in problems)
+
+
+def test_verify_freeze_reports_a_changed_side_reason():
+    records = _freeze_corpus()
+    frozen = freeze(records, {"version": "0.14.0", "commit": "abc"})
+    tampered = json.loads(json.dumps(frozen))
+    tampered["cases"][0]["reason"] = "cluster-straddle"
+    payload = json.dumps(tampered["cases"], sort_keys=True, separators=(",", ":"))
+    tampered["digest"] = hashlib.sha256(payload.encode()).hexdigest()
+    assert any(
+        "side reason changed" in problem for problem in verify_freeze(records, tampered)
+    )
+
+
+def test_freeze_label_cannot_escape_the_snapshot_directory():
+    for label in ("", "../escape", "a/b", "a\\b", ".hidden", "a b"):
+        with pytest.raises(ValueError):
+            freeze_filename(label)
+    assert freeze_filename("2026-11-26") == "2026-11-26.json"
+    assert freeze_filename("dev_2.1") == "dev_2.1.json"
