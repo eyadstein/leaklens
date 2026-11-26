@@ -83,7 +83,12 @@ jobs:
       - name: Check out validated release tag
         run: git checkout --detach "${{ steps.release.outputs.tag }}"
       - name: Verify version metadata is consistent
-        run: python scripts/validate_release.py --versions
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          release_date="$(git log -1 --format=%cs "$TAG")"
+          python scripts/validate_release.py --versions --release-date "$release_date"
       - run: pip install build
       - run: python -m build
       - name: Verify dist contains only the wheel and sdist
