@@ -453,7 +453,7 @@ def build() -> dict:
         _code_fixture(
             "advanced",
             "advanced_leaks.py",
-            "Five leaks in one pipeline",
+            "Leaks across an advanced pipeline",
             "Target encoding, feature selection, tuning, time ordering and group "
             "CV, all in a single realistic script.",
             (EXAMPLES / "advanced_leaks.py").read_text(encoding="utf-8"),
