@@ -15,7 +15,7 @@ from .availability import EngineUnavailable, probe
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
-ALL_INTERFACES = ("0.0.0.0", "::")  # noqa: S104 - compared, never the default bind
+ALL_INTERFACES = ("0.0.0.0", "::")  # noqa: S104  # nosec B104 - never the default bind
 LOG_LEVELS = ("critical", "error", "warning", "info", "debug", "trace")
 
 
