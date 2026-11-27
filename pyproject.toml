@@ -30,6 +30,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/eyadstein/leaklens"
+Documentation = "https://eyadstein.github.io/leaklens/docs.html"
 Issues = "https://github.com/eyadstein/leaklens/issues"
 Changelog = "https://github.com/eyadstein/leaklens/blob/main/CHANGELOG.md"
 Source = "https://github.com/eyadstein/leaklens"
