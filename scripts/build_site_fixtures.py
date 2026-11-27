@@ -40,6 +40,9 @@ from leaklens.scanner import scan_source  # noqa: E402
 
 OUT = ROOT / "docs" / "assets" / "fixtures.mjs"
 EXAMPLES = ROOT / "examples"
+# The demo's copyable dataset commands point at these files, so a visitor who
+# clones the repository can reproduce every recorded finding.
+DATA = EXAMPLES / "data"
 
 SAFE_PIPELINE = """from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
@@ -382,7 +385,8 @@ def _overlap_fixture(
     }
 
 
-def build() -> dict:
+def demo_frames() -> dict[str, pd.DataFrame]:
+    """The exact frames the demo records, so the CSVs and findings cannot drift."""
     transactions = make_transactions()
     clean = transactions.drop(columns=["txn_id", "chargeback_flag"])
 
@@ -401,6 +405,49 @@ def build() -> dict:
     near_train = near_train[
         ["amount", "hour", "dist_home_km", "channel", "chargeback_flag", "is_fraud"]
     ]
+    return {
+        "leaky_transactions": transactions,
+        "clean_transactions": clean,
+        "grouped_customers": make_customers(),
+        "train": train,
+        "test": test,
+        "near_train": near_train,
+        "near_test": near_test,
+    }
+
+
+def render_data() -> dict[str, str]:
+    return {
+        f"{name}.csv": frame.to_csv(index=False, lineterminator="\n")
+        for name, frame in demo_frames().items()
+    }
+
+
+def write_data() -> list[Path]:
+    DATA.mkdir(parents=True, exist_ok=True)
+    written = []
+    for name, text in render_data().items():
+        path = DATA / name
+        path.write_text(text, encoding="utf-8", newline="\n")
+        written.append(path)
+    return written
+
+
+def stale_data() -> list[str]:
+    return [
+        name
+        for name, text in render_data().items()
+        if not (DATA / name).is_file()
+        or (DATA / name).read_text(encoding="utf-8") != text
+    ]
+
+
+def build() -> dict:
+    frames = demo_frames()
+    transactions = frames["leaky_transactions"]
+    clean = frames["clean_transactions"]
+    train, test = frames["train"], frames["test"]
+    near_train, near_test = frames["near_train"], frames["near_test"]
 
     code = [
         _code_fixture(
@@ -440,7 +487,7 @@ def build() -> dict:
             "to 50/100. This is the shape of most '99% accuracy' demos.",
             transactions,
             "is_fraud",
-            "leaklens leaky_transactions.csv --target is_fraud",
+            "leaklens examples/data/leaky_transactions.csv --target is_fraud",
         ),
         _dataset_fixture(
             "clean_transactions",
@@ -449,16 +496,16 @@ def build() -> dict:
             "trust score reaches 100/100.",
             clean,
             "is_fraud",
-            "leaklens clean_transactions.csv --target is_fraud",
+            "leaklens examples/data/clean_transactions.csv --target is_fraud",
         ),
         _dataset_fixture(
             "grouped_customers",
             "Repeated entities across a random split",
             "Every customer has several rows. A random split can place one customer "
             "on both sides, so the audit asks for an entity-aware split.",
-            make_customers(),
+            frames["grouped_customers"],
             "is_fraud",
-            "leaklens grouped_customers.csv --target is_fraud --group customer_id",
+            "leaklens examples/data/grouped_customers.csv --target is_fraud --group customer_id",
             group_col="customer_id",
         ),
     ]
@@ -471,7 +518,7 @@ def build() -> dict:
             "overlap and the CLI exits with code 1.",
             train,
             test,
-            "leaklens train.csv --test test.csv --target is_fraud",
+            "leaklens examples/data/train.csv --test examples/data/test.csv --target is_fraud",
         ),
         _overlap_fixture(
             "overlap_near",
@@ -480,7 +527,7 @@ def build() -> dict:
             "hide the same rows. The normalised check catches them.",
             near_train,
             near_test,
-            "leaklens train.csv --test test.csv --target is_fraud",
+            "leaklens examples/data/near_train.csv --test examples/data/near_test.csv --target is_fraud",
         ),
     ]
 
@@ -525,6 +572,10 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     text = render(build())
     if "--check" in argv:
+        stale = stale_data()
+        if stale:
+            print(f"stale demo data: {', '.join(stale)}")
+            return 1
         if not OUT.exists() or OUT.read_text(encoding="utf-8") != text:
             print(f"stale fixtures: {OUT.relative_to(ROOT)}")
             return 1
@@ -533,6 +584,8 @@ def main(argv: list[str] | None = None) -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {OUT.relative_to(ROOT)} ({len(text):,} bytes)")
+    for path in write_data():
+        print(f"wrote {path.relative_to(ROOT)}")
     return 0
 
 

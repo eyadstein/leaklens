@@ -520,7 +520,7 @@ export const fixtures = {
           "is_fraud": 0
         }
       ],
-      "command": "leaklens leaky_transactions.csv --target is_fraud",
+      "command": "leaklens examples/data/leaky_transactions.csv --target is_fraud",
       "findings": [
         {
           "severity": "high",
@@ -627,7 +627,7 @@ export const fixtures = {
           "is_fraud": 0
         }
       ],
-      "command": "leaklens clean_transactions.csv --target is_fraud",
+      "command": "leaklens examples/data/clean_transactions.csv --target is_fraud",
       "findings": [],
       "counts": {
         "high": 0,
@@ -690,7 +690,7 @@ export const fixtures = {
           "is_fraud": 0
         }
       ],
-      "command": "leaklens grouped_customers.csv --target is_fraud --group customer_id",
+      "command": "leaklens examples/data/grouped_customers.csv --target is_fraud --group customer_id",
       "findings": [
         {
           "severity": "medium",
@@ -794,7 +794,7 @@ export const fixtures = {
           "is_fraud": 0
         }
       ],
-      "command": "leaklens train.csv --test test.csv --target is_fraud",
+      "command": "leaklens examples/data/train.csv --test examples/data/test.csv --target is_fraud",
       "findings": [
         {
           "severity": "high",
@@ -2350,7 +2350,7 @@ export const fixtures = {
           "is_fraud": 0
         }
       ],
-      "command": "leaklens train.csv --test test.csv --target is_fraud",
+      "command": "leaklens examples/data/near_train.csv --test examples/data/near_test.csv --target is_fraud",
       "findings": [
         {
           "severity": "medium",

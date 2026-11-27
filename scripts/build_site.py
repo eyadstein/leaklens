@@ -466,6 +466,14 @@ def run(check_only: bool) -> int:
         FIXTURES.parent.mkdir(parents=True, exist_ok=True)
         FIXTURES.write_text(rendered, encoding="utf-8", newline="\n")
         print(f"wrote docs/assets/fixtures.mjs ({FIXTURES.stat().st_size:,} bytes)")
+        for path in build_site_fixtures.write_data():
+            print(f"wrote {path.relative_to(ROOT)}")
+    else:
+        stale = build_site_fixtures.stale_data()
+        if stale:
+            fail(
+                f"stale demo data: {', '.join(stale)}; run python scripts/build_site.py"
+            )
     check_fixture_freshness(rendered)
     check_site_structure(payload)
     fixture_ids = {
