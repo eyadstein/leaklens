@@ -1,7 +1,9 @@
 """Tests for release tag/version, distribution completeness and workflow refs."""
 
 import io
+import os
 import re
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
@@ -152,6 +154,50 @@ def test_manual_dispatch_from_branch_rejected():
 def test_release_event_ref_must_match_tag():
     with pytest.raises(ValueError, match="does not match tag"):
         validate("v0.13.0", "0.13.0", "release", "refs/tags/v0.12.9")
+
+
+def test_release_workflow_uses_commit_date_for_annotated_and_lightweight_tags(
+    tmp_path,
+):
+    workflow = _text("release.yml")
+    workflow_command = 'release_date="$(git log -1 --format=%cs "$TAG")"'
+    assert workflow_command in workflow, (
+        "release workflow must derive the date with git log --format=%cs"
+    )
+
+    def git(*args, env=None):
+        result = subprocess.run(
+            ["git", *args],
+            cwd=tmp_path,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip()
+
+    git("init", "--quiet")
+    git("config", "user.name", "LeakLens Tests")
+    git("config", "user.email", "tests@example.invalid")
+    (tmp_path / "source.txt").write_text("release source\n", encoding="utf-8")
+    git("add", "source.txt")
+
+    commit_env = os.environ.copy()
+    commit_env.update(
+        {
+            "GIT_AUTHOR_DATE": "2026-01-02T12:00:00+00:00",
+            "GIT_COMMITTER_DATE": "2026-01-02T12:00:00+00:00",
+        }
+    )
+    git("commit", "--quiet", "-m", "release commit", env=commit_env)
+    git("tag", "lightweight-tag")
+    git("tag", "--annotate", "annotated-tag", "--message", "annotated release tag")
+
+    assert git("cat-file", "-t", "lightweight-tag") == "commit"
+    assert git("cat-file", "-t", "annotated-tag") == "tag"
+
+    for tag in ("lightweight-tag", "annotated-tag"):
+        assert git("log", "-1", "--format=%cs", tag) == "2026-01-02"
 
 
 def test_cli_accepts_valid_tag(tmp_path, capsys):
