@@ -23,7 +23,7 @@ GitHub Pages (static)                     Optional free backend
 │ docs/live.html          │ ───────────▶ │ leaklens.public_api:app      │
 │ docs/assets/live.js     │              │ FastAPI, 1 uvicorn worker    │
 │ docs/assets/live-engine │ ◀─────────── │ real LeakLens detectors      │
-└─────────────────────────┘   JSON       │ in-memory uploads only       │
+└─────────────────────────┘   JSON       │ no stored uploads            │
         │                                └──────────────────────────────┘
         │ no backend configured
         ▼
@@ -98,7 +98,10 @@ Then open `docs/live.html` through a local static server and enter
 
 `python -m leaklens.api` starts the legacy developer API (the app behind the
 default `Dockerfile`, including `/predict`) with the same host, port and log
-settings. The hardened app is the one the live page talks to.
+settings. The hardened app is the one the live page talks to. The legacy app is
+a local developer surface: it has no client authentication, no CORS policy, no
+rate limit and no request-body cap, and `/predict` loads a pickle from a path
+the operator fixes. Do not expose it to anyone else.
 
 Host, port and log level are read from the environment; nothing is required:
 
@@ -134,13 +137,16 @@ Streamlit UI together. It is not required to run the backend.
 
 ```sh
 docker build -f Dockerfile.api -t leaklens-api .
-docker run --rm -p 8000:8000 leaklens-api
+docker run --rm -p 127.0.0.1:8000:8000 leaklens-api
 ```
 
 `docker compose up --build` runs the API on port 8000 and the Streamlit UI on
-8501. The images run as unprivileged uid `10001` and healthcheck `/health`.
-Environment variables behave exactly as they do natively; the containers bind
-`0.0.0.0` through uvicorn flags because a container must accept traffic.
+8501, both published on loopback only. The API has no client authentication, so
+do not widen the mapping to `-p 8000:8000` unless an authenticating proxy sits
+in front of it. The images run as unprivileged uid `10001` and healthcheck
+`/health`. Environment variables behave exactly as they do natively; inside the
+container uvicorn binds `0.0.0.0` because a container must accept traffic,
+while the published host port stays on `127.0.0.1`.
 
 During the phase 3.1 verification pass, `Dockerfile.api` was built and run
 locally against Docker Desktop's Linux engine. The image ran as uid 10001, the
@@ -154,21 +160,61 @@ Render deployment.
   way in a single process: the rate limiter and the `ScanRunner` slot are
   in-process. Scale by running more instances behind a proxy, not by adding
   workers to one process.
-* There is **no client authentication**. Never bind it to a public interface
-  directly: keep `LEAKLENS_HOST=127.0.0.1` and put it behind a proxy you
-  control, or use the Render option below. Binding elsewhere prints a warning.
+* There is **no client authentication** and no authorization model: every route
+  is public, and anyone who can reach the port can upload, scan and read the
+  results. Keep `LEAKLENS_HOST=127.0.0.1` and put it behind a proxy you control.
+  Binding elsewhere prints a warning but does not add protection.
 * Behind a reverse proxy, set `LEAKLENS_TRUST_PROXY=1` so rate limits key on the
-  forwarded client, and forward headers with
-  `python -m uvicorn leaklens.public_api:app --proxy-headers`. Trust the proxy
-  only when it overwrites `X-Forwarded-For`.
-* Size the instance from the limits: uploads are parsed in memory, so a 4 MiB
-  file plus a 30 s scan needs headroom. Lower `LEAKLENS_PUBLIC_MAX_BYTES`,
-  `..._MAX_ROWS` and `..._TIMEOUT_SECONDS` on small machines.
-* No temporary files are written, so native and container runs need no writable
-  data volume.
+  forwarded client. The limiter reads the **last** `X-Forwarded-For` entry — the
+  hop appended by the proxy nearest the app — so a client cannot choose its own
+  bucket with a forged prefix. Forward and overwrite the header at the proxy;
+  trusting a header that clients can set defeats the limit.
+* Size the instance from the limits: parsing holds one file per in-flight
+  request, so a 4 MiB upload plus a 30 s scan needs headroom. Lower
+  `LEAKLENS_PUBLIC_MAX_BYTES`, `..._MAX_ROWS` and `..._TIMEOUT_SECONDS` on small
+  machines.
+* Uploads are read into a bounded buffer and are never persisted. A file larger
+  than 1 MiB is spooled by the web framework to a per-request OS temporary file
+  and closed when the request ends. No data volume is needed, but the temp
+  directory (`TMPDIR`/`TEMP`) must be writable, private to the service account
+  and large enough for simultaneous uploads (each at most
+  `LEAKLENS_PUBLIC_MAX_BYTES`).
 * Run it under your platform's process supervisor (systemd, Task Scheduler, a
   container orchestrator) if it must survive logout. Running the module does not
   make the service production-hardened by itself.
+
+### Exposure, authentication and reverse proxies
+
+Match the configuration to who must reach the API:
+
+| Scope | What to do |
+|---|---|
+| One person, same machine | Default loopback bind; no credentials. |
+| Private team | Keep the loopback bind and use an SSH tunnel or VPN, **or** add a proxy that authenticates every request (basic auth, OIDC, mTLS). LeakLens has no accounts, API keys or tokens of its own. |
+| Public internet | HTTPS plus an authenticating proxy plus per-client limits and body caps at the proxy. Do not expose `python -m leaklens.public_api` directly. |
+| Behind an authenticated proxy | Enforce authentication at the proxy for every path, including `/health` and `/openapi.json` if they should not be public, then pass only the headers listed below. |
+
+* **HTTPS is required off loopback.** Uploads and findings travel in plaintext
+  over HTTP, and the page refuses non-localhost `http://` origins. Terminate TLS
+  at the proxy; the app emits HSTS only when it sees an `https` scheme, which
+  requires `--proxy-headers` (or an equivalent trusted-proxy setting).
+* **Trusted headers.** Enable `LEAKLENS_TRUST_PROXY` only when a proxy you
+  control sets `X-Forwarded-For`. `X-Forwarded-Proto` is honoured solely through
+  uvicorn's `--proxy-headers`. Never start uvicorn with
+  `--forwarded-allow-ips "*"` on a port that clients can reach directly.
+  `Dockerfile.api` uses that flag because Render terminates TLS in front of an
+  unpublished container port; if you publish the container yourself, keep the
+  host mapping on loopback as shown above, or drop the flag.
+* **Host header.** The app does not validate `Host`. Configure the proxy with
+  its public server name and let it reject unknown hosts; trailing-slash
+  redirects otherwise echo whatever the client sent.
+* **Rate limits are process-local.** Each instance keeps its own in-memory
+  buckets (default 20 requests/60 s per client, 2,048 keys). A proxy limit is
+  the only limit that survives restarts and spans instances.
+* **Development settings are not production settings.** `LEAKLENS_ENABLE_DOCS`
+  is off by default; `LEAKLENS_ALLOW_LOCAL_ORIGINS` only exists for local page
+  development; the permissive CORS wildcard (`LEAKLENS_ALLOWED_ORIGINS=*`) is
+  for a browser client you control, not for authentication.
 
 ### Troubleshooting
 
@@ -211,8 +257,9 @@ Verified in November 2026 against <https://render.com/docs/free> and
   the service actually sleeps).
 * Spins down after **15 minutes without traffic**; the next request pays a
   cold start of roughly **one minute**.
-* **Ephemeral filesystem** and no persistent disk. Uploads are never written to
-  disk anyway.
+* **Ephemeral filesystem** and no persistent disk. Uploads are never retained;
+  only transient per-request spool files exist, and they are closed when the
+  request ends.
 * Free instances are not suitable for sustained load or large datasets.
 
 Other hosts were checked and are not free for this use case at the time of
@@ -267,7 +314,7 @@ A local Docker run is equivalent:
 
 ```sh
 docker build -f Dockerfile.api -t leaklens-api .
-docker run --rm -p 8000:8000 leaklens-api
+docker run --rm -p 127.0.0.1:8000:8000 leaklens-api
 ```
 
 ### Cold starts, busy and timeouts
@@ -299,8 +346,8 @@ retry action, never to a fake result.
 | `LEAKLENS_PUBLIC_FORMATS` | `csv,json` | Comma-separated; enabling optional formats requires the parser extra |
 | `LEAKLENS_ALLOWED_ORIGINS` | `https://eyadstein.github.io` | Comma-separated CORS origins |
 | `LEAKLENS_ALLOW_LOCAL_ORIGINS` | `1` | Permit `http://localhost:*` during development |
-| `LEAKLENS_TRUST_PROXY` | `0` | Trust `X-Forwarded-For` for rate limiting (set `1` behind Render) |
-| `LEAKLENS_ENABLE_DOCS` | `0` | Serve `/docs` and `/openapi.json` |
+| `LEAKLENS_TRUST_PROXY` | `0` | Trust the last `X-Forwarded-For` hop for rate limiting (set `1` behind Render) |
+| `LEAKLENS_ENABLE_DOCS` | `0` | Serve `/docs` and `/openapi.json`; the Swagger UI itself is blocked by the app's CSP (see limitations) |
 
 CSV and JSON are available with the base dependencies. `.xlsx` needs
 `pip install "leaklens-ml[excel]"`, and `.parquet` / `.feather` need
@@ -326,14 +373,17 @@ Uploads are treated as hostile input:
 * **Bounded parsing.** Rows, columns and cells are capped before detectors run.
   Plain CSV parsing exits early with `nrows`; the frame is validated again
   after parsing because a parser may expand a compact file.
-* **Bounded memory.** Files are read in 64 KiB chunks into an in-memory buffer
-  for one request, never written to disk, never persisted, never shared between
+* **Bounded memory and temp storage.** Files are read in 64 KiB chunks into a
+  bounded buffer for one request. Above 1 MiB, the multipart parser spools the
+  file to a per-request OS temporary file that is closed on every success,
+  rejection and parse-error path; nothing is persisted or shared between
   requests. The upload handle is closed even when reading fails.
 * **Serialised work.** One `ScanRunner` slot runs scans; overlapping requests
   get `503 scan_busy`. A timed-out worker keeps the slot until it actually
   finishes, so a timeout cannot silently pile up work.
 * **Rate limiting.** A bounded sliding-window limiter caps expensive POSTs per
-  client and evicts stale/forged keys instead of growing without limit.
+  client and evicts stale/forged keys instead of growing without limit. It is
+  process-local, not a distributed or authenticated control.
 * **Generic errors.** Parser exceptions, filesystem paths, stack traces and
   internal messages never reach clients; unexpected failures return a generic
   `500`. The response contains only the findings for that request.
@@ -359,6 +409,9 @@ except on localhost.
   result include the version.
 * A browser cancel aborts the HTTP request but cannot kill work already running
   on the backend; the backend still enforces its timeout.
+* `LEAKLENS_ENABLE_DOCS=1` serves a valid `/openapi.json`, but the bundled
+  Swagger UI page at `/docs` loads its assets from a CDN and is blocked by the
+  app's own `Content-Security-Policy`. Use the JSON with a local OpenAPI client.
 * The mobile layout, error states and offline fallback are covered by the site
   checks and the live-engine tests, but a real deployed backend is not exercised
   by CI.

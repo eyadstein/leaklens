@@ -9,6 +9,14 @@
   it; invalid values exit 2 with a message. Docker and Docker Compose remain
   supported. A core-only install still does not pull FastAPI, Uvicorn or
   Starlette, and a missing extra now names `leaklens-ml[api]`.
+- **Safer deployment defaults.** Docker Compose publishes the API and UI on
+  `127.0.0.1` only, and `Dockerfile.api` pins the same base image as
+  `Dockerfile`. Rate limiting behind a proxy keys on the nearest
+  `X-Forwarded-For` hop, so a forged prefix cannot buy a fresh bucket. The
+  `/audit` request cap covers two uploads plus a graph baseline, and the docs
+  now state that an upload above 1 MiB uses a per-request temporary file.
+  `LIVE_SCANNING.md` documents authentication duties, HTTPS, trusted headers and
+  the process-local limits; the API still has no client authentication.
 
 ## 0.14.0
 

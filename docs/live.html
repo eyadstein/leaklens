@@ -299,7 +299,7 @@ python -m leaklens.public_api</code></pre>
       <section class="live-side-card">
         <h2>What happens to the file</h2>
         <ul class="live-list">
-          <li>Parsed in memory for one request; never written to disk by LeakLens.</li>
+          <li>Parsed for one request and never retained. Above 1 MiB the web framework holds the file in a temporary file that is closed when the request ends.</li>
           <li>Size, row, column and cell limits are checked before detection.</li>
           <li>The backend validates content, not the filename or MIME type.</li>
           <li>No account, no tracking, no permanent dataset storage.</li>

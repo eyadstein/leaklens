@@ -404,7 +404,7 @@ python -m pip install "leaklens-ml[api]"
 python -m leaklens.public_api            # http://127.0.0.1:8000/health
 ```
 
-`LEAKLENS_HOST` (default `127.0.0.1`), `LEAKLENS_PORT` (default `8000`) and `LEAKLENS_LOG_LEVEL` change the bind; see [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) for limits, reverse-proxy and Docker instructions.
+`LEAKLENS_HOST` (default `127.0.0.1`), `LEAKLENS_PORT` (default `8000`) and `LEAKLENS_LOG_LEVEL` change the bind; see [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) for limits, reverse-proxy and Docker instructions. The API has no client authentication: keep it on loopback or put it behind an authenticating proxy before anyone else can reach the port.
 
 If an optional dependency is missing, the command raises an `ImportError` that names the extra, and `leaklens doctor` lists which extras are importable. The base install remains fully usable. Scanning is offline and CPU-first by default; only an explicitly configured remote `--llm` provider, an install command or an MLflow run you start uses the network.
 
