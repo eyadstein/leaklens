@@ -12,9 +12,11 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
+from starlette import formparsers
 
 from leaklens import __version__
 from leaklens.public_api import (
+    MAX_GRAPH_SNAPSHOT_BYTES,
     MAX_SOURCE_BYTES,
     PAGES_ORIGIN,
     BodyLimitMiddleware,
@@ -22,6 +24,7 @@ from leaklens.public_api import (
     ScanBusy,
     ScanRunner,
     ScanTimeout,
+    _client_key,
     _read_bounded,
     create_app,
 )
@@ -694,6 +697,68 @@ def test_rate_limit_reads_are_not_restricted():
         test_client.app.state.runner.close()
 
 
+def test_forwarded_for_uses_the_nearest_hop():
+    scope = {
+        "type": "http",
+        "headers": [(b"x-forwarded-for", b"9.9.9.9, 203.0.113.9")],
+        "client": ("10.0.0.1", 1),
+    }
+    assert _client_key(scope, True) == "203.0.113.9"
+    assert _client_key(scope, False) == "10.0.0.1"
+
+
+def test_spoofed_forwarded_prefix_cannot_buy_a_new_bucket():
+    test_client = client_for(settings(rate_limit_requests=1, trust_proxy=True))
+    try:
+        first = test_client.post(
+            "/scan",
+            json={"source": "x = 1\n"},
+            headers={"X-Forwarded-For": "1.1.1.1, 203.0.113.9"},
+        )
+        second = test_client.post(
+            "/scan",
+            json={"source": "x = 1\n"},
+            headers={"X-Forwarded-For": "2.2.2.2, 203.0.113.9"},
+        )
+    finally:
+        test_client.app.state.runner.close()
+    assert first.status_code == 200
+    assert second.status_code == 429
+
+
+def test_request_budget_covers_two_uploads_and_the_largest_arriving_baseline():
+    config = settings()
+    # Starlette caps a non-file multipart part at 1 MiB, so that is the most a
+    # graph baseline can add to an /audit request.
+    assert config.max_request_bytes >= config.max_bytes * 2 + 1024 * 1024
+    assert MAX_GRAPH_SNAPSHOT_BYTES >= 1024 * 1024
+
+
+def test_upload_over_one_mib_uses_a_temp_file_closed_after_the_request(monkeypatch):
+    created = []
+    original = formparsers.SpooledTemporaryFile
+
+    class Tracking(original):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created.append(self)
+
+    monkeypatch.setattr(formparsers, "SpooledTemporaryFile", Tracking)
+    rows = "\n".join(f"a{i},{'x' * 30_000}" for i in range(40))
+    payload = f"a,b\n{rows}\n".encode()
+    assert len(payload) > 1024 * 1024
+    test_client = client_for(settings(max_bytes=2 * 1024 * 1024))
+    try:
+        response = test_client.post(
+            "/inspect", files={"file": ("big.csv", payload, "text/csv")}
+        )
+    finally:
+        test_client.app.state.runner.close()
+    assert response.status_code == 200
+    assert any(tempfile._rolled for tempfile in created)
+    assert all(tempfile.closed for tempfile in created)
+
+
 def test_timeout_returns_504_and_busy_until_the_worker_finishes(monkeypatch):
     release = threading.Event()
     started = threading.Event()
@@ -1003,7 +1068,7 @@ def test_settings_from_env_parses_formats_and_origins(monkeypatch):
     config = PublicSettings.from_env()
     assert config.formats == ("csv", "xlsx")
     assert config.allowed_origins == ("https://one.example", "http://localhost:3000")
-    assert config.max_request_bytes == config.max_bytes * 2 + 512 * 1024
+    assert config.max_request_bytes == config.max_bytes * 2 + MAX_GRAPH_SNAPSHOT_BYTES
 
 
 def test_settings_reject_an_empty_format_and_origin_list(monkeypatch):

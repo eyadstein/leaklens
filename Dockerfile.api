@@ -1,11 +1,11 @@
 # Hardened LeakLens live-scan API.
 #
 # Build:  docker build -f Dockerfile.api -t leaklens-api .
-# Run:    docker run --rm -p 8000:8000 leaklens-api
+# Run:    docker run --rm -p 127.0.0.1:8000:8000 leaklens-api
 #
 # This image runs the public app only.  It deliberately does not include the
 # legacy developer API (/predict) or the Streamlit UI.
-FROM python:3.11-slim
+FROM python:3.11.18-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

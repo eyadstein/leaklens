@@ -2,14 +2,16 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      # Loopback only: the API has no client authentication, so publishing on
+      # all interfaces would expose it to the LAN. See docs/LIVE_SCANNING.md.
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./models:/app/models
   ui:
     build: .
     command: ["streamlit", "run", "/app/leaklens/ui.py", "--server.port=8501", "--server.address=0.0.0.0"]
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     volumes:
       - ./models:/app/models
     # The image healthcheck probes the API on :8000; this service runs Streamlit.

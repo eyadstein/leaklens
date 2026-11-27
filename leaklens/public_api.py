@@ -10,9 +10,11 @@ endpoint.  The public app exposes only bounded, stateless scans:
 * ``POST /audit``        run the real dataset detectors (optional held-out file)
 * ``POST /scan``         run the real static scanner on Python source
 
-Uploads are read into a bounded in-memory buffer for the lifetime of one
-request and are never written to disk or retained.  All errors are generic;
-parser internals, filesystem paths and stack traces never reach the client.
+Uploads are read into a bounded buffer for the lifetime of one request.  A
+file larger than the multipart spool threshold (1 MiB) is held in a
+per-request OS temporary file that is closed when the request ends; nothing is
+retained or persisted.  All errors are generic; parser internals, filesystem
+paths and stack traces never reach the client.
 """
 
 from __future__ import annotations
@@ -167,8 +169,10 @@ class PublicSettings:
 
     @property
     def max_request_bytes(self) -> int:
-        # One optional held-out dataset can arrive beside the primary upload.
-        return self.max_bytes * 2 + 512 * 1024
+        # Two uploads (primary + held-out) plus the largest accepted graph
+        # baseline.  The baseline is a multipart form field, so the web
+        # framework additionally caps a single part at 1 MiB.
+        return self.max_bytes * 2 + MAX_GRAPH_SNAPSHOT_BYTES
 
     def public_limits(self) -> dict[str, Any]:
         data = self.limits.to_public_dict()
@@ -309,8 +313,11 @@ def _cors_headers(scope: Scope, settings: PublicSettings) -> dict[str, str]:
 def _client_key(scope: Scope, trust_proxy: bool) -> str:
     headers = Headers(scope=scope)
     if trust_proxy:
-        forwarded = headers.get("x-forwarded-for", "")
-        candidate = forwarded.split(",")[0].strip()
+        # Repeated headers are joined, then the last hop is used: that entry
+        # belongs to the proxy nearest us.  A client-supplied prefix cannot
+        # pick a fresh rate-limit bucket per request.
+        forwarded = ",".join(headers.getlist("x-forwarded-for"))
+        candidate = forwarded.split(",")[-1].strip()
         if _IP_CHARS.match(candidate):
             return candidate
     client = scope.get("client")
@@ -1029,8 +1036,10 @@ def create_app(
                 },
             },
             "privacy": (
-                "Uploads are parsed in memory for one request, never written to "
-                "disk, and never retained. Responses contain only your findings."
+                "Uploads are parsed for one request and never retained. A file "
+                "larger than 1 MiB is held by the web framework in a per-request "
+                "temporary file that is closed when the request ends; nothing is "
+                "persisted. Responses contain only your findings."
             ),
             "storage": "none",
         }

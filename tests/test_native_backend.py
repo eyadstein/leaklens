@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -87,6 +88,21 @@ def test_native_and_docker_run_the_same_application():
         assert imported.app is not None, module
         source = Path(imported.__file__).read_text(encoding="utf-8")
         assert 'if __name__ == "__main__":' in source, module
+
+
+def test_published_ports_and_base_images_are_pinned_and_loopback():
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    published = re.findall(r'^\s*-\s*"([^"]+)"\s*$', compose, re.MULTILINE)
+    assert published
+    for mapping in published:
+        # The API has no client authentication; publishing beyond loopback
+        # would expose it to the host's network.
+        assert mapping.startswith("127.0.0.1:"), mapping
+    for dockerfile in ("Dockerfile", "Dockerfile.api"):
+        text = (ROOT / dockerfile).read_text(encoding="utf-8")
+        base = re.search(r"^FROM\s+(\S+)", text, re.MULTILINE)
+        assert base is not None, dockerfile
+        assert re.search(r":\d+\.\d+\.\d+-", base.group(1)), base.group(1)
 
 
 def test_serve_defaults_to_loopback(monkeypatch, capsys):
