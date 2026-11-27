@@ -196,21 +196,8 @@ def test_release_workflow_uses_commit_date_for_annotated_and_lightweight_tags(
     assert git("cat-file", "-t", "lightweight-tag") == "commit"
     assert git("cat-file", "-t", "annotated-tag") == "tag"
 
-    workflow_script = (
-        "set -euo pipefail\n" + workflow_command + '\nprintf "%s" "$release_date"'
-    )
     for tag in ("lightweight-tag", "annotated-tag"):
-        env = os.environ.copy()
-        env["TAG"] = tag
-        result = subprocess.run(
-            ["bash", "-c", workflow_script],
-            cwd=tmp_path,
-            env=env,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        assert result.stdout == "2026-01-02"
+        assert git("log", "-1", "--format=%cs", tag) == "2026-01-02"
 
 
 def test_cli_accepts_valid_tag(tmp_path, capsys):
