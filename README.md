@@ -225,7 +225,7 @@ JSON reports carry `$schema`; `leaklens schema` prints the contract. Details: [d
 
 ## Installation
 
-The PyPI package is `leaklens-ml`; the installed command is `leaklens`. The floor is Python 3.10 (`requires-python`), and CI runs 3.10, 3.11, 3.12 and 3.14 on Linux. Python 3.13 is outside the matrix and is not claimed as verified. The package is pure Python and installs on Windows, Linux and macOS. On Windows use `py -3 -m pip ...` if `python` is not on PATH; if pip reports `externally-managed-environment`, create a virtual environment first.
+The PyPI package is `leaklens-ml`; the installed command is `leaklens`. The floor is Python 3.10 (`requires-python`), and CI runs 3.10, 3.11, 3.12 and 3.14 on Linux, plus the native backend startup test on Windows and macOS. Python 3.13 is outside the matrix and is not claimed as verified. The package is pure Python and installs on Windows, Linux and macOS. On Windows use `py -3 -m pip ...` if `python` is not on PATH; if pip reports `externally-managed-environment`, create a virtual environment first.
 
 Optional extras:
 
@@ -393,9 +393,18 @@ The base install covers CSV/JSON/JSONL datasets, code scanning, split checks and
 | Image near-duplicates | `leaklens images` | `[images]` | exit 1 on a high-severity finding |
 | SQL lineage | `--sql` | `[sql]` | exit 1 on a high-severity finding |
 | Model arena | `--arena` | `[arena]` | writes `models/best.joblib` |
-| API, UI, workspace | `uvicorn`, `streamlit`, `leaklens workspace` | `[app]` | not a scan gate |
-| Public live-scan API | `uvicorn leaklens.public_api:app` | `[api]` | not a scan gate |
+| API, UI, workspace | `python -m leaklens.api`, `streamlit`, `leaklens workspace` | `[app]` | not a scan gate |
+| Public live-scan API | `python -m leaklens.public_api` (or `uvicorn leaklens.public_api:app`) | `[api]` | not a scan gate |
 | LLM explanations | `--llm` | local Ollama by default | never changes findings, score or exit |
+
+The API runs natively with Python; Docker is an optional deployment choice:
+
+```sh
+python -m pip install "leaklens-ml[api]"
+python -m leaklens.public_api            # http://127.0.0.1:8000/health
+```
+
+`LEAKLENS_HOST` (default `127.0.0.1`), `LEAKLENS_PORT` (default `8000`) and `LEAKLENS_LOG_LEVEL` change the bind; see [docs/LIVE_SCANNING.md](docs/LIVE_SCANNING.md) for limits, reverse-proxy and Docker instructions.
 
 If an optional dependency is missing, the command raises an `ImportError` that names the extra, and `leaklens doctor` lists which extras are importable. The base install remains fully usable. Scanning is offline and CPU-first by default; only an explicitly configured remote `--llm` provider, an install command or an MLflow run you start uses the network.
 

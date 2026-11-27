@@ -84,13 +84,14 @@
         </form>
         <div class="live-offline" data-offline hidden>
           <strong>No backend connected. Nothing is being scanned.</strong>
-          <p data-offline-detail>This GitHub Pages build is static. Run the API locally or deploy the documented service, then connect its URL above.</p>
+          <p data-offline-detail>This GitHub Pages build is static. Run the API locally with Python (Docker is optional) or deploy the documented service, then connect its URL above.</p>
           <p class="live-offline-actions">
             <a href="demo.html">Open the prerecorded demo</a>
             <a href="docs.html#api">Read the API docs</a>
             <a href="https://github.com/eyadstein/leaklens/blob/main/docs/LIVE_SCANNING.md" rel="noopener">Deployment and limits</a>
           </p>
-          <pre><code>uvicorn leaklens.public_api:app --port 8000</code></pre>
+          <pre><code>pip install "leaklens-ml[api]"
+python -m leaklens.public_api</code></pre>
         </div>
       </section>
 

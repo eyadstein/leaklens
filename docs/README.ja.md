@@ -356,8 +356,8 @@ reason = "accepted: the column is recorded before prediction"
 | 近似重複画像 | `leaklens images` | `[images]` | 重大度「高」の検出結果で終了コード 1 |
 | SQL リネージ | `--sql` | `[sql]` | 重大度「高」の検出結果で終了コード 1 |
 | モデルアリーナ | `--arena` | `[arena]` | `models/best.joblib` を書き出す |
-| API、UI、ワークスペース | `uvicorn`、`streamlit`、`leaklens workspace` | `[app]` | スキャンゲートではない |
-| 公開ライブスキャン API | `uvicorn leaklens.public_api:app` | `[api]` | スキャンゲートではない |
+| API、UI、ワークスペース | `python -m leaklens.api`、`streamlit`、`leaklens workspace` | `[app]` | スキャンゲートではない |
+| 公開ライブスキャン API | `python -m leaklens.public_api` | `[api]` | スキャンゲートではない |
 | LLM による説明 | `--llm` | 既定ではローカル Ollama | 検出結果、スコア、終了コードを変えない |
 
 オプション依存関係が不足している場合、コマンドは追加依存関係の名前を含む `ImportError` を発生させ、`leaklens doctor` がインポート可能な追加依存関係を一覧表示します。基本インストールは引き続き完全に利用できます。スキャンは既定でオフラインかつ CPU 優先です。ネットワークを使うのは、明示的に設定したリモートの `--llm` プロバイダー、インストールコマンド、または自分で開始した MLflow の実行だけです。

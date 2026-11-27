@@ -356,8 +356,8 @@ reason = "accepted: the column is recorded before prediction"
 | الصور القريبة من التكرار | `leaklens images` | `[images]` | الخروج بالرمز 1 عند نتيجة عالية الخطورة |
 | تتبّع مصدر SQL | `--sql` | `[sql]` | الخروج بالرمز 1 عند نتيجة عالية الخطورة |
 | ساحة النماذج | `--arena` | `[arena]` | يكتب `models/best.joblib` |
-| API والواجهة ومساحة العمل | `uvicorn` و`streamlit` و`leaklens workspace` | `[app]` | ليست بوابة فحص |
-| واجهة الفحص المباشر العامة | `uvicorn leaklens.public_api:app` | `[api]` | ليست بوابة فحص |
+| API والواجهة ومساحة العمل | `python -m leaklens.api` و`streamlit` و`leaklens workspace` | `[app]` | ليست بوابة فحص |
+| واجهة الفحص المباشر العامة | `python -m leaklens.public_api` | `[api]` | ليست بوابة فحص |
 | شروح LLM | `--llm` | Ollama محلي افتراضياً | لا تغيّر النتائج أو الدرجة أو رمز الخروج |
 
 إذا غابت اعتمادية اختيارية، يرفع الأمر `ImportError` يسمّي الحزمة، ويسرد `leaklens doctor` الحزم القابلة للاستيراد. ويبقى التثبيت الأساسي صالحاً بالكامل. الفحص دون اتصال ويعمل على المعالج أولاً افتراضياً؛ ولا يستخدم الشبكة إلا مزوّد `--llm` بعيد يُضبط صراحةً، أو أمر تثبيت، أو تشغيل MLflow تبدأه أنت.

@@ -45,6 +45,7 @@ Single test: `pytest tests/test_scanner.py -q`. Every PR must pass all three (se
 | Opt-in drift diagnostics | `leaklens/drift.py`; benchmark `leaklens/bench_drift.py` + `docs/DRIFT_BENCHMARK.md`; docs `docs/DRIFT.md` |
 | Dataset input dispatch | `leaklens/readers.py` — suffix → pandas reader |
 | Model arena (MLflow) | `leaklens/arena.py`; API `leaklens/api.py`; UI `leaklens/ui.py` |
+| Native backend entry points | `leaklens/serve.py` (`python -m leaklens.api`, `python -m leaklens.public_api`; `LEAKLENS_HOST`/`LEAKLENS_PORT`/`LEAKLENS_LOG_LEVEL`); Dockerfiles run the same `app` objects |
 | Interactive scan workspace | `leaklens/workspace.py` (FastAPI app + scan session), `leaklens/workspace_ui.py` (page), `leaklens/cli.py` (`workspace` subcommand) |
 | Deterministic intelligence layer | `leaklens/intelligence/` (`orchestrator.py`, `schemas.py`) |
 | Reports / exports | `leaklens/report.py` (HTML), `leaklens/sarif.py` (SARIF), `leaklens/fixes.py` (`--explain`) |
@@ -79,4 +80,4 @@ New detectors: data → `leakage.py`, code → `scanner.py`, SQL → `sqlscan.py
 - **`POST /predict`** never accepts a request-selected model. The server loads `LEAKLENS_MODEL_PATH` (default `models/best.joblib`) and returns 422 for any other `model_path` before touching the filesystem. Pickle artifacts are trusted operator input only.
 - **Paths from requests** go through `paths.resolve_within`; it refuses foreign drives/anchor (UNC, device paths) before `Path.resolve()`, so a rejected path cannot trigger network resolution.
 - **Benchmark**: `python -m leaklens.bench` output goes to `docs/BENCHMARK.md`; treat as regression guard, not accuracy claim. The AI benchmark is `python -m leaklens.bench_ai` → `docs/AI_BENCHMARK.md`; report its measured numbers, never an improvement claim.
-- Live demo: `python examples/make_demo.py && leaklens demo.csv --target is_fraud --arena`. API: `uvicorn leaklens.api:app --port 8000`; UI: `streamlit run leaklens/ui.py`; Docker: `docker compose up --build` (API :8000, UI :8501).
+- Live demo: `python examples/make_demo.py && leaklens demo.csv --target is_fraud --arena`. API: `python -m leaklens.api` (or `uvicorn leaklens.api:app`); UI: `streamlit run leaklens/ui.py`; Docker: `docker compose up --build` (API :8000, UI :8501).

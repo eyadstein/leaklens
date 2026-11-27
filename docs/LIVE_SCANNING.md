@@ -9,11 +9,11 @@ only renders findings returned over HTTP by a real
 `leaklens.public_api:app` backend that you configure. When no backend is
 configured, the page stays in an explicit “No backend connected” state.
 
-> **Deployment status:** the repository ships the hardened backend, a Docker
-> image, a Render Blueprint, tests and this document, but **no public backend is
-> deployed by this project**. The hosted page is disconnected until someone
-> deploys the service and supplies its URL. Nothing in the repository or the
-> website claims otherwise.
+> **Deployment status:** the repository ships the hardened backend, native
+> Python startup, a Docker image, a Render Blueprint, tests and this document,
+> but **no public backend is deployed by this project**. The hosted page is
+> disconnected until someone deploys the service and supplies its URL. Nothing
+> in the repository or the website claims otherwise.
 
 ## Architecture
 
@@ -58,24 +58,62 @@ The `/audit` response contains `live`, `engine`, `trust_score`, `findings`
 renderer the CLI uses. No metric is invented: `impact` contains measured split
 statistics, not estimates of model-performance loss.
 
-## Local run
+## Run the backend
+
+Two deployment choices run the **same** FastAPI apps from `leaklens.public_api`
+and `leaklens.api` with the same environment configuration. Native Python is the
+default; Docker is optional.
+
+### Option A — native Python (no Docker)
+
+Create a virtual environment, install the API extra, and start the app:
 
 ```sh
-python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
-pip install -e ".[api]"
-uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000
+python -m venv .venv
+. .venv/bin/activate            # Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install "leaklens-ml[api]"
+python -m leaklens.public_api
 ```
 
-Then either open `docs/live.html` through a local static server and enter
-`http://localhost:8000`, or use the `?api=` parameter:
+From a checkout, install the project instead:
+`python -m pip install -e ".[api]"`.
+
+The command prints the real URLs before serving:
 
 ```
-http://localhost:8000/health
-http://localhost:8000/capabilities
+LeakLens live-scan API: http://127.0.0.1:8000/
+Health check: http://127.0.0.1:8000/health
+Press Ctrl+C to stop.
 ```
 
-Run the real-HTTP smoke test (it starts its own uvicorn subprocess and shuts it
-down again):
+Check it from another terminal (any shell):
+
+```sh
+curl -fsS http://127.0.0.1:8000/health
+# PowerShell: Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+Then open `docs/live.html` through a local static server and enter
+`http://localhost:8000`, or pass `?api=http://localhost:8000` in the page URL.
+
+`python -m leaklens.api` starts the legacy developer API (the app behind the
+default `Dockerfile`, including `/predict`) with the same host, port and log
+settings. The hardened app is the one the live page talks to.
+
+Host, port and log level are read from the environment; nothing is required:
+
+```sh
+LEAKLENS_PORT=9000 LEAKLENS_LOG_LEVEL=warning python -m leaklens.public_api
+# PowerShell: $env:LEAKLENS_PORT='9000'; python -m leaklens.public_api
+```
+
+The default binds `127.0.0.1` only. Running
+`python -m uvicorn leaklens.public_api:app --host 127.0.0.1 --port 8000` remains
+supported when you need uvicorn flags such as `--proxy-headers`; it imports the
+same `app` object.
+
+Run the real-HTTP smoke test (it starts its own `python -m leaklens.public_api`
+subprocess and shuts it down again):
 
 ```sh
 python scripts/smoke_public_api.py
@@ -86,13 +124,65 @@ The API tests use the real detectors and real HTTP multipart requests:
 
 ```sh
 pytest tests/test_public_api.py tests/test_upload_guard.py -q
+pytest tests/test_native_backend.py -q
 ```
+
+### Option B — Docker (optional)
+
+Docker is useful when you want the exact pinned runtime or the API and
+Streamlit UI together. It is not required to run the backend.
+
+```sh
+docker build -f Dockerfile.api -t leaklens-api .
+docker run --rm -p 8000:8000 leaklens-api
+```
+
+`docker compose up --build` runs the API on port 8000 and the Streamlit UI on
+8501. The images run as unprivileged uid `10001` and healthcheck `/health`.
+Environment variables behave exactly as they do natively; the containers bind
+`0.0.0.0` through uvicorn flags because a container must accept traffic.
 
 During the phase 3.1 verification pass, `Dockerfile.api` was built and run
 locally against Docker Desktop's Linux engine. The image ran as uid 10001, the
 container healthcheck passed, the real-HTTP smoke test passed against it, and
 uploads left no filesystem changes. That validates the artifact; it is not a
 Render deployment.
+
+### Production notes
+
+* The public app runs **one** uvicorn worker by default and should stay that
+  way in a single process: the rate limiter and the `ScanRunner` slot are
+  in-process. Scale by running more instances behind a proxy, not by adding
+  workers to one process.
+* There is **no client authentication**. Never bind it to a public interface
+  directly: keep `LEAKLENS_HOST=127.0.0.1` and put it behind a proxy you
+  control, or use the Render option below. Binding elsewhere prints a warning.
+* Behind a reverse proxy, set `LEAKLENS_TRUST_PROXY=1` so rate limits key on the
+  forwarded client, and forward headers with
+  `python -m uvicorn leaklens.public_api:app --proxy-headers`. Trust the proxy
+  only when it overwrites `X-Forwarded-For`.
+* Size the instance from the limits: uploads are parsed in memory, so a 4 MiB
+  file plus a 30 s scan needs headroom. Lower `LEAKLENS_PUBLIC_MAX_BYTES`,
+  `..._MAX_ROWS` and `..._TIMEOUT_SECONDS` on small machines.
+* No temporary files are written, so native and container runs need no writable
+  data volume.
+* Run it under your platform's process supervisor (systemd, Task Scheduler, a
+  container orchestrator) if it must survive logout. Running the module does not
+  make the service production-hardened by itself.
+
+### Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `ModuleNotFoundError: ... pip install "leaklens-ml[api]"` | FastAPI/Uvicorn are optional. Install the `api` extra into the same interpreter that runs the command |
+| `error while attempting to bind on address ...` | Port already in use. Set `LEAKLENS_PORT` to another port (or stop the other process) |
+| Server starts but the browser cannot reach it | The default binds loopback. Use `http://localhost:<port>` from the same machine, not the machine's LAN name |
+| CORS error in the browser | The page origin must be `https://eyadstein.github.io` or localhost, or be listed in `LEAKLENS_ALLOWED_ORIGINS` |
+| `413 upload_too_large` | The backend limit is lower than the file. Raise `LEAKLENS_PUBLIC_MAX_BYTES`, or send a smaller extract |
+| `503 scan_busy` / `504 scan_timeout` | One scan runs at a time. Retry, or raise `LEAKLENS_PUBLIC_TIMEOUT_SECONDS` for larger data |
+| `LEAKLENS_PORT must be an integer` | The value is not 1–65535; fix the environment variable |
+| Live page says "No backend connected" | `apiBase` is empty (the shipped default). Enter the URL in the page; do not edit the site unless you operate that backend |
+| Permission denied on the port on Linux/macOS | Ports below 1024 need privileges. Use 8000+ or a reverse proxy |
 
 ### Connecting the static page
 
@@ -194,6 +284,9 @@ retry action, never to a fake result.
 
 | Variable | Default | Notes |
 |---|---|---|
+| `LEAKLENS_HOST` | `127.0.0.1` | Native bind address; `0.0.0.0` exposes the API, which has no authentication |
+| `LEAKLENS_PORT` | `8000` | Native listen port, 1–65535 |
+| `LEAKLENS_LOG_LEVEL` | `info` | `critical`, `error`, `warning`, `info`, `debug` or `trace` |
 | `LEAKLENS_PUBLIC_MAX_BYTES` | `4194304` (4 MiB) | Per-file limit, clamped 64 KiB–16 MiB |
 | `LEAKLENS_PUBLIC_MAX_JSON_BYTES` | `524288` (512 KiB) | `/scan` request body |
 | `LEAKLENS_PUBLIC_MAX_ROWS` | `5000` | Parsed rows, clamped 10–20,000 |

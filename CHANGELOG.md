@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The backend runs without Docker.** `python -m leaklens.public_api` starts
+  the hardened live-scan app and `python -m leaklens.api` the developer app —
+  the same `app` objects the images serve — bound to `127.0.0.1:8000` by
+  default. `LEAKLENS_HOST`, `LEAKLENS_PORT` and `LEAKLENS_LOG_LEVEL` configure
+  it; invalid values exit 2 with a message. Docker and Docker Compose remain
+  supported. A core-only install still does not pull FastAPI, Uvicorn or
+  Starlette, and a missing extra now names `leaklens-ml[api]`.
+
 ## 0.14.0
 
 Changes in the `0.14.0` release. The package is published on PyPI; release notes
