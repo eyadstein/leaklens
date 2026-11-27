@@ -10,8 +10,14 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel
+
+try:
+    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from pydantic import BaseModel
+except ImportError as exc:  # core-only install: name the extra, keep ImportError
+    raise ImportError(
+        'LeakLens API modules need fastapi: pip install "leaklens-ml[api]"'
+    ) from exc
 
 from . import __version__, assemble
 from .audit import audit
@@ -355,3 +361,9 @@ def predict(req: PredictReq):
     else:
         out = [{"value": float(v)} for v in pipe.predict(X)]
     return {"model": b["model"], "task": b["task"], "predictions": out}
+
+
+if __name__ == "__main__":  # pragma: no cover - native entry point
+    from .serve import serve
+
+    raise SystemExit(serve(app, service="API"))

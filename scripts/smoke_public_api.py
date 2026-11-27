@@ -1,6 +1,6 @@
 """Real-HTTP smoke test for the hardened public scan API.
 
-By default this starts a local ``uvicorn leaklens.public_api:app`` subprocess
+By default this starts a local ``python -m leaklens.public_api`` subprocess
 with conservative limits, exercises the real endpoints over the network, and
 shuts the server down.  Pass ``--url`` to test an already-running deployment
 instead (the smoke test never writes anything to that server).
@@ -83,20 +83,15 @@ def main() -> int:
             "LEAKLENS_PUBLIC_MAX_CELLS": "50000",
             "LEAKLENS_PUBLIC_RATE_LIMIT": "100",
             "LEAKLENS_ENABLE_DOCS": "0",
+            "LEAKLENS_HOST": "127.0.0.1",
+            "LEAKLENS_PORT": str(port),
+            "LEAKLENS_LOG_LEVEL": "warning",
         }
         process = subprocess.Popen(  # noqa: S603 - fixed local interpreter and arguments
             [
                 sys.executable,
                 "-m",
-                "uvicorn",
-                "leaklens.public_api:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                "--log-level",
-                "warning",
-                "--no-access-log",
+                "leaklens.public_api",
             ],
             cwd=ROOT,
             env=env,

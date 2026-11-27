@@ -506,7 +506,8 @@ def test_ci_workflow_is_read_only_and_cancels_only_pull_request_runs():
 
 def test_ci_jobs_are_bounded_and_checkouts_drop_credentials():
     text = _text("ci.yml")
-    assert text.count("runs-on: ubuntu-latest") == text.count("timeout-minutes:")
+    # One `runs-on:` per job, including the OS matrix; every job must be bounded.
+    assert text.count("runs-on:") == text.count("timeout-minutes:")
     assert text.count("actions/checkout@") == text.count("persist-credentials: false")
 
 

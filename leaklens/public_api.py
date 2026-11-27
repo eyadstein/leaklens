@@ -32,15 +32,20 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, ClassVar
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
-from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
-from starlette.concurrency import run_in_threadpool
-from starlette.datastructures import Headers
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+try:
+    from fastapi import FastAPI, File, Form, Request, UploadFile
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import JSONResponse
+    from pydantic import BaseModel, ConfigDict, Field
+    from starlette.concurrency import run_in_threadpool
+    from starlette.datastructures import Headers
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
+except ImportError as exc:  # core-only install: name the extra, keep ImportError
+    raise ImportError(
+        'LeakLens API modules need fastapi: pip install "leaklens-ml[api]"'
+    ) from exc
 
 from . import __version__, assemble
 from .audit import audit
@@ -1113,3 +1118,9 @@ def create_app(
 
 
 app = create_app()
+
+
+if __name__ == "__main__":  # pragma: no cover - native entry point
+    from .serve import serve
+
+    raise SystemExit(serve(app, service="live-scan API"))

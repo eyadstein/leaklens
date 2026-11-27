@@ -158,6 +158,25 @@ jobs:
       # live-scan API. No deployed backend is required.
       - run: pytest tests/test_public_api.py tests/test_upload_guard.py -q
       - run: python scripts/smoke_public_api.py
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux native startup is covered by the `api` job's smoke test.
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+      - run: pip install -e ".[dev,api]"
+      # Starts both apps with `python -m leaklens.<app>` on a real socket,
+      # checks /health, and proves a core import pulls no backend dependency.
+      - run: pytest tests/test_native_backend.py -q
   site:
     runs-on: ubuntu-latest
     timeout-minutes: 30
