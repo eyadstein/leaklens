@@ -33,6 +33,12 @@ if (root) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const groups = groupFixtures(fixtures);
   const all = groups.flatMap((group) => group.fixtures);
+  // Fixtures carry a display group ("dataset", "overlap"); the tab ids are
+  // plural. Resolve the tab from membership so a fixture click cannot reset
+  // the sidebar to the first group.
+  const groupForFixture = (fixture) =>
+    groups.find((group) => group.fixtures.some((item) => item.id === fixture.id))?.id ||
+    groups[0].id;
 
   const state = {
     group: groups[0]?.id || "code",
@@ -44,7 +50,7 @@ if (root) {
   const stored = decodeURIComponent(window.location.hash.replace(/^#/, ""));
   if (stored && findFixture(fixtures, stored)) {
     const match = findFixture(fixtures, stored);
-    state.group = match.group;
+    state.group = groupForFixture(match);
     state.fixture = match.id;
   } else {
     state.fixture = groups[0]?.fixtures[0]?.id || null;
@@ -84,9 +90,15 @@ if (root) {
   const activeFixture = () => findFixture(fixtures, state.fixture);
   const activeGroup = () => groups.find((group) => group.id === state.group) || groups[0];
 
-  /* --- Tabs ------------------------------------------------------------- */
-  const renderTabs = () => {
-    groupTabs.replaceChildren();
+  /* --- Tabs and fixture list ---------------------------------------------
+     Built once, then updated in place. Replacing this markup on every
+     selection used to drop focus and any scroll position the sidebar owned. */
+  const tabButtons = new Map();
+  const fixtureButtons = new Map();
+  let emptyItem = null;
+
+  const buildTabs = () => {
+    if (groupTabs.children.length) return;
     for (const [index, group] of groups.entries()) {
       const count = group.fixtures.length;
       const button = el(
@@ -95,9 +107,9 @@ if (root) {
           type: "button",
           role: "tab",
           id: `group-tab-${group.id}`,
-          "aria-selected": String(group.id === state.group),
+          "aria-selected": "false",
           "aria-controls": "fixture-list",
-          tabindex: group.id === state.group ? "0" : "-1",
+          tabindex: "-1",
           onclick: () => selectGroup(group.id),
           onkeydown: (event) => {
             if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -110,25 +122,20 @@ if (root) {
                   : (index + (event.key === "ArrowRight" ? 1 : -1) + groups.length) % groups.length;
             const target = groups[next];
             selectGroup(target.id);
-            groupTabs.querySelector(`#group-tab-${target.id}`)?.focus();
+            tabButtons.get(target.id)?.focus();
           },
         },
         el("span", { text: group.label }),
         el("span", { class: "tab-count", text: ` · ${count}` })
       );
+      tabButtons.set(group.id, button);
       groupTabs.append(button);
     }
   };
 
-  /* --- Fixture list ----------------------------------------------------- */
-  const renderList = () => {
-    const group = activeGroup();
-    fixtureList.replaceChildren();
-    if (!group || !group.fixtures.length) {
-      fixtureList.append(el("li", { class: "f-empty", text: "No fixtures in this group." }));
-      return;
-    }
-    for (const fixture of group.fixtures) {
+  const buildList = () => {
+    if (fixtureList.children.length) return;
+    for (const fixture of all) {
       const counts = severityCounts(fixture.findings);
       const marker = fixture.clean
         ? el("span", { class: "badge badge-safe", text: "clean" })
@@ -136,23 +143,40 @@ if (root) {
             class: `badge ${counts.high ? "badge-high" : "badge-medium"}`,
             text: fixture.trustScore != null ? `${fixture.trustScore}/100` : `${counts.total} found`,
           });
-      fixtureList.append(
-        el(
-          "li",
-          {},
-          el(
-            "button",
-            {
-              type: "button",
-              "aria-pressed": String(fixture.id === state.fixture),
-              onclick: () => selectFixture(fixture.id),
-            },
-            el("span", { class: "f-name", text: fixture.name }, marker),
-            el("span", { class: "f-desc", text: fixture.title })
-          )
-        )
+      const button = el(
+        "button",
+        {
+          type: "button",
+          "aria-pressed": "false",
+          onclick: () => selectFixture(fixture.id),
+        },
+        el("span", { class: "f-name", text: fixture.name }, marker),
+        el("span", { class: "f-desc", text: fixture.title })
       );
+      fixtureButtons.set(fixture.id, button);
+      fixtureList.append(el("li", { dataset: { fixture: fixture.id } }, button));
     }
+    emptyItem = el("li", { class: "f-empty", text: "No fixtures in this group.", hidden: true });
+    fixtureList.append(emptyItem);
+  };
+
+  const syncTabs = () => {
+    for (const [id, button] of tabButtons) {
+      const on = id === state.group;
+      button.setAttribute("aria-selected", String(on));
+      button.setAttribute("tabindex", on ? "0" : "-1");
+    }
+  };
+
+  const syncList = () => {
+    const group = activeGroup();
+    const ids = new Set(group ? group.fixtures.map((fixture) => fixture.id) : []);
+    const empty = !group || !group.fixtures.length;
+    for (const [id, button] of fixtureButtons) {
+      button.setAttribute("aria-pressed", String(id === state.fixture));
+      button.parentElement.hidden = !ids.has(id);
+    }
+    if (emptyItem) emptyItem.hidden = !empty;
   };
 
   /* --- Head ------------------------------------------------------------- */
@@ -563,24 +587,51 @@ if (root) {
     state.group = id;
     state.severity = "all";
     state.fixture = group.fixtures[0]?.id || null;
-    renderTabs();
-    renderList();
+    syncTabs();
+    syncList();
     renderAll();
   };
 
   const selectFixture = (id) => {
     const fixture = findFixture(fixtures, id);
     if (!fixture) return;
-    state.group = fixture.group;
+    state.group = groupForFixture(fixture);
     state.fixture = id;
     state.severity = "all";
-    renderTabs();
-    renderList();
+    syncTabs();
+    syncList();
     renderAll();
   };
 
   const updateHash = () => {
     if (state.fixture) window.history.replaceState(null, "", `#${state.fixture}`);
+  };
+
+  /* Scroll only the sidebar box, and only when the selected item is outside
+     it (deep link, hash change). Never touches the page scroll. */
+  const revealSelection = () => {
+    const button = fixtureButtons.get(state.fixture);
+    const side = root.querySelector(".demo-side");
+    if (!button || !side || side.scrollHeight <= side.clientHeight + 1) return;
+    const buttonRect = button.getBoundingClientRect();
+    const sideRect = side.getBoundingClientRect();
+    if (buttonRect.top >= sideRect.top && buttonRect.bottom <= sideRect.bottom) return;
+    const top = buttonRect.top - sideRect.top + side.scrollTop;
+    side.scrollTo({
+      top: Math.max(0, top - 24),
+      behavior: reduceMotion.matches ? "auto" : "smooth",
+    });
+  };
+
+  const pulseResults = () => {
+    if (reduceMotion.matches || typeof body.animate !== "function") return;
+    body.animate(
+      [
+        { opacity: 0.55, transform: "translateY(5px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 200, easing: "cubic-bezier(0.2, 0.7, 0.3, 1)" }
+    );
   };
 
   const renderAll = () => {
@@ -591,6 +642,7 @@ if (root) {
       updateHash();
       root.dataset.activeGroup = state.group;
       root.dataset.activeFixture = state.fixture;
+      pulseResults();
     }
   };
 
@@ -606,7 +658,10 @@ if (root) {
     const delay = reduceMotion.matches ? 80 : 480;
     window.setTimeout(() => {
       state.severity = "all";
-      renderAll();
+      // Only the results change; leaving the head intact keeps focus on the
+      // Replay button the user just pressed.
+      renderBody();
+      pulseResults();
       output.classList.remove("is-scanning");
       state.scanning = false;
       announce(`Replayed ${fixture?.name || "fixture"}; no scanning happened in the browser`);
@@ -615,10 +670,16 @@ if (root) {
 
   window.addEventListener("hashchange", () => {
     const id = decodeURIComponent(window.location.hash.replace(/^#/, ""));
-    if (id && findFixture(fixtures, id) && id !== state.fixture) selectFixture(id);
+    if (id && findFixture(fixtures, id) && id !== state.fixture) {
+      selectFixture(id);
+      revealSelection();
+    }
   });
 
-  renderTabs();
-  renderList();
+  buildTabs();
+  buildList();
+  syncTabs();
+  syncList();
   renderAll();
+  revealSelection();
 }

@@ -162,6 +162,7 @@ const navigate = async (cdp, session, url) => {
 
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
+  { name: "short", width: 1280, height: 600 },
   { name: "tablet", width: 834, height: 1112 },
   { name: "mobile", width: 390, height: 844 },
 ];
@@ -325,54 +326,155 @@ const main = async () => {
         }
 
         if (page === "demo.html") {
-          const fixtureCount = await evaluate(
+          const fixtureCounts = await evaluate(
             cdp,
             sessionId,
-            `document.querySelectorAll("[data-fixture-list] button").length`
+            `(() => ({
+              total: document.querySelectorAll("[data-fixture-list] button").length,
+              visible: document.querySelectorAll("[data-fixture-list] li:not([hidden]) button").length,
+            }))()`
           );
-          check(fixtureCount === 3, `${label}: expected 3 code fixtures, found ${fixtureCount}`);
+          check(fixtureCounts.total === 8, `${label}: expected 8 built fixtures, found ${fixtureCounts.total}`);
+          check(fixtureCounts.visible === 3, `${label}: expected 3 visible code fixtures, found ${fixtureCounts.visible}`);
           const demo = await evaluate(
             cdp,
             sessionId,
             `(async () => {
               const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-              const tabs = [...document.querySelectorAll('[data-group-tabs] [role="tab"]')];
-              tabs.find((tab) => tab.textContent.includes("Datasets"))?.click();
-              await wait(120);
-              const score = document.querySelector("[data-output] .score-ring span")?.textContent;
-              const findings = document.querySelectorAll("[data-output] .finding").length;
-              const evidence = document.querySelectorAll("[data-output] .finding-evidence").length;
-              const high = [...document.querySelectorAll("[data-output] .demo-filters .chip")][1];
-              high?.click();
-              await wait(80);
-              const pressed = [...document.querySelectorAll("[data-output] .demo-filters .chip")].findIndex((chip) => chip.getAttribute("aria-pressed") === "true");
-              const preview = document.querySelectorAll("[data-output] .preview-table tbody tr").length;
-              const active = document.querySelector("[data-demo]")?.dataset.activeFixture;
-              tabs.find((tab) => tab.textContent.includes("Code"))?.click();
-              await wait(120);
-              const details = document.querySelector("[data-output] .finding");
+              const frame = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+              const root = document.querySelector("[data-demo]");
+              const side = root.querySelector(".demo-side");
+              const tabs = [...root.querySelectorAll('[data-group-tabs] [role="tab"]')];
+              const list = root.querySelector("[data-fixture-list]");
+              const visibleButtons = () => [...list.querySelectorAll("li:not([hidden]) button")];
+              const selectedTab = () =>
+                tabs
+                  .find((tab) => tab.getAttribute("aria-selected") === "true")
+                  ?.textContent.trim()
+                  .split(" · ")[0];
+              const scrollable = side.scrollHeight > side.clientHeight + 1;
+              if (scrollable) side.scrollTop = 24;
+              const start = { top: side.scrollTop, y: scrollY, selected: selectedTab() };
+              const timeline = [];
+              const picks = ${JSON.stringify(
+                viewport.name === "mobile"
+                  ? ["Datasets", "Splits", "Code"]
+                  : ["Datasets", "Splits", "Code", "Datasets"]
+              )};
+              for (const name of picks) {
+                tabs.find((tab) => tab.textContent.includes(name)).click();
+                await wait(140);
+                timeline.push({
+                  picked: name,
+                  selected: selectedTab(),
+                  top: side.scrollTop,
+                  y: scrollY,
+                  pressed: visibleButtons().filter((button) => button.getAttribute("aria-pressed") === "true").length,
+                  active: root.dataset.activeFixture,
+                });
+              }
+
+              tabs.find((tab) => tab.textContent.includes("Code")).click();
+              await wait(150);
+              const codeLines = root.querySelectorAll(".source-line").length;
+              const details = root.querySelector(".finding");
               if (details) details.open = true;
-              await wait(80);
+              await wait(100);
+              const highlighted = root.querySelectorAll(".source-line.is-target").length;
+              tabs.find((tab) => tab.textContent.includes("Datasets")).click();
+              await wait(150);
+              const dataset = {
+                score: root.querySelector(".score-ring span")?.textContent,
+                findings: root.querySelectorAll(".finding").length,
+                evidence: root.querySelectorAll(".finding-evidence").length,
+                preview: root.querySelectorAll(".preview-table tbody tr").length,
+              };
+
+              // Focus must survive a selection: the sidebar is updated, not replaced.
+              const target = visibleButtons()[visibleButtons().length - 1];              target.focus();
+              target.click();
+              await wait(140);
+              const focusHeld = document.activeElement === target;
+              const pressedHeld = target.getAttribute("aria-pressed") === "true";
+              const afterFixtureClick = { tab: selectedTab(), group: root.dataset.activeGroup };
+
+              const replayButton = [...root.querySelectorAll("[data-output-head] button")].find((button) =>
+                /Replay/.test(button.textContent)
+              );
+              replayButton.focus();
+              replayButton.click();
+              await wait(700);
+              const replay = {
+                scanning: root.querySelector("[data-output]").classList.contains("is-scanning"),
+                focus: document.activeElement === replayButton,
+                chip: [...root.querySelectorAll(".demo-filters .chip")].find(
+                  (chip) => chip.getAttribute("aria-pressed") === "true"
+                )?.textContent,
+              };
+
+              const copyButton = root.querySelector("[data-output] .copy-button");
+              const copyOriginal = copyButton.textContent;
+              copyButton.click();
+              await wait(200);
+              const copyFeedback =
+                copyButton.classList.contains("is-copied") || copyButton.classList.contains("is-failed");
+              await wait(1700);
+              const copyRestored = copyButton.textContent === copyOriginal;
+
+              location.hash = "#overlap_exact";
+              await wait(200);
+              const deepLink = {
+                active: root.dataset.activeFixture,
+                tab: selectedTab(),
+                pressed: visibleButtons().some((button) => button.getAttribute("aria-pressed") === "true"),
+              };
+
               return {
-                score,
-                findings,
-                pressed,
-                preview,
-                active,
-                evidence,
-                sourceLines: document.querySelectorAll("[data-output] .source-line").length,
-                highlighted: document.querySelectorAll("[data-output] .source-line.is-target").length,
+                start,
+                scrollable,
+                timeline,
+                dataset,
+                codeLines,
+                highlighted,
+                focusHeld,
+                pressedHeld,
+                afterFixtureClick,
+                replay,
+                copyFeedback,
+                copyRestored,
+                deepLink,
               };
             })()`
           );
-          check(demo.score === "50", `${label}: leaky dataset score should be 50, got ${demo.score}`);
-          check(demo.findings === 2, `${label}: expected 2 dataset findings, got ${demo.findings}`);
-          check(demo.pressed === 1, `${label}: severity filter did not activate`);
-          check(demo.preview > 0, `${label}: dataset preview table is empty`);
-          check(demo.active === "leaky_transactions", `${label}: dataset tab did not select a fixture`);
-          check(demo.evidence >= 2, `${label}: dataset findings did not render their evidence records`);
-          check(demo.sourceLines > 10, `${label}: code fixture did not render its source`);
+          check(demo.dataset.score === "50", `${label}: leaky dataset score should be 50, got ${demo.dataset.score}`);
+          check(demo.dataset.findings === 2, `${label}: expected 2 dataset findings, got ${demo.dataset.findings}`);
+          check(demo.dataset.preview > 0, `${label}: dataset preview table is empty`);
+          check(demo.dataset.evidence >= 2, `${label}: dataset findings did not render their evidence records`);
+          check(demo.codeLines > 10, `${label}: code fixture did not render its source`);
           check(demo.highlighted === 1, `${label}: opening a finding did not highlight its source line`);
+          check(demo.timeline.every((step) => step.selected === step.picked), `${label}: demo selection did not stick`);
+          check(demo.timeline.every((step) => step.pressed === 1), `${label}: demo selection lost its highlight`);
+          check(demo.timeline.every((step) => step.y === demo.start.y), `${label}: demo selection scrolled the page`);
+          if (demo.scrollable) {
+            check(
+              demo.timeline.every((step) => step.top === demo.start.top),
+              `${label}: demo selection reset the sidebar scroll (${demo.timeline.map((step) => step.top).join(",")})`
+            );
+          }
+          check(demo.focusHeld, `${label}: selecting a fixture dropped keyboard focus`);
+          check(demo.pressedHeld, `${label}: selecting a fixture did not update its pressed state`);
+          check(
+            demo.afterFixtureClick.tab === "Datasets" && demo.afterFixtureClick.group === "datasets",
+            `${label}: selecting a dataset fixture reset the sidebar to ${demo.afterFixtureClick.tab}`
+          );
+          check(!demo.replay.scanning, `${label}: replay never finished`);
+          check(demo.replay.focus, `${label}: replay stole focus from its button`);
+          check(/^All /.test(demo.replay.chip || ""), `${label}: replay did not restore the findings filter`);
+          check(demo.copyFeedback, `${label}: copy button gave no visible feedback`);
+          check(demo.copyRestored, `${label}: copy button label did not reset`);
+          check(demo.deepLink.active === "overlap_exact", `${label}: deep link did not restore the fixture`);
+          check(demo.deepLink.tab === "Splits", `${label}: deep link did not restore its group`);
+          check(demo.deepLink.pressed, `${label}: deep link did not highlight the fixture`);
         }
 
         if (page === "live.html") {
@@ -413,13 +515,88 @@ const main = async () => {
           const docs = await evaluate(
             cdp,
             sessionId,
-            `(() => {
+            `(async () => {
+              const wait = (ms) => new Promise((done) => setTimeout(done, ms));
+              const frame = () =>
+                new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
               const nav = document.querySelector("[data-docs-nav]");
               const toggle = document.querySelector("[data-docs-toggle]");
+              const links = [...nav.querySelectorAll('a[href^="#"]')];
+              const sections = [...document.querySelectorAll("[data-doc-section]")];
+              const ids = sections.map((section) => section.id);
+              const order = links.map((link) => link.getAttribute("href").slice(1));
+              const activeId = () => nav.querySelector("a.is-active")?.getAttribute("href")?.slice(1) || null;
+              const isMobile = ${viewport.name === "mobile"};
+              const stickyTop =
+                parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--header-h")) + 20;
+
+              // Walk the whole page: the highlight must only ever move forward,
+              // and it must reach every section in document order. The sidebar
+              // itself may scroll away at the very end, but never bob upwards.
+              const seen = [];
+              const navTops = [];
+              const max = document.documentElement.scrollHeight - innerHeight;
+              const step = Math.max(150, Math.round(innerHeight * 0.2));
+              for (let y = 0; y <= max; y += step) {
+                window.scrollTo({ top: y, behavior: "instant" });
+                await frame();
+                const id = activeId();
+                if (id && seen[seen.length - 1] !== id) seen.push(id);
+                navTops.push(Math.round(nav.getBoundingClientRect().top));
+              }
+              window.scrollTo({ top: Math.round(max / 2), behavior: "instant" });
+              await frame();
+              const midTop = Math.round(nav.getBoundingClientRect().top);
+              window.scrollTo({ top: max, behavior: "instant" });
+              await frame();
+              const bottom = activeId();
+              const navRect = nav.getBoundingClientRect();
+              const activeRect = nav.querySelector("a.is-active")?.getBoundingClientRect();
+              const activeVisible = Boolean(
+                activeRect &&
+                  activeRect.top >= navRect.top - 1 &&
+                  activeRect.bottom <= navRect.bottom + 1
+              );
+
+              // Every nav link must land its section under the sticky header
+              // and highlight that same section.
+              const jumps = [];
+              for (const [index, link] of links.entries()) {
+                const id = link.getAttribute("href").slice(1);
+                link.click();
+                await wait(60);
+                let last = -2;
+                let stable = 0;
+                for (let attempt = 0; attempt < 180 && stable < 3; attempt += 1) {
+                  await frame();
+                  const y = Math.round(scrollY);
+                  stable = y === last ? stable + 1 : 0;
+                  last = y;
+                }
+                jumps.push({
+                  id,
+                  last: index === links.length - 1,
+                  hash: location.hash.slice(1),
+                  active: activeId(),
+                  top: Math.round(document.getElementById(id).getBoundingClientRect().top),
+                });
+              }
+
               return {
                 nav: Boolean(nav),
                 toggleVisible: toggle ? getComputedStyle(toggle).display !== "none" : false,
-                sections: document.querySelectorAll("[data-doc-section]").length,
+                sections: sections.length,
+                order,
+                ids,
+                seen,
+                bottom,
+                isMobile,
+                stickyTop,
+                midTop,
+                navTops,
+                scrollable: nav.scrollHeight > nav.clientHeight + 1,
+                activeVisible,
+                jumps,
               };
             })()`
           );
@@ -429,6 +606,38 @@ const main = async () => {
             viewport.name === "mobile" ? docs.toggleVisible : !docs.toggleVisible,
             `${label}: docs contents toggle visibility is wrong`
           );
+          check(
+            docs.order.join() === docs.ids.join(),
+            `${label}: sidebar order ${docs.order.join(",")} does not match document order ${docs.ids.join(",")}`
+          );
+          check(
+            docs.seen.join() === docs.ids.join(),
+            `${label}: scrolling highlighted ${docs.seen.join(",")} instead of every section in order`
+          );
+          check(docs.bottom === docs.ids[docs.ids.length - 1], `${label}: the last section is not active at the page end`);
+          check(
+            docs.navTops.every((top, index) => index === 0 || top <= docs.navTops[index - 1] + 1),
+            `${label}: the sidebar bobbed while the page scrolled (${docs.navTops.slice(0, 12).join(",")})`
+          );
+          if (!docs.isMobile) {
+            check(
+              Math.abs(docs.midTop - docs.stickyTop) <= 2,
+              `${label}: the sidebar is not pinned at ${docs.stickyTop}px mid-page (${docs.midTop}px)`
+            );
+          }
+          if (docs.scrollable) {
+            check(docs.activeVisible, `${label}: the active docs link is outside the sidebar's scroll box`);
+          }
+          for (const jump of docs.jumps) {
+            check(jump.hash === jump.id, `${label}: clicking ${jump.id} set the hash to #${jump.hash}`);
+            check(jump.active === jump.id, `${label}: clicking ${jump.id} highlighted ${jump.active}`);
+            if (!jump.last) {
+              check(
+                Math.abs(jump.top - 90) <= 24,
+                `${label}: clicking ${jump.id} left its heading at ${jump.top}px`
+              );
+            }
+          }
         }
 
         const pageErrors = cdp.events.filter(

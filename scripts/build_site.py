@@ -334,6 +334,30 @@ def check_page(page: Page) -> None:
         fail(f"{name}: more than one <main> element")
 
 
+DOCS_NAV = re.compile(r'<nav class="docs-nav"[^>]*>(.*?)</nav>', re.DOTALL)
+DOCS_NAV_LINK = re.compile(r'<a href="#([^"]+)">')
+DOC_SECTION = re.compile(r'<section id="([^"]+)" data-doc-section>')
+
+
+def check_docs_nav_order() -> None:
+    """The sidebar must list sections in the same order as the document.
+
+    A mismatch makes the active-item highlight jump backwards mid-scroll.
+    """
+    text = (DOCS / "docs.html").read_text(encoding="utf-8")
+    nav = DOCS_NAV.search(text)
+    if nav is None:
+        fail("docs.html: missing docs-nav")
+        return
+    links = DOCS_NAV_LINK.findall(nav.group(1))
+    sections = DOC_SECTION.findall(text)
+    if links != sections:
+        fail(
+            "docs.html: sidebar links must follow document order "
+            f"(nav: {links}, sections: {sections})"
+        )
+
+
 def check_site_structure(payload: dict) -> None:
     for name in PAGES:
         if not (DOCS / name).is_file():
@@ -476,6 +500,7 @@ def run(check_only: bool) -> int:
             )
     check_fixture_freshness(rendered)
     check_site_structure(payload)
+    check_docs_nav_order()
     fixture_ids = {
         item["id"]
         for group in ("code", "datasets", "overlaps")

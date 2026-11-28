@@ -95,9 +95,12 @@
     const ok = await copyText(text);
     if (button.copyTimer) window.clearTimeout(button.copyTimer);
     button.textContent = ok ? "Copied" : "Copy failed";
+    button.classList.toggle("is-copied", ok);
+    button.classList.toggle("is-failed", !ok);
     announce(ok ? "Copied to clipboard" : "Copy failed");
     button.copyTimer = window.setTimeout(() => {
       button.textContent = original;
+      button.classList.remove("is-copied", "is-failed");
     }, 1600);
   });
 
@@ -148,24 +151,64 @@
 
   const docSections = [...doc.querySelectorAll("[data-doc-section]")];
   const docLinks = docsNav ? [...docsNav.querySelectorAll('a[href^="#"]')] : [];
-  if (docSections.length && docLinks.length && "IntersectionObserver" in window) {
+  if (docSections.length && docLinks.length) {
     const byId = new Map(docLinks.map((link) => [link.getAttribute("href").slice(1), link]));
-    const spy = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
-        if (!visible) return;
-        docLinks.forEach((link) => link.classList.remove("is-active"));
-        const active = byId.get(visible.target.id);
-        if (active) {
-          active.classList.add("is-active");
-          active.setAttribute("aria-current", "true");
-        }
-      },
-      { rootMargin: "-20% 0px -60% 0px", threshold: [0.1, 0.4] }
-    );
-    docSections.forEach((section) => spy.observe(section));
+    const headerHeight = () =>
+      parseFloat(getComputedStyle(doc.documentElement).getPropertyValue("--header-h")) || 68;
+    let activeId = null;
+    let ticking = false;
+
+    const setActive = (id) => {
+      if (!id || id === activeId) return;
+      activeId = id;
+      for (const link of docLinks) {
+        const on = link.getAttribute("href") === `#${id}`;
+        link.classList.toggle("is-active", on);
+        if (on) link.setAttribute("aria-current", "true");
+        else link.removeAttribute("aria-current");
+      }
+      // Reveal inside the sidebar's own scroll box only; the page never moves.
+      const active = byId.get(id);
+      if (!active || docsNav.scrollHeight <= docsNav.clientHeight + 1) return;
+      const linkRect = active.getBoundingClientRect();
+      const navRect = docsNav.getBoundingClientRect();
+      const contentTop = linkRect.top - navRect.top + docsNav.scrollTop;
+      const above = contentTop < docsNav.scrollTop + 8;
+      const below = contentTop + linkRect.height > docsNav.scrollTop + docsNav.clientHeight - 8;
+      if (above || below) {
+        docsNav.scrollTo({
+          top: Math.max(0, contentTop - 40),
+          behavior: reduceMotion.matches ? "auto" : "smooth",
+        });
+      }
+    };
+
+    // One active section at a time, chosen by reading position: the last
+    // section whose top has crossed the header. Sections are in document
+    // order, so the highlight only moves forward while scrolling down.
+    const update = () => {
+      ticking = false;
+      const line = headerHeight() + Math.max(96, window.innerHeight * 0.22);
+      let current = docSections[0].id;
+      for (const section of docSections) {
+        if (section.getBoundingClientRect().top <= line) current = section.id;
+        else break;
+      }
+      if (window.scrollY + window.innerHeight >= doc.documentElement.scrollHeight - 2) {
+        current = docSections[docSections.length - 1].id;
+      }
+      setActive(current);
+    };
+    const request = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(update);
+    };
+
+    window.addEventListener("scroll", request, { passive: true });
+    window.addEventListener("resize", request, { passive: true });
+    window.addEventListener("hashchange", request);
+    update();
   }
 
   /* --- Landing: preview a proposed audit change ------------------------- */

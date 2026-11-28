@@ -487,6 +487,16 @@ pre code {
   border-color: #2b4159;
 }
 
+.copy-button.is-copied {
+  color: var(--safe);
+  border-color: rgba(126, 231, 135, 0.5);
+}
+
+.copy-button.is-failed {
+  color: var(--danger);
+  border-color: rgba(255, 127, 127, 0.55);
+}
+
 .copy-button svg {
   width: 14px;
   height: 14px;
@@ -1647,9 +1657,18 @@ pre code {
   top: calc(var(--header-h) + 18px);
   display: grid;
   gap: 16px;
+  max-height: calc(100dvh - var(--header-h) - 36px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Keep the sidebar geometry independent of the result column's height. */
+  overflow-anchor: none;
+  padding-right: 6px;
 }
 
 .demo-group-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: grid;
   gap: 6px;
   padding: 6px;
@@ -1689,6 +1708,10 @@ pre code {
   gap: 7px;
 }
 
+.fixture-list li[hidden] {
+  display: none;
+}
+
 .fixture-list button {
   width: 100%;
   text-align: left;
@@ -1701,6 +1724,10 @@ pre code {
   cursor: pointer;
   display: grid;
   gap: 4px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
 }
 
 .fixture-list button:hover {
@@ -1710,6 +1737,7 @@ pre code {
 .fixture-list button[aria-pressed="true"] {
   border-color: rgba(94, 234, 212, 0.45);
   background: linear-gradient(180deg, rgba(94, 234, 212, 0.08), var(--panel));
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .fixture-list .f-name {
@@ -2291,19 +2319,26 @@ pre code {
   display: block;
   padding: 6px 10px;
   border-left: 1px solid var(--line);
+  border-radius: 0 6px 6px 0;
   color: var(--muted);
   font-size: 0.82rem;
   text-decoration: none;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease;
 }
 
 .docs-nav a:hover {
   color: var(--text);
   border-left-color: #2b4159;
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .docs-nav a.is-active {
   color: var(--accent);
   border-left-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .docs-content {
@@ -2690,8 +2725,12 @@ table.data td code {
   }
   .demo-side {
     position: static;
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
   }
   .demo-group-tabs {
+    position: static;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     display: grid;
   }
